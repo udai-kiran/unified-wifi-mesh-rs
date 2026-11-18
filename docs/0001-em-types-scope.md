@@ -136,7 +136,8 @@ Unknown values round-trip unchanged. **The codec decides** whether to reject, ig
 an unknown value, using the spec rule for that field. That's `em-msg`/`em-core`'s job, and these
 types don't make that decision.
 
-Upstream values that never go on the wire are not part of these types:
+Upstream values that are not protocol-defined codes are not named in these types. Amendment A1
+explains that such a value can still be received; it then round-trips as a raw value:
 
 - **Sentinels** (`*_max`, `*_none`, `*_unknown`) are excluded. "No value" is expressed as
   `Option<T>`.
@@ -413,6 +414,46 @@ crates are provisional.
    comment gives the upstream identifier and the spec section.
 2. **Recording the profile or release that introduced each value.** **Not now.** Add it if `em-msg`
    validation needs it.
+
+## Amendments
+
+### A1 (2026-11-18, during Step 1): sentinels may still appear on the wire
+
+D3 and D4 describe sentinels as values that "never go on the wire". Step 1 found that this is
+true by spec but not by upstream behaviour. Upstream creates its controller and agent AL nodes with
+`em_freq_band_unknown` (0x04) and copies that band into the AutoconfigFreqBand and
+SupportedFreqBand TLVs (`src/ctrl/em_ctrl.cpp:1144`, `src/orch/em_orch_agent.cpp:259`,
+`src/em/config/em_configuration.cpp:4404-4411`, `:4559-4562`). The extended Autoconfig Response
+is built from `get_band()` and sent (`:4504-4507`). Table 15 marks 0x04 as reserved.
+
+**Clarified meaning.** `sentinel` means "not a value defined by the protocol, so not named in the
+Rust API". It does **not** guarantee the value is never received. Because every code type is an
+open newtype (D3), such values still round-trip unchanged. How to treat them is decided by the
+`em-msg` codec, together with the spec rule for that field. The decision itself is unchanged.
+
+**Recorded for `em-msg`** (not acted on here): upstream rejects a received Multi-AP Profile value
+≥ `em_profile_type_max` (`src/em/em_msg.cpp:144-148`), whereas Table 69 says a receiver of a
+reserved value "shall assume the sender implements the same profile implemented by the receiver".
+Upstream also maps a received 0x00 to Profile-1 (`src/em/config/em_configuration.cpp:6307`,
+`:6412`).
+
+### A2 (2026-11-18, during Step 1): IEEE 1905.1 rows are provisional
+
+31 classification rows come from IEEE 1905.1 only, and 1905.1 is not available to this project:
+
+- 5 message types: `0x0000`, `0x0004`–`0x0006`, `0x000A`
+- 17 TLVs in `0x00`–`0x11`
+- 9 media types
+
+Their **values** are fixed: they are the values upstream's compiler assigns at the pinned commit,
+which the fixture records and the Step 2 golden test will enforce. Not every one is used by
+upstream code; for example, `em_media_type_ieee80211af` appears only in its enum declaration.
+Their **Rust names and spec references** are provisional until checked against 1905.1. Renaming
+them later is an API change to `em-types`, recorded in `STATUS.md` when it happens.
+
+This is an **explicit exception** to the D4 / Consequences requirement that the classification be
+reviewed against the spec text before Step 2. It applies to these 31 rows only. All EasyMesh rows
+were checked against the EasyMesh v6.0 text.
 
 ## Review resolution
 

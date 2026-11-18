@@ -1,0 +1,221 @@
+upstream_type	upstream_identifier	class	rust_name	spec_reference	reason
+em_msg_type_t	em_msg_type_topo_disc	spec	TOPOLOGY_DISCOVERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_topo_notif	spec	TOPOLOGY_NOTIFICATION	Table 21, §17.1; message §17.1.5	-
+em_msg_type_t	em_msg_type_topo_query	spec	TOPOLOGY_QUERY	Table 21, §17.1; message §17.1.38	-
+em_msg_type_t	em_msg_type_topo_resp	spec	TOPOLOGY_RESPONSE	Table 21, §17.1; message §17.1.4	-
+em_msg_type_t	em_msg_type_topo_vendor	spec	VENDOR_SPECIFIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_link_metric_query	spec	LINK_METRIC_QUERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_link_metric_resp	spec	LINK_METRIC_RESPONSE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_autoconf_search	spec	AP_AUTOCONFIGURATION_SEARCH	Table 21, §17.1; message §17.1.1	-
+em_msg_type_t	em_msg_type_autoconf_resp	spec	AP_AUTOCONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.2	-
+em_msg_type_t	em_msg_type_autoconf_wsc	spec	AP_AUTOCONFIGURATION_WSC	Table 21, §17.1; message §17.1.3	-
+em_msg_type_t	em_msg_type_autoconf_renew	spec	AP_AUTOCONFIGURATION_RENEW	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_1905_ack	spec	IEEE1905_ACK	Table 21, §17.1; message §17.1.32	-
+em_msg_type_t	em_msg_type_ap_cap_query	spec	AP_CAPABILITY_QUERY	Table 21, §17.1; message §17.1.6	-
+em_msg_type_t	em_msg_type_ap_cap_rprt	spec	AP_CAPABILITY_REPORT	Table 21, §17.1; message §17.1.7	-
+em_msg_type_t	em_msg_type_map_policy_config_req	spec	MULTI_AP_POLICY_CONFIG_REQUEST	Table 21, §17.1; message §17.1.8	-
+em_msg_type_t	em_msg_type_channel_pref_query	spec	CHANNEL_PREFERENCE_QUERY	Table 21, §17.1; message §17.1.9	-
+em_msg_type_t	em_msg_type_channel_pref_rprt	spec	CHANNEL_PREFERENCE_REPORT	Table 21, §17.1; message §17.1.10	-
+em_msg_type_t	em_msg_type_channel_sel_req	spec	CHANNEL_SELECTION_REQUEST	Table 21, §17.1; message §17.1.11	-
+em_msg_type_t	em_msg_type_channel_sel_rsp	spec	CHANNEL_SELECTION_RESPONSE	Table 21, §17.1; message §17.1.12	-
+em_msg_type_t	em_msg_type_op_channel_rprt	spec	OPERATING_CHANNEL_REPORT	Table 21, §17.1; message §17.1.13	-
+em_msg_type_t	em_msg_type_client_cap_query	spec	CLIENT_CAPABILITY_QUERY	Table 21, §17.1; message §17.1.14	-
+em_msg_type_t	em_msg_type_client_cap_rprt	spec	CLIENT_CAPABILITY_REPORT	Table 21, §17.1; message §17.1.15	-
+em_msg_type_t	em_msg_type_ap_metrics_query	spec	AP_METRICS_QUERY	Table 21, §17.1; message §17.1.16	-
+em_msg_type_t	em_msg_type_ap_metrics_rsp	spec	AP_METRICS_RESPONSE	Table 21, §17.1; message §17.1.17	-
+em_msg_type_t	em_msg_type_assoc_sta_link_metrics_query	spec	ASSOCIATED_STA_LINK_METRICS_QUERY	Table 21, §17.1; message §17.1.18	-
+em_msg_type_t	em_msg_type_assoc_sta_link_metrics_rsp	spec	ASSOCIATED_STA_LINK_METRICS_RESPONSE	Table 21, §17.1; message §17.1.19	-
+em_msg_type_t	em_msg_type_unassoc_sta_link_metrics_query	spec	UNASSOCIATED_STA_LINK_METRICS_QUERY	Table 21, §17.1; message §17.1.20	-
+em_msg_type_t	em_msg_type_unassoc_sta_link_metrics_rsp	spec	UNASSOCIATED_STA_LINK_METRICS_RESPONSE	Table 21, §17.1; message §17.1.21	-
+em_msg_type_t	em_msg_type_beacon_metrics_query	spec	BEACON_METRICS_QUERY	Table 21, §17.1; message §17.1.22	-
+em_msg_type_t	em_msg_type_beacon_metrics_rsp	spec	BEACON_METRICS_RESPONSE	Table 21, §17.1; message §17.1.23	-
+em_msg_type_t	em_msg_type_combined_infra_metrics	spec	COMBINED_INFRASTRUCTURE_METRICS	Table 21, §17.1; message §17.1.24	-
+em_msg_type_t	em_msg_type_client_steering_req	spec	CLIENT_STEERING_REQUEST	Table 21, §17.1; message §17.1.25	-
+em_msg_type_t	em_msg_type_client_steering_btm_rprt	spec	CLIENT_STEERING_BTM_REPORT	Table 21, §17.1; message §17.1.26	-
+em_msg_type_t	em_msg_type_client_assoc_ctrl_req	spec	CLIENT_ASSOCIATION_CONTROL_REQUEST	Table 21, §17.1; message §17.1.27	-
+em_msg_type_t	em_msg_type_steering_complete	spec	STEERING_COMPLETED	Table 21, §17.1; message §17.1.28	-
+em_msg_type_t	em_msg_type_higher_layer_data	spec	HIGHER_LAYER_DATA	Table 21, §17.1; message §17.1.31	-
+em_msg_type_t	em_msg_type_bh_steering_req	spec	BACKHAUL_STEERING_REQUEST	Table 21, §17.1; message §17.1.29	-
+em_msg_type_t	em_msg_type_bh_steering_rsp	spec	BACKHAUL_STEERING_RESPONSE	Table 21, §17.1; message §17.1.30	-
+em_msg_type_t	em_msg_type_channel_scan_req	spec	CHANNEL_SCAN_REQUEST	Table 21, §17.1; message §17.1.33	-
+em_msg_type_t	em_msg_type_channel_scan_rprt	spec	CHANNEL_SCAN_REPORT	Table 21, §17.1; message §17.1.34	-
+em_msg_type_t	em_msg_type_dpp_cce_ind	spec	DPP_CCE_INDICATION	Table 21, §17.1; message §17.1.51	-
+em_msg_type_t	em_msg_type_1905_rekey_req	spec	IEEE1905_REKEY_REQUEST	Table 21, §17.1; message §17.1.45	-
+em_msg_type_t	em_msg_type_1905_decrypt_fail	spec	IEEE1905_DECRYPTION_FAILURE	Table 21, §17.1; message §17.1.46	-
+em_msg_type_t	em_msg_type_cac_req	spec	CAC_REQUEST	Table 21, §17.1; message §17.1.35	-
+em_msg_type_t	em_msg_type_cac_term	spec	CAC_TERMINATION	Table 21, §17.1; message §17.1.36	-
+em_msg_type_t	em_msg_type_client_disassoc_stats	spec	CLIENT_DISASSOCIATION_STATS	Table 21, §17.1; message §17.1.41	-
+em_msg_type_t	em_msg_type_svc_prio_req	spec	SERVICE_PRIORITIZATION_REQUEST	Table 21, §17.1; message §17.1.47	-
+em_msg_type_t	em_msg_type_err_rsp	spec	ERROR_RESPONSE	Table 21, §17.1; message §17.1.37	-
+em_msg_type_t	em_msg_type_assoc_status_notif	spec	ASSOCIATION_STATUS_NOTIFICATION	Table 21, §17.1; message §17.1.39	-
+em_msg_type_t	em_msg_type_tunneled	spec	TUNNELED	Table 21, §17.1; message §17.1.40	-
+em_msg_type_t	em_msg_type_bh_sta_cap_query	spec	BACKHAUL_STA_CAPABILITY_QUERY	Table 21, §17.1; message §17.1.42	-
+em_msg_type_t	em_msg_type_bh_sta_cap_rprt	spec	BACKHAUL_STA_CAPABILITY_REPORT	Table 21, §17.1; message §17.1.43	-
+em_msg_type_t	em_msg_type_proxied_encap_dpp	spec	PROXIED_ENCAP_DPP	Table 21, §17.1; message §17.1.48	-
+em_msg_type_t	em_msg_type_direct_encap_dpp	spec	DIRECT_ENCAP_DPP	Table 21, §17.1; message §17.1.56	-
+em_msg_type_t	em_msg_type_reconfig_trigger	spec	RECONFIGURATION_TRIGGER	Table 21, §17.1; message §17.1.57	-
+em_msg_type_t	em_msg_type_bss_config_req	spec	BSS_CONFIGURATION_REQUEST	Table 21, §17.1; message §17.1.53	-
+em_msg_type_t	em_msg_type_bss_config_rsp	spec	BSS_CONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.54	-
+em_msg_type_t	em_msg_type_bss_config_res	spec	BSS_CONFIGURATION_RESULT	Table 21, §17.1; message §17.1.55	-
+em_msg_type_t	em_msg_type_chirp_notif	spec	CHIRP_NOTIFICATION	Table 21, §17.1; message §17.1.52	-
+em_msg_type_t	em_msg_type_1905_encap_eapol	spec	IEEE1905_ENCAP_EAPOL	Table 21, §17.1; message §17.1.49	-
+em_msg_type_t	em_msg_type_dpp_bootstrap_uri_notif	spec	DPP_BOOTSTRAPPING_URI_NOTIFICATION	Table 21, §17.1; message §17.1.50	-
+em_msg_type_t	em_msg_type_anticipated_channel_pref	spec	ANTICIPATED_CHANNEL_PREFERENCE	Table 21, §17.1; message §17.1.59	-
+em_msg_type_t	em_msg_type_failed_conn	spec	FAILED_CONNECTION	Table 21, §17.1; message §17.1.44	-
+em_msg_type_t	em_msg_type_agent_list	spec	AGENT_LIST	Table 21, §17.1; message §17.1.58	-
+em_msg_type_t	em_msg_type_anticipated_channel_usage_rprt	spec	ANTICIPATED_CHANNEL_USAGE_REPORT	Table 21, §17.1; message §17.1.60	-
+em_msg_type_t	em_msg_type_qos_mgmt_notif	spec	QOS_MANAGEMENT_NOTIFICATION	Table 21, §17.1; message §17.1.61	-
+em_msg_type_t	em_msg_type_early_ap_cap_rprt	spec	EARLY_AP_CAPABILITY_REPORT	Table 21, §17.1; message §17.1.62	-
+em_msg_type_t	em_msg_type_ap_mld_config_req	spec	AP_MLD_CONFIGURATION_REQUEST	Table 21, §17.1; message §17.1.63	-
+em_msg_type_t	em_msg_type_ap_mld_config_resp	spec	AP_MLD_CONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.64	-
+em_msg_type_t	em_msg_type_bsta_mld_config_req	spec	BSTA_MLD_CONFIGURATION_REQUEST	Table 21, §17.1; message §17.1.65	-
+em_msg_type_t	em_msg_type_bsta_mld_config_resp	spec	BSTA_MLD_CONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.66	-
+em_msg_type_t	em_msg_type_avail_spectrum_inquiry	spec	AVAILABLE_SPECTRUM_INQUIRY	Table 21, §17.1; message §17.1.67	-
+em_tlv_type_t	em_tlv_type_eom	spec	END_OF_MESSAGE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_al_mac_address	spec	AL_MAC_ADDRESS	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_mac_address	spec	MAC_ADDRESS	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_device_info	spec	DEVICE_INFORMATION	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_device_bridging_cap	spec	DEVICE_BRIDGING_CAPABILITY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_non1905_neigh_list	spec	NON_1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_1905_neigh_list	spec	IEEE1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_link_metric	spec	LINK_METRIC_QUERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_transmitter_link_metric	spec	TRANSMITTER_LINK_METRIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_receiver_link_metric	spec	RECEIVER_LINK_METRIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_vendor_specific	spec	VENDOR_SPECIFIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_link_metric_result_code	spec	LINK_METRIC_RESULT_CODE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_searched_role	spec	SEARCHED_ROLE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_autoconf_freq_band	spec	AUTOCONFIG_FREQ_BAND	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_supported_role	spec	SUPPORTED_ROLE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_supported_freq_band	spec	SUPPORTED_FREQ_BAND	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_wsc	spec	WSC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_supported_service	spec	SUPPORTED_SERVICE	Table 22, §17.2; TLV §17.2.1	-
+em_tlv_type_t	em_tlv_type_searched_service	spec	SEARCHED_SERVICE	Table 22, §17.2; TLV §17.2.2	-
+em_tlv_type_t	em_tlv_type_radio_id	spec	AP_RADIO_IDENTIFIER	Table 22, §17.2; TLV §17.2.3	-
+em_tlv_type_t	em_tlv_type_operational_bss	spec	AP_OPERATIONAL_BSS	Table 22, §17.2; TLV §17.2.4	-
+em_tlv_type_t	em_tlv_type_associated_clients	spec	ASSOCIATED_CLIENTS	Table 22, §17.2; TLV §17.2.5	-
+em_tlv_type_t	em_tlv_type_ap_radio_basic_cap	spec	AP_RADIO_BASIC_CAPABILITIES	Table 22, §17.2; TLV §17.2.7	-
+em_tlv_type_t	em_tlv_type_ht_cap	spec	AP_HT_CAPABILITIES	Table 22, §17.2; TLV §17.2.8	-
+em_tlv_type_t	em_tlv_type_vht_cap	spec	AP_VHT_CAPABILITIES	Table 22, §17.2; TLV §17.2.9	-
+em_tlv_type_t	em_tlv_type_he_cap	spec	AP_HE_CAPABILITIES	Table 22, §17.2; TLV §17.2.10	-
+em_tlv_type_t	em_tlv_type_steering_policy	spec	STEERING_POLICY	Table 22, §17.2; TLV §17.2.11	-
+em_tlv_type_t	em_tlv_type_metric_reporting_policy	spec	METRIC_REPORTING_POLICY	Table 22, §17.2; TLV §17.2.12	-
+em_tlv_type_t	em_tlv_type_channel_pref	spec	CHANNEL_PREFERENCE	Table 22, §17.2; TLV §17.2.13	-
+em_tlv_type_t	em_tlv_type_radio_op_restriction	spec	RADIO_OPERATION_RESTRICTION	Table 22, §17.2; TLV §17.2.14	-
+em_tlv_type_t	em_tlv_type_tx_power	spec	TRANSMIT_POWER_LIMIT	Table 22, §17.2; TLV §17.2.15	-
+em_tlv_type_t	em_tlv_type_channel_sel_resp	spec	CHANNEL_SELECTION_RESPONSE	Table 22, §17.2; TLV §17.2.16	-
+em_tlv_type_t	em_tlv_type_op_channel_report	spec	OPERATING_CHANNEL_REPORT	Table 22, §17.2; TLV §17.2.17	-
+em_tlv_type_t	em_tlv_type_client_info	spec	CLIENT_INFO	Table 22, §17.2; TLV §17.2.18	-
+em_tlv_type_t	em_tlv_type_client_cap_report	spec	CLIENT_CAPABILITY_REPORT	Table 22, §17.2; TLV §17.2.19	-
+em_tlv_type_t	em_tlv_type_client_assoc_event	spec	CLIENT_ASSOCIATION_EVENT	Table 22, §17.2; TLV §17.2.20	-
+em_tlv_type_t	em_tlv_type_ap_metrics_query	spec	AP_METRICS_QUERY	Table 22, §17.2; TLV §17.2.21	-
+em_tlv_type_t	em_tlv_type_ap_metrics	spec	AP_METRICS	Table 22, §17.2; TLV §17.2.22	-
+em_tlv_type_t	em_tlv_type_sta_mac_addr	spec	STA_MAC_ADDRESS_TYPE	Table 22, §17.2; TLV §17.2.23	-
+em_tlv_type_t	em_tlv_type_assoc_sta_link_metric	spec	ASSOCIATED_STA_LINK_METRICS	Table 22, §17.2; TLV §17.2.24	-
+em_tlv_type_t	em_tlv_type_unassoc_sta_link_metric_query	spec	UNASSOCIATED_STA_LINK_METRICS_QUERY	Table 22, §17.2; TLV §17.2.25	-
+em_tlv_type_t	em_tlv_type_unassoc_sta_link_metric_rsp	spec	UNASSOCIATED_STA_LINK_METRICS_RESPONSE	Table 22, §17.2; TLV §17.2.26	-
+em_tlv_type_t	em_tlv_type_bcon_metric_query	spec	BEACON_METRICS_QUERY	Table 22, §17.2; TLV §17.2.27	-
+em_tlv_type_t	em_tlv_type_bcon_metric_rsp	spec	BEACON_METRICS_RESPONSE	Table 22, §17.2; TLV §17.2.28	-
+em_tlv_type_t	em_tlv_type_steering_request	spec	STEERING_REQUEST	Table 22, §17.2; TLV §17.2.29	-
+em_tlv_type_t	em_tlv_type_steering_btm_rprt	spec	STEERING_BTM_REPORT	Table 22, §17.2; TLV §17.2.30	-
+em_tlv_type_t	em_tlv_type_client_assoc_ctrl_req	spec	CLIENT_ASSOCIATION_CONTROL_REQUEST	Table 22, §17.2; TLV §17.2.31	-
+em_tlv_type_t	em_tlv_type_bh_steering_req	spec	BACKHAUL_STEERING_REQUEST	Table 22, §17.2; TLV §17.2.32	-
+em_tlv_type_t	em_tlv_type_bh_steering_rsp	spec	BACKHAUL_STEERING_RESPONSE	Table 22, §17.2; TLV §17.2.33	-
+em_tlv_type_t	em_tlv_type_higher_layer_data	spec	HIGHER_LAYER_DATA	Table 22, §17.2; TLV §17.2.34	-
+em_tlv_type_t	em_tlv_type_ap_cap	spec	AP_CAPABILITY	Table 22, §17.2; TLV §17.2.6	-
+em_tlv_type_t	em_tlv_type_assoc_sta_traffic_sts	spec	ASSOCIATED_STA_TRAFFIC_STATS	Table 22, §17.2; TLV §17.2.35	-
+em_tlv_type_t	em_tlv_type_error_code	spec	ERROR_CODE	Table 22, §17.2; TLV §17.2.36	-
+em_tlv_type_t	em_tlv_type_channel_scan_rprt_policy	spec	CHANNEL_SCAN_REPORTING_POLICY	Table 22, §17.2; TLV §17.2.37	-
+em_tlv_type_t	em_tlv_type_channel_scan_cap	spec	CHANNEL_SCAN_CAPABILITIES	Table 22, §17.2; TLV §17.2.38	-
+em_tlv_type_t	em_tlv_type_channel_scan_req	spec	CHANNEL_SCAN_REQUEST	Table 22, §17.2; TLV §17.2.39	-
+em_tlv_type_t	em_tlv_type_channel_scan_rslt	spec	CHANNEL_SCAN_RESULT	Table 22, §17.2; TLV §17.2.40	-
+em_tlv_type_t	em_tlv_type_timestamp	spec	TIMESTAMP	Table 22, §17.2; TLV §17.2.41	-
+em_tlv_type_t	em_tlv_type_1905_layer_security_cap	spec	IEEE1905_LAYER_SECURITY_CAPABILITY	Table 22, §17.2; TLV §17.2.67	-
+em_tlv_type_t	em_tlv_type_ap_wifi6_cap	spec	AP_WIFI_6_CAPABILITIES	Table 22, §17.2; TLV §17.2.72	-
+em_tlv_type_t	em_tlv_type_mic	spec	MIC	Table 22, §17.2; TLV §17.2.68	-
+em_tlv_type_t	em_tlv_type_encrypt_payload	spec	ENCRYPTED_PAYLOAD	Table 22, §17.2; TLV §17.2.69	-
+em_tlv_type_t	em_tlv_type_cac_req	spec	CAC_REQUEST	Table 22, §17.2; TLV §17.2.42	-
+em_tlv_type_t	em_tlv_type_cac_term	spec	CAC_TERMINATION	Table 22, §17.2; TLV §17.2.43	-
+em_tlv_type_t	em_tlv_type_cac_cmpltn_rprt	spec	CAC_COMPLETION_REPORT	Table 22, §17.2; TLV §17.2.44	-
+em_tlv_type_t	em_tlv_type_assoc_wifi6_sta_rprt	spec	ASSOCIATED_WIFI_6_STA_STATUS_REPORT	Table 22, §17.2; TLV §17.2.73	-
+em_tlv_type_t	em_tlv_type_cac_sts_rprt	spec	CAC_STATUS_REPORT	Table 22, §17.2; TLV §17.2.45	-
+em_tlv_type_t	em_tlv_type_cac_cap	spec	CAC_CAPABILITIES	Table 22, §17.2; TLV §17.2.46	-
+em_tlv_type_t	em_tlv_type_profile	spec	MULTI_AP_PROFILE	Table 22, §17.2; TLV §17.2.47	-
+em_tlv_type_t	em_tlv_type_profile_2_ap_cap	spec	PROFILE_2_AP_CAPABILITY	Table 22, §17.2; TLV §17.2.48	-
+em_tlv_type_t	em_tlv_type_dflt_8021q_settings	spec	DEFAULT_8021Q_SETTINGS	Table 22, §17.2; TLV §17.2.49	-
+em_tlv_type_t	em_tlv_type_traffic_separation_policy	spec	TRAFFIC_SEPARATION_POLICY	Table 22, §17.2; TLV §17.2.50	-
+em_tlv_type_t	em_tlv_type_bss_conf_rep	spec	BSS_CONFIGURATION_REPORT	Table 22, §17.2; TLV §17.2.75	-
+em_tlv_type_t	em_tlv_type_bssid	spec	BSSID	Table 22, §17.2; TLV §17.2.74	-
+em_tlv_type_t	em_tlv_type_svc_prio_rule	spec	SERVICE_PRIORITIZATION_RULE	Table 22, §17.2; TLV §17.2.70	-
+em_tlv_type_t	em_tlv_type_dscp_map_tbl	spec	DSCP_MAPPING_TABLE	Table 22, §17.2; TLV §17.2.71	-
+em_tlv_type_t	em_tlv_type_bss_conf_req	spec	BSS_CONFIGURATION_REQUEST	Table 22, §17.2; TLV §17.2.84	-
+em_tlv_type_t	em_tlv_type_profile_2_error_code	spec	PROFILE_2_ERROR_CODE	Table 22, §17.2; TLV §17.2.51	-
+em_tlv_type_t	em_tlv_type_bss_conf_rsp	spec	BSS_CONFIGURATION_RESPONSE	Table 22, §17.2; TLV §17.2.85	-
+em_tlv_type_t	em_tlv_type_ap_radio_advanced_cap	spec	AP_RADIO_ADVANCED_CAPABILITIES	Table 22, §17.2; TLV §17.2.52	-
+em_tlv_type_t	em_tlv_type_assoc_sts_notif	spec	ASSOCIATION_STATUS_NOTIFICATION	Table 22, §17.2; TLV §17.2.53	-
+em_tlv_type_t	em_tlv_type_src_info	spec	SOURCE_INFO	Table 22, §17.2; TLV §17.2.54	-
+em_tlv_type_t	em_tlv_type_tunneled_msg_type	spec	TUNNELED_MESSAGE_TYPE	Table 22, §17.2; TLV §17.2.55	-
+em_tlv_type_t	em_tlv_type_tunneled	spec	TUNNELED	Table 22, §17.2; TLV §17.2.56	-
+em_tlv_type_t	em_tlv_type_profile2_steering_request	spec	PROFILE_2_STEERING_REQUEST	Table 22, §17.2; TLV §17.2.57	-
+em_tlv_type_t	em_tlv_type_unsucc_assoc_policy	spec	UNSUCCESSFUL_ASSOCIATION_POLICY	Table 22, §17.2; TLV §17.2.58	-
+em_tlv_type_t	em_tlv_type_metric_cltn_interval	spec	METRIC_COLLECTION_INTERVAL	Table 22, §17.2; TLV §17.2.59	-
+em_tlv_type_t	em_tlv_type_radio_metric	spec	RADIO_METRICS	Table 22, §17.2; TLV §17.2.60	-
+em_tlv_type_t	em_tlv_type_ap_ext_metric	spec	AP_EXTENDED_METRICS	Table 22, §17.2; TLV §17.2.61	-
+em_tlv_type_t	em_tlv_type_assoc_sta_ext_link_metric	spec	ASSOCIATED_STA_EXTENDED_LINK_METRICS	Table 22, §17.2; TLV §17.2.62	-
+em_tlv_type_t	em_tlv_type_status_code	spec	STATUS_CODE	Table 22, §17.2; TLV §17.2.63	-
+em_tlv_type_t	em_tlv_type_reason_code	spec	REASON_CODE	Table 22, §17.2; TLV §17.2.64	-
+em_tlv_type_t	em_tlv_type_bh_sta_radio_cap	spec	BACKHAUL_STA_RADIO_CAPABILITIES	Table 22, §17.2; TLV §17.2.65	-
+em_tlv_type_t	em_tlv_type_akm_suite	spec	AKM_SUITE_CAPABILITIES	Table 22, §17.2; TLV §17.2.78	-
+em_tlv_type_t	em_tlv_type_1905_encap_dpp	spec	IEEE1905_ENCAP_DPP	Table 22, §17.2; TLV §17.2.79	-
+em_tlv_type_t	em_tlv_type_1905_encap_eapol	spec	IEEE1905_ENCAP_EAPOL	Table 22, §17.2; TLV §17.2.80	-
+em_tlv_type_t	em_tlv_type_dpp_bootstrap_uri_notification	spec	DPP_BOOTSTRAPPING_URI_NOTIFICATION	Table 22, §17.2; TLV §17.2.81	-
+em_tlv_type_t	em_tlv_type_backhaul_bss_conf	spec	BACKHAUL_BSS_CONFIGURATION	Table 22, §17.2; TLV §17.2.66	-
+em_tlv_type_t	em_tlv_type_dpp_msg	spec	DPP_MESSAGE	Table 22, §17.2; TLV §17.2.86	-
+em_tlv_type_t	em_tlv_type_dpp_cce_indication	spec	DPP_CCE_INDICATION	Table 22, §17.2; TLV §17.2.82	-
+em_tlv_type_t	em_tlv_type_dpp_chirp_value	spec	DPP_CHIRP_VALUE	Table 22, §17.2; TLV §17.2.83	-
+em_tlv_type_t	em_tlv_type_device_inventory	spec	DEVICE_INVENTORY	Table 22, §17.2; TLV §17.2.76	-
+em_tlv_type_t	em_tlv_type_agent_list	spec	AGENT_LIST	Table 22, §17.2; TLV §17.2.77	-
+em_tlv_type_t	em_tlv_type_anticipated_channel_pref	spec	ANTICIPATED_CHANNEL_PREFERENCE	Table 22, §17.2; TLV §17.2.87	-
+em_tlv_type_t	em_tlv_type_channel_usage	spec	ANTICIPATED_CHANNEL_USAGE	Table 22, §17.2; TLV §17.2.88	-
+em_tlv_type_t	em_tlv_type_spatial_reuse_req	spec	SPATIAL_REUSE_REQUEST	Table 22, §17.2; TLV §17.2.89	-
+em_tlv_type_t	em_tlv_type_spatial_reuse_rep	spec	SPATIAL_REUSE_REPORT	Table 22, §17.2; TLV §17.2.90	-
+em_tlv_type_t	em_tlv_type_spatial_reuse_cfg_rsp	spec	SPATIAL_REUSE_CONFIG_RESPONSE	Table 22, §17.2; TLV §17.2.91	-
+em_tlv_type_t	em_tlv_type_qos_mgmt_policy	spec	QOS_MANAGEMENT_POLICY	Table 22, §17.2; TLV §17.2.92	-
+em_tlv_type_t	em_tlv_type_qos_mgmt_desc	spec	QOS_MANAGEMENT_DESCRIPTOR	Table 22, §17.2; TLV §17.2.93	-
+em_tlv_type_t	em_tlv_type_ctrl_cap	spec	CONTROLLER_CAPABILITY	Table 22, §17.2; TLV §17.2.94	-
+em_tlv_type_t	em_tlv_type_wifi7_agent_cap	spec	WIFI_7_AGENT_CAPABILITIES	Table 22, §17.2; TLV §17.2.95	-
+em_tlv_type_t	em_tlv_type_ap_mld_config	spec	AGENT_AP_MLD_CONFIGURATION	Table 22, §17.2; TLV §17.2.96	-
+em_tlv_type_t	em_tlv_type_bsta_mld_config	spec	BACKHAUL_STA_MLD_CONFIGURATION	Table 22, §17.2; TLV §17.2.97	-
+em_tlv_type_t	em_tlv_type_assoc_sta_mld_conf_rep	spec	ASSOCIATED_STA_MLD_CONFIGURATION_REPORT	Table 22, §17.2; TLV §17.2.98	-
+em_tlv_type_t	em_tlv_type_affiliated_sta_metrics	spec	AFFILIATED_STA_METRICS	Table 22, §17.2; TLV §17.2.100	-
+em_tlv_type_t	em_tlv_type_tid_to_link_map_policy	spec	TID_TO_LINK_MAPPING_POLICY	Table 22, §17.2; TLV §17.2.102	-
+em_tlv_type_t	em_tlv_eht_operations	spec	EHT_OPERATIONS	Table 22, §17.2; TLV §17.2.103	-
+em_tlv_type_t	em_tlv_type_avail_spectrum_inquiry_reg	spec	AVAILABLE_SPECTRUM_INQUIRY_REQUEST	Table 126, §17.2.104	-
+em_tlv_type_t	em_tlv_type_avail_spectrum_inquiry_rsp	spec	AVAILABLE_SPECTRUM_INQUIRY_RESPONSE	Table 127, §17.2.105	-
+em_tlv_type_t	em_tlv_type_vendor_operational_bss	vendor	VENDOR_OPERATIONAL_BSS	-	Not defined in EasyMesh v6.0 (absent from Table 22 and §17.2); upstream non-standard TLV carrying em_ap_vendor_operational_bss_t
+em_tlv_type_t	em_tlv_type_max	sentinel	-	-	Upper bound marker (0xF3); not a TLV type
+em_freq_band_t	em_freq_band_24	spec	BAND_2_4_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_5	spec	BAND_5_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_60	spec	BAND_60_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_6	spec	BAND_6_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_unknown	sentinel	-	-	Not a band: 0x04 is reserved per Table 15. Upstream nevertheless creates its controller and agent AL nodes with this value (src/ctrl/em_ctrl.cpp:1144, src/orch/em_orch_agent.cpp:259) and copies get_band() into the AutoconfigFreqBand / SupportedFreqBand TLVs (src/em/config/em_configuration.cpp:4404-4411, :4559-4562; response sent from :4504-4507), so 0x04 can appear on the wire. Upstream defect; FreqBand keeps the raw value but names no constant
+em_media_type_t	em_media_type_ieee8023ab	spec	IEEE_802_3AB	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211b_24	spec	IEEE_802_11B_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211g_24	spec	IEEE_802_11G_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211a_5	spec	IEEE_802_11A_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211n_24	spec	IEEE_802_11N_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211n_5	spec	IEEE_802_11N_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211ac_5	spec	IEEE_802_11AC_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211ad_60	spec	IEEE_802_11AD_60_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_ieee80211af	spec	IEEE_802_11AF	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
+em_media_type_t	em_media_type_max	sentinel	-	-	Upper bound marker (0x0108); not a media type
+em_profile_type_t	em_profile_type_reserved	sentinel	-	-	0x00 is Reserved per Table 69. Upstream uses it as an unset default and, on receive, treats a decoded 0x00 as Profile-1 (src/em/config/em_configuration.cpp:6307, :6412); no production writer sends it. Reserved values are handled by the codec per Table 69, not named in the API
+em_profile_type_t	em_profile_type_1	spec	MULTI_AP_PROFILE_1	Table 69, §17.2.47	-
+em_profile_type_t	em_profile_type_2	spec	MULTI_AP_PROFILE_2	Table 69, §17.2.47	-
+em_profile_type_t	em_profile_type_3	spec	MULTI_AP_PROFILE_3	Table 69, §17.2.47	-
+em_profile_type_t	em_profile_type_max	sentinel	-	-	Upper bound marker (0x04); not a profile value
+em_service_type_t	em_service_type_ctrl	spec	MULTI_AP_CONTROLLER	Table 23, §17.2.1	-
+em_service_type_t	em_service_type_agent	spec	MULTI_AP_AGENT	Table 23, §17.2.1	-
+em_service_type_t	em_service_type_cli	internal	-	-	IPC endpoint selector for the CLI (em_cmd_exec); 0x02 is reserved on the wire per Table 23; owned by the em-cmd IPC endpoint type (0001 D3)
+em_service_type_t	em_service_type_emplus_ctrl	vendor	EMPLUS_CONTROLLER	-	Upstream "EM+" vendor extension in the reserved range of Table 23; sent in the SupportedService TLV (src/em/config/em_configuration.cpp:4423)
+em_service_type_t	em_service_type_emplus_agent	vendor	EMPLUS_AGENT	-	Upstream "EM+" vendor extension in the reserved range of Table 23; sent in the SupportedService TLV (src/em/config/em_configuration.cpp:4567)
+em_service_type_t	em_service_type_none	sentinel	-	-	Upstream "none" marker (0xA2); not a service type; "no service" is Option::None

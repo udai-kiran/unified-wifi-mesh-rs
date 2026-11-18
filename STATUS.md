@@ -36,3 +36,17 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-18 | Codex review of revision 2 → revision 3 + [bus-event inventory](docs/bus-event-inventory.md) | 13 of 15 resolved; #2, #6 re-opened plus 6 new, all confirmed and addressed; revision 3 proposed |
 | 2026-11-18 | Codex review of revision 3 → revision 4 | 5 findings, all confirmed; cmd/core/orch boundary deferred to note 0002 under binding constraints; classification file added to Step 1; revision 4 proposed |
 | 2026-11-18 | Codex review of revision 4; 4 doc fixes | verdict "ready to start Step 1"; **0001 revision 4 accepted** |
+| 2026-11-18 | em-types Step 1: golden data (`tools/gen-upstream-enums`, `upstream_enums.tsv`, `classification.tsv`) | 220 enumerators (210 spec, 3 vendor, 1 internal, 6 sentinel); fixture matches an independent computation; `--check` and 7 mutation tests verified. 31 IEEE 1905.1-only rows provisional (0001 A2) |
+| 2026-11-18 | Codex review of Step 1 | 9 findings: 8 confirmed and fixed (generator completeness/ordering/I-O hardening + unit tests; sentinel-on-wire amendment A1; reason fixes); naming finding mostly dismissed (spec's own names) |
+| 2026-11-18 | Codex re-review of Step 1 | verdict "ready to commit as provisional golden data under A2"; 6 earlier findings resolved; wording fixes to A1/A2/D3 applied; tool follow-ups recorded below |
+
+## Open follow-ups
+
+| Area | Item | Origin |
+|---|---|---|
+| `tools/gen-upstream-enums` | Two I/O paths miss the exit-2 contract: an over-long `--out` filename is reported as "not found" (exit 1), and a scratch-directory `PermissionError` in `compile_and_run()` escapes as a traceback | Step 1 re-review #5 |
+| `tools/gen-upstream-enums` | Docstring promises preprocessor lines always fail; a `#if` inside an initializer (after `=`) is not rejected. Narrow the promise or reject directive lines | Step 1 re-review #8 |
+| `tools/test_gen_upstream_enums.py` | No `main()`-level tests (validate-before-write, `--no-classification`, exit-2 I/O paths; verified by hand only); some tests assert only the exit code; add a known-enum extra-row case | Step 1 re-review #10 |
+| `classification.tsv` | 31 IEEE 1905.1-only rows provisional (names, references) until checked against 1905.1 | 0001 A2 |
+| `em-msg` | Upstream rejects received Multi-AP Profile ≥ 4; spec Table 69 says assume own profile | 0001 A1 |
+| `em-types` Step 2 | `ADDITIONS` candidates absent upstream: TLVs 0xDE, 0xE3, 0xE5; messages 0x8038–0x8042, 0x8048; media type 0x0000 | Step 1 |
