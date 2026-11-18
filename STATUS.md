@@ -11,7 +11,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 
 | # | Crate | Upstream source | Depends on | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | `em-types` | `inc/em_base.h`, `inc/ieee80211.h` | — | not started | |
+| 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | not started | rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
 | 2 | `em-utils` | `src/utils/` | em-types | not started | |
 | 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
 | 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
@@ -31,3 +31,4 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | Date | Step | Result |
 |---|---|---|
 | 2026-11-18 | Repository and directory scaffolding | created |
+| 2026-11-18 | Design note [0001: em-types scope](docs/0001-em-types-scope.md) | accepted (spec-name consts; no per-value profile tagging yet) |
