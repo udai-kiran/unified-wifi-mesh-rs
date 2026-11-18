@@ -13,7 +13,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 |---|---|---|---|---|---|
 | 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | ported | wire codes pinned to upstream by the golden test; 31 IEEE 1905.1-only names provisional (0001 A2); rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
 | 2 | `em-utils` | `src/utils/` (see [0003](docs/0003-em-utils-scope.md)) | — | ported | modules `chan`, `akm`, `time`, `hex`; channel table pinned to upstream by the golden test; hex dump byte-identical to upstream's loop; timestamps are UTC (intentional fix); timer and logging follow 0004 R4/R5 |
-| 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
+| 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` (see [0005](docs/0005-em-msg-scope.md)) | em-types | in progress | Step 1 (validation-table golden data) done; Step 2 (crate: CMDU header, TLVs, builder, validation, WSC selector) not started. TLV bodies and field readers come later, per consumer |
 | 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
 | 5 | `em-dm` | `src/dm/` | em-types | not started | |
 | 6 | `em-db` | `src/db/` | em-dm | not started | controller only |
@@ -46,6 +46,8 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-18 | em-utils Step 1 completed: literal fixture-text tests; review round 1 (6 findings) | `-` marker, header and fixture-row bite tests now caught. Fixed: block comment merged tokens (`8/**/1` read as `81`); added the D3 malformed-entry test at 68 rows. #1, #3, #5, #6 left as low (follow-ups) |
 | 2026-11-18 | em-utils Step 1 review round 2, plus one fix after it | both fixes confirmed. The comment fix broke an exact-text declaration match (`= /* c */{`); the declaration is now matched with any whitespace between tokens. That last fix was verified independently, but not reviewed (two-round limit) |
 | 2026-11-18 | em-utils Step 2: crate `em-utils` (`chan`, `akm`, `time`, `hex`) | 24 tests on stable and 1.85; clippy pedantic, fmt and rustdoc clean; no clones, no `unsafe`, no dependencies. `HexDump` byte-identical to upstream's loop compiled as C, for 12 inputs incl. all 256 byte values and 1000 random bytes. 13 mutation tests caught. Review round 1: 6 findings; fixed docs, a row-local forward test, and 3 forward cases. Round 2: ready to commit. #4-#6 left as low (follow-ups) |
+| 2026-11-18 | Design note [0005: em-msg scope](docs/0005-em-msg-scope.md), two review rounds | round 1: 10 findings, all confirmed (strict length checks would reject upstream's own messages; WSC M1/M2 selector needed in Step 2; generator grammar; profile callers); round 2: wording and test-list fixes applied; **accepted** with the user's 3 decisions |
+| 2026-11-18 | em-msg Step 1: `tools/gen-upstream-msg-tables`, tests, `upstream_msg_tables.tsv` | 70 tables, 69 message types, 179 rows, 6 empty; all 185 fixture lines match an independent extraction. Review round 1: case grammar and WSC guard fixes; round 2: WSC check still foolable by unusual code, so the WSC case is now pinned to its exact upstream text (verified independently, not reviewed: two-round limit). #3, #4 left as low |
 
 ## Open follow-ups
 
@@ -55,7 +57,10 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | `tools/gen-upstream-enums` | Docstring promises preprocessor lines always fail; a `#if` inside an initializer (after `=`) is not rejected. Narrow the promise or reject directive lines | Step 1 re-review #8 |
 | `tools/test_gen_upstream_enums.py` | No `main()`-level tests (validate-before-write, `--no-classification`, exit-2 I/O paths; verified by hand only); some tests assert only the exit code; add a known-enum extra-row case | Step 1 re-review #10 |
 | `classification.tsv` | 31 IEEE 1905.1-only rows provisional (names, references) until checked against 1905.1 | 0001 A2 |
-| `em-msg` | Upstream rejects received Multi-AP Profile ≥ 4; spec Table 69 says assume own profile | 0001 A1 |
+| `em-core` | Upstream rejects received Multi-AP Profile ≥ 4; spec Table 69 says assume own profile. Receive policy, moves to `em-core` with the Profile TLV reader | 0001 A1, 0005 D5 |
+| `em-msg` | Stricter TLV length checks (every instance, optional TLVs) not added: upstream's own senders would fail them. Revisit with the spec | 0005 D3 |
+| `tools/gen-upstream-msg-tables` | Low: table discovery scans the whole file (a stray non-table function stops it loudly); a declaration-shaped string or a `'}'` char literal could confuse the scan | em-msg Step 1 review #3 |
+| `tools/gen-upstream-msg-tables` | Low: the `EMEX_MIN_EXT_DEV_INFO_SZ` reader does not notice `#if 0` or `#undef` around the define | em-msg Step 1 review #4 |
 | `em-types` | Remaining `ADDITIONS` candidates absent upstream: TLV 0xDE and messages 0x8038–0x8042, 0x8048 (vBSS, spec Appendix B; not yet reviewed); media type 0x0000 (IEEE 1905.1, unverified). TLVs 0xE3 and 0xE5 were added in Step 2 | Step 1 |
 | `tools/gen-upstream-freq-ranges` | Low: non-atomic write can leave a partial fixture on a failed write (same as enums tool; file is in git); region regex `re.match(...$)` accepts a trailing newline (counts backstop it) | em-utils Step 1, review #1 |
 | `tools/gen-upstream-freq-ranges` | Low: the declaration is also matched inside a string literal (e.g. a raw string holding the table text) | em-utils Step 1 review #3 |
