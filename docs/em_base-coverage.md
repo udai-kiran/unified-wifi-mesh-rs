@@ -30,7 +30,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 
 | Line | Kind | Upstream type | Owner | Note | Status |
 |---|---|---|---|---|---|
-| 410 | alias | `em_interface_name_t` | em-types | `InterfaceName` | planned |
+| 410 | alias | `em_interface_name_t` | em-types | `InterfaceName` | ported |
 | 411 | alias | `em_nonce_t` | em-crypto | key material | planned |
 | 412 | alias | `em_dh5_key_t` | em-crypto | key material | planned |
 | 413 | alias | `em_short_string_t` | do not port | fixed-size C char buffer; replaced by `String`/bounded types | n/a |
@@ -54,9 +54,9 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 464 | struct | `em_cmdu_t` | em-msg | framing / codes / validation metadata | planned |
 | 475 | struct | `em_client_assoc_event_t` | em-msg | Client Association Event TLV body | planned |
 | 482 | alias | `em_enum_type_t` | do not port | C storage alias for enums | n/a |
-| 484 | enum | `em_service_type_t` | em-types | `ServiceType`; `cli` (0x02) and `none` excluded, see D3 | planned |
-| 493 | enum | `em_profile_type_t` | em-types | `ProfileType`; `max` excluded | planned |
-| 501 | enum | `em_freq_band_t` | em-types | `FreqBand`; `unknown` excluded | planned |
+| 484 | enum | `em_service_type_t` | em-types | `ServiceType`; `cli` (0x02) and `none` excluded, see D3 | ported |
+| 493 | enum | `em_profile_type_t` | em-types | `ProfileType`; `reserved` and `max` excluded | ported |
+| 501 | enum | `em_freq_band_t` | em-types | `FreqBand`; `unknown` excluded | ported |
 | 509 | enum | `em_mlo_mode_bitmap_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 516 | struct | `em_mlo_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 521 | struct | `em_channels_list_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
@@ -76,10 +76,10 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 679 | struct | `em_unassoc_sta_metric_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 686 | struct | `em_unassoc_sta_link_metrics_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 692 | enum | `em_tlv_requirement_t` | em-msg | framing / codes / validation metadata | planned |
-| 698 | enum | `em_msg_type_t` | em-types | `MsgType` | planned |
+| 698 | enum | `em_msg_type_t` | em-types | `MsgType` | ported |
 | 773 | enum | `em_attrib_id_t` | em-msg | framing / codes / validation metadata | planned |
 | 792 | enum | `em_wsc_msg_type_t` | em-msg | framing / codes / validation metadata | planned |
-| 811 | enum | `em_tlv_type_t` | em-types | `TlvType`; `max` excluded | planned |
+| 811 | enum | `em_tlv_type_t` | em-types | `TlvType`; `max` excluded | ported |
 | 937 | enum | `em_vendor_airties_tlv_type_t` | em-msg | framing / codes / validation metadata | planned |
 | 943 | enum | `em_channel_pref_reason_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 960 | struct | `em_qos_mgmt_des_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
@@ -257,7 +257,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2204 | struct | `em_searched_service_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2209 | struct | `em_ap_capability_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2218 | struct | `em_ap_radio_advanced_cap_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2230 | enum | `em_media_type_t` | em-types | `MediaType`; `max` excluded | planned |
+| 2230 | enum | `em_media_type_t` | em-types | `MediaType`; `max` excluded | ported |
 | 2243 | struct | `em_dpp_chirp_value_t` | em-msg | DPP-related TLV body (consumed by em-easyconnect) | planned |
 | 2250 | struct | `em_ctrl_cap_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2256 | struct | `data_elem_attr_t` | em-dm | Data Elements / vendor attribute IDs; verify at port | planned |
@@ -271,7 +271,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2497 | enum | `em_vap_mode_t` | em-dm | data-model record | planned |
 | 2502 | struct | `em_frame_info_t` | em-transport | link-layer header / raw frame | planned |
 | 2507 | struct | `em_interface_preference_t` | em-dm | data-model record | planned |
-| 2512 | struct | `em_interface_t` | em-types | `Interface` | planned |
+| 2512 | struct | `em_interface_t` | em-types | `Interface` | ported |
 | 2518 | alias | `em_frame_event_t` | em-transport | link-layer header / raw frame | planned |
 | 2520 | struct | `em_network_info_t` | em-dm | data-model record | planned |
 | 2533 | struct | `ieee_1905_security_t` | em-dm | data-model record | planned |

@@ -455,6 +455,36 @@ This is an **explicit exception** to the D4 / Consequences requirement that the 
 reviewed against the spec text before Step 2. It applies to these 31 rows only. All EasyMesh rows
 were checked against the EasyMesh v6.0 text.
 
+### A3 (2026-11-18, Step 2): public API beyond the D5 list
+
+The Step 2 crate exposes a few conveniences that D5 does not list. They are intentional and part
+of the API:
+
+- **`MacAddr`:**
+  - `const fn new([u8; 6])` and `const fn octets(self)`, for const construction and access to
+    the raw bytes
+  - `is_broadcast()` (already covered by acceptance criterion 5)
+- **`InterfaceName`:**
+  - `MAX_LEN` (15) and `as_str()`
+  - `FromStr`, `TryFrom<&str>` and `TryFrom<String>`, all sharing one validation function
+  - `from_bytes(&[u8])`, which maps non-UTF-8 input to `InterfaceNameError::NotUtf8`
+  - a `Debug` that prints `InterfaceName("eth0")`
+- **`Interface`:** derives `Debug, PartialEq, Eq, Hash`. `name: None` means "the name is not
+  known", as D2 says.
+- **`Clone`:** following [0004](0004-runtime-and-ownership.md) R2, `Clone` is derived only on
+  `Copy` types (`MacAddr` and the six code newtypes). `InterfaceName` derives
+  `PartialEq, Eq, Hash, PartialOrd, Ord`, and `Interface`, `InterfaceNameError` and
+  `MacAddrParseError` do not implement `Clone`. This overrides the `Clone` that D5 lists for
+  `MacAddr`'s derives only where a type is not `Copy`. `MacAddr` is `Copy`, so it keeps `Clone`.
+
+Two clarifications of D5:
+
+- **Whitespace.** `InterfaceName` rejects every character for which `char::is_whitespace` is
+  true, including Unicode whitespace such as U+00A0. This is stricter than the kernel's
+  byte-oriented check, and it is intentional.
+- **MAC context in errors.** `from_bytes` does not know the interface's MAC address. The caller
+  that loads names from the kernel or from persisted data attaches it when it reports the error.
+
 ## Review resolution
 
 ### Review of revision 4

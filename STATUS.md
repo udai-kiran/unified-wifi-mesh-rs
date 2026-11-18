@@ -11,7 +11,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 
 | # | Crate | Upstream source | Depends on | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | not started | rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
+| 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | ported | wire codes pinned to upstream by the golden test; 31 IEEE 1905.1-only names provisional (0001 A2); rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
 | 2 | `em-utils` | `src/utils/` | em-types | not started | |
 | 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
 | 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
@@ -49,4 +49,5 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | `tools/test_gen_upstream_enums.py` | No `main()`-level tests (validate-before-write, `--no-classification`, exit-2 I/O paths; verified by hand only); some tests assert only the exit code; add a known-enum extra-row case | Step 1 re-review #10 |
 | `classification.tsv` | 31 IEEE 1905.1-only rows provisional (names, references) until checked against 1905.1 | 0001 A2 |
 | `em-msg` | Upstream rejects received Multi-AP Profile ≥ 4; spec Table 69 says assume own profile | 0001 A1 |
-| `em-types` Step 2 | `ADDITIONS` candidates absent upstream: TLVs 0xDE, 0xE3, 0xE5; messages 0x8038–0x8042, 0x8048; media type 0x0000 | Step 1 |
+| `em-types` | Remaining `ADDITIONS` candidates absent upstream: TLV 0xDE and messages 0x8038–0x8042, 0x8048 (vBSS, spec Appendix B; not yet reviewed); media type 0x0000 (IEEE 1905.1, unverified). TLVs 0xE3 and 0xE5 were added in Step 2 | Step 1 |
+| `classification.tsv` | Cross-check the 31 provisional 1905.1 names against `rdkcentral/ieee1905-rs` (`ieee1905-core/src/cmdu_codec.rs`: `CMDUType`, `IEEE1905TLVType`) as a secondary source until 1905.1 itself is available | Step 2 discussion |

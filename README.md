@@ -3,8 +3,8 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status: scaffolding only.** No component has been ported yet. Progress is tracked in
-> [STATUS.md](STATUS.md).
+> **Status:** `em-types` is ported; the other components have not been started. Progress is
+> tracked in [STATUS.md](STATUS.md).
 
 ## Porting base
 
@@ -24,6 +24,13 @@ Every component README names the upstream files it ports, at this commit.
   port starts. Until then the directory holds a README describing its scope.
 - **Behavioural parity first.** Each crate is tested against the upstream behaviour it replaces.
   Redesign is a separate, explicit step.
+- **Hard rules** ([docs/0004](docs/0004-runtime-and-ownership.md)), enforced by the compiler and
+  clippy:
+  - no `unsafe`
+  - no `.clone()` anywhere, tests included, and that covers `Arc`, `Rc` and channel senders.
+    Ownership is moved or borrowed instead.
+- **Async on tokio, as actors.** Each stateful component is a task that owns its state and talks
+  to the others only through channels. Pure data and logic crates stay synchronous.
 - **Transport-agnostic core.** IEEE 1905 transport sits behind a trait so the core can run either
   on raw sockets or over AL-SAP to
   [rdkcentral/ieee1905-rs](https://github.com/rdkcentral/ieee1905-rs).
@@ -32,7 +39,8 @@ Every component README names the upstream files it ports, at this commit.
 
 ```
 crates/
-  em-types/        shared basics: MAC, interface, wire code types (part of inc/em_base.h, see docs/0001)
+  em-types/        MacAddr, InterfaceName, Interface; wire codes MsgType, TlvType, FreqBand,
+                   MediaType, ProfileType, ServiceType   (part of inc/em_base.h, see docs/0001)
   em-utils/        utilities and timers                          (src/utils)
   em-msg/          CMDU / TLV encode, decode, validation         (src/em/em_msg.cpp)
   em-crypto/       1905 / AES-SIV / key-derivation crypto        (src/util_crypto, src/em/crypto)

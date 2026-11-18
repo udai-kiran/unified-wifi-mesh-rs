@@ -1,0 +1,12 @@
+[package]
+name = "em-types"
+version = "0.1.0"
+description = "Shared basic types for the unified-wifi-mesh Rust port: MAC address, interface, and wire-code newtypes."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

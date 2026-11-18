@@ -26,4 +26,4 @@ Base: `rdkcentral/unified-wifi-mesh` @ `ba4180b`.
 
 ## Status
 
-not started. See [STATUS.md](../../STATUS.md).
+Step 2 (crate) implemented; see [STATUS.md](../../STATUS.md).
