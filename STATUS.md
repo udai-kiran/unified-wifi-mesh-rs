@@ -39,6 +39,8 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-18 | em-types Step 1: golden data (`tools/gen-upstream-enums`, `upstream_enums.tsv`, `classification.tsv`) | 220 enumerators (210 spec, 3 vendor, 1 internal, 6 sentinel); fixture matches an independent computation; `--check` and 7 mutation tests verified. 31 IEEE 1905.1-only rows provisional (0001 A2) |
 | 2026-11-18 | Codex review of Step 1 | 9 findings: 8 confirmed and fixed (generator completeness/ordering/I-O hardening + unit tests; sentinel-on-wire amendment A1; reason fixes); naming finding mostly dismissed (spec's own names) |
 | 2026-11-18 | Codex re-review of Step 1 | verdict "ready to commit as provisional golden data under A2"; 6 earlier findings resolved; wording fixes to A1/A2/D3 applied; tool follow-ups recorded below |
+| 2026-11-18 | em-types Step 2: crate (`9e213e1`) + no-clone follow-up | 59 tests on stable and 1.85; clippy pedantic, fmt and rustdoc clean; golden test pins all 220 enumerators; R7 bite test: clippy rejects all 9 banned clone forms; Codex: no blockers |
+| 2026-11-18 | Design note [0004](docs/0004-runtime-and-ownership.md) accepted | tokio, actors, no `.clone()` (incl. `Arc`, `Rc`, senders), no `unsafe`; enforced by `clippy.toml` |
 
 ## Open follow-ups
 

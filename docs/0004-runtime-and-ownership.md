@@ -125,11 +125,25 @@ These rules are enforced by the compiler and linter, not by memory:
   ]
   ```
 
-  CI and the verification step run `cargo clippy --all-targets -- -D warnings`, so any clone
-  fails the build. The way this is enforced must itself be proven by a bite test: a `.clone()`
-  inserted into a copy of the repo, on a `Copy` type, a non-`Copy` type, an `Arc` and a tokio
-  `Sender`, must fail clippy.
-- If clippy cannot express a case, the case is listed here and checked in review.
+  CI and the verification step run `cargo clippy --all-targets -- -D warnings`, so any call to
+  one of the **listed methods** fails the build. This was proven by a bite test on 2026-11-18,
+  on stable and on 1.85.0. Clippy rejected all nine of these with `disallowed_methods`:
+  - `.clone()` on a `Copy` type, on a `String`, on an `Arc`, and on an `mpsc::Sender`
+  - `Arc::clone(&a)`
+  - `Iterator::cloned`, `Option::cloned` and `Result::cloned`
+  - `clone_from`
+
+  `.copied()` and `to_owned()` were not flagged. tokio's `Sender::clone` resolves to the same
+  `Clone::clone` path.
+- **Cases left to review** (a method denylist cannot see them):
+  - a method that duplicates data under another name, e.g. a custom `fn dup(&self) -> Self`
+  - a clone performed inside a library API that we call
+  - `to_owned()`, `to_string()`, `to_vec()` and `Cow::into_owned()`, which R2 allows only at a
+    real borrowed-to-owned boundary
+  - `ToOwned::clone_into`, which can either duplicate owned data or legitimately fill a reused
+    buffer
+
+  Banning these outright would also reject legitimate ownership boundaries.
 
 ## Alternatives considered
 
@@ -142,7 +156,8 @@ These rules are enforced by the compiler and linter, not by memory:
 
 ## Consequences
 
-- `em-types` is brought into line before its commit:
+- `em-types` is brought into line with R2 by a follow-up commit to `9e213e1` (which was committed
+  before the rule was applied to the code):
   - the `.clone()`/`.cloned()` calls in its tests are removed
   - `Clone` is removed from `InterfaceName`, `Interface`, `InterfaceNameError` and
     `MacAddrParseError`

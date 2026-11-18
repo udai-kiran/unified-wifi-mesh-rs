@@ -535,9 +535,9 @@ mod golden {
         }
     }
 
-    fn parse_classification() -> Vec<[String; 6]> {
+    fn parse_classification() -> Vec<[&'static str; 6]> {
         let raw = include_str!("../tests/data/classification.tsv");
-        let mut seen: std::collections::HashSet<(String, String)> =
+        let mut seen: std::collections::HashSet<(&'static str, &'static str)> =
             std::collections::HashSet::new();
         raw.lines()
             .filter(|l| !l.starts_with('#'))
@@ -546,17 +546,17 @@ mod golden {
             .map(|l| {
                 let cols: Vec<&str> = l.split('\t').collect();
                 assert!(cols.len() >= 6, "unexpected column count: {l}");
-                let pair = (cols[0].to_owned(), cols[1].to_owned());
+                let pair = (cols[0], cols[1]);
                 assert!(
                     seen.insert(pair),
                     "duplicate (c_enum, identifier) in classification.tsv: {l}"
                 );
-                std::array::from_fn(|i| cols[i].to_owned())
+                [cols[0], cols[1], cols[2], cols[3], cols[4], cols[5]]
             })
             .collect()
     }
 
-    fn parse_fixture() -> std::collections::HashMap<(String, String), u32> {
+    fn parse_fixture() -> std::collections::HashMap<(&'static str, &'static str), u32> {
         let raw = include_str!("../tests/data/upstream_enums.tsv");
         let mut map = std::collections::HashMap::new();
         for l in raw
@@ -567,7 +567,7 @@ mod golden {
         {
             let cols: Vec<&str> = l.split('\t').collect();
             assert!(cols.len() >= 3, "unexpected column count: {l}");
-            let key = (cols[0].to_owned(), cols[1].to_owned());
+            let key = (cols[0], cols[1]);
             let val = u32::from_str_radix(cols[2].trim_start_matches("0x"), 16)
                 .expect("bad hex value in fixture");
             assert!(map.insert(key, val).is_none(), "duplicate fixture key: {l}");
@@ -583,7 +583,7 @@ mod golden {
 
         for row in &rows {
             let (c_enum, identifier, class, rust_name, spec_reference, _reason) =
-                (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
+                (row[0], row[1], row[2], row[3], row[4], row[5]);
 
             if class != "spec" && class != "vendor" {
                 continue;
@@ -591,24 +591,20 @@ mod golden {
 
             let table: &[Entry] = tables
                 .iter()
-                .find(|(ce, _)| *ce == c_enum.as_str())
+                .find(|(ce, _)| *ce == c_enum)
                 .map_or_else(|| panic!("no table for {c_enum}"), |(_, t)| *t);
 
             let entry = table
                 .iter()
-                .find(|e| e.upstream == Some(identifier.as_str()))
+                .find(|e| e.upstream == Some(identifier))
                 .unwrap_or_else(|| {
                     panic!("no TABLE entry for upstream identifier {identifier:?} in {c_enum}")
                 });
 
-            assert_eq!(
-                entry.name,
-                rust_name.as_str(),
-                "rust_name mismatch for {identifier}"
-            );
+            assert_eq!(entry.name, rust_name, "rust_name mismatch for {identifier}");
 
             let fix_val = fixture
-                .get(&(c_enum.clone(), identifier.clone()))
+                .get(&(c_enum, identifier))
                 .copied()
                 .unwrap_or_else(|| panic!("missing fixture for {c_enum}/{identifier}"));
 
@@ -618,12 +614,12 @@ mod golden {
                 entry.value
             );
 
-            match class.as_str() {
+            match class {
                 "spec" => {
                     assert_eq!(entry.class, Class::Spec, "class mismatch for {identifier}");
                     assert_eq!(
                         entry.spec_ref,
-                        Some(spec_reference.as_str()),
+                        Some(spec_reference),
                         "spec_ref mismatch for {identifier}"
                     );
                 }
@@ -652,44 +648,43 @@ mod golden {
         let excluded_set: std::collections::HashSet<(&str, &str)> =
             EXCLUDED.iter().map(|(c, id, _, _)| (*c, *id)).collect();
 
-        let mut excluded_in_rows: std::collections::HashSet<(String, String)> =
+        let mut excluded_in_rows: std::collections::HashSet<(&'static str, &'static str)> =
             std::collections::HashSet::new();
 
         for row in &rows {
-            let (c_enum, identifier, class) = (&row[0], &row[1], &row[2]);
+            let (c_enum, identifier, class) = (row[0], row[1], row[2]);
             if class != "internal" && class != "sentinel" {
                 continue;
             }
-            excluded_in_rows.insert((c_enum.clone(), identifier.clone()));
+            excluded_in_rows.insert((c_enum, identifier));
 
             assert!(
-                excluded_set.contains(&(c_enum.as_str(), identifier.as_str())),
+                excluded_set.contains(&(c_enum, identifier)),
                 "internal/sentinel row not in EXCLUDED: {c_enum} / {identifier}"
             );
 
-            if let Some((_, table)) = tables.iter().find(|(ce, _)| *ce == c_enum.as_str()) {
+            if let Some((_, table)) = tables.iter().find(|(ce, _)| *ce == c_enum) {
                 for entry in *table {
                     assert_ne!(
                         entry.upstream,
-                        Some(identifier.as_str()),
+                        Some(identifier),
                         "excluded identifier {identifier} appears in TABLE"
                     );
                 }
             }
 
             assert!(
-                fixture.contains_key(&(c_enum.clone(), identifier.clone())),
+                fixture.contains_key(&(c_enum, identifier)),
                 "excluded row {c_enum}/{identifier} not in fixture"
             );
 
             // For each internal/sentinel row, check the EXCLUDED entry
             if let Some((_, _, excl_class, excl_reason)) = EXCLUDED
                 .iter()
-                .find(|(c, id, _, _)| c == c_enum && id == identifier)
+                .find(|(c, id, _, _)| *c == c_enum && *id == identifier)
             {
                 assert_eq!(
-                    *excl_class,
-                    class.as_str(),
+                    *excl_class, class,
                     "EXCLUDED class mismatch for {c_enum}/{identifier}"
                 );
                 assert!(
@@ -697,8 +692,7 @@ mod golden {
                     "EXCLUDED reason is empty for {c_enum}/{identifier}"
                 );
                 assert_ne!(
-                    row[5].as_str(),
-                    "-",
+                    row[5], "-",
                     "classification.tsv reason is '-' for {c_enum}/{identifier}"
                 );
             }
@@ -706,7 +700,7 @@ mod golden {
 
         for (c_enum, identifier, _, _) in EXCLUDED {
             assert!(
-                excluded_in_rows.contains(&((*c_enum).to_owned(), (*identifier).to_owned())),
+                excluded_in_rows.contains(&(*c_enum, *identifier)),
                 "EXCLUDED entry ({c_enum}, {identifier}) not found as internal/sentinel row"
             );
         }
@@ -743,7 +737,7 @@ mod golden {
                     });
 
                 for ((fe_type, _), fe_val) in &fixture {
-                    if fe_type.as_str() == *c_enum {
+                    if *fe_type == *c_enum {
                         assert_ne!(
                             entry.value, *fe_val,
                             "addition {} has same value as fixture entry",
@@ -835,10 +829,10 @@ mod golden {
         let fixture = parse_fixture();
         let rows = parse_classification();
 
-        let fixture_keys: std::collections::HashSet<(String, String)> =
-            fixture.keys().cloned().collect();
-        let class_keys: std::collections::HashSet<(String, String)> =
-            rows.iter().map(|r| (r[0].clone(), r[1].clone())).collect();
+        let fixture_keys: std::collections::HashSet<(&str, &str)> =
+            fixture.keys().copied().collect();
+        let class_keys: std::collections::HashSet<(&str, &str)> =
+            rows.iter().map(|r| (r[0], r[1])).collect();
 
         assert_eq!(
             fixture.len(),

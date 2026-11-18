@@ -1,0 +1,7 @@
+disallowed-methods = [
+  { path = "core::clone::Clone::clone",     reason = "0004 R2: no .clone(); move or borrow instead" },
+  { path = "core::clone::Clone::clone_from", reason = "0004 R2: no clone_from" },
+  { path = "core::iter::Iterator::cloned",  reason = "0004 R2: no .cloned(); use .copied() for Copy types or borrow" },
+  { path = "core::option::Option::cloned",  reason = "0004 R2: no .cloned()" },
+  { path = "core::result::Result::cloned",  reason = "0004 R2: no .cloned()" },
+]

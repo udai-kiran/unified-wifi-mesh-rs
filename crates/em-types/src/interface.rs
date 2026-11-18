@@ -21,7 +21,7 @@ use crate::mac::MacAddr;
 /// This crate rejects names that are not valid UTF-8 (see [`InterfaceNameError::NotUtf8`]).
 /// Any place that loads names from external data must report such a name as an
 /// error with context, and must not store it.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InterfaceName(String);
 
 impl InterfaceName {
@@ -128,7 +128,7 @@ impl fmt::Debug for InterfaceName {
 /// A network interface descriptor: an optional name, a MAC address, and a media type.
 ///
 /// `name` is `None` when the interface name is not known.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Interface {
     /// Interface name, or `None` when not yet known.
     pub name: Option<InterfaceName>,
@@ -144,7 +144,7 @@ pub struct Interface {
 
 /// Error returned when an [`InterfaceName`] cannot be constructed.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InterfaceNameError {
     /// The name is empty (zero bytes).
     Empty,
@@ -371,13 +371,12 @@ mod tests {
 
     #[test]
     fn interface_with_name() {
-        let name: InterfaceName = "eth0".parse().unwrap();
         let iface = Interface {
-            name: Some(name.clone()),
+            name: Some("eth0".parse::<InterfaceName>().unwrap()),
             mac: MacAddr::ZERO,
             media: MediaType::from(0x0001_u16),
         };
-        assert_eq!(iface.name, Some(name));
+        assert_eq!(iface.name, Some("eth0".parse::<InterfaceName>().unwrap()));
     }
 
     #[test]
@@ -387,7 +386,11 @@ mod tests {
             mac: MacAddr::BROADCAST,
             media: MediaType::from(0x0100_u16),
         };
-        let b = a.clone();
+        let b = Interface {
+            name: None,
+            mac: MacAddr::BROADCAST,
+            media: MediaType::from(0x0100_u16),
+        };
         assert_eq!(a, b);
     }
 }

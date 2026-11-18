@@ -198,7 +198,7 @@ impl FromStr for MacAddr {
 
 /// Error returned when a [`MacAddr`] cannot be parsed or converted.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MacAddrParseError {
     /// The string is not a recognised MAC address format.
     InvalidFormat,
