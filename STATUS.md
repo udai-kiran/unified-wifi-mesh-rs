@@ -12,7 +12,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | # | Crate | Upstream source | Depends on | Status | Notes |
 |---|---|---|---|---|---|
 | 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | ported | wire codes pinned to upstream by the golden test; 31 IEEE 1905.1-only names provisional (0001 A2); rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
-| 2 | `em-utils` | `src/utils/` (see [0003](docs/0003-em-utils-scope.md)) | — | in progress | Step 1 (channel-table golden data) done: reviewed in two rounds, low items open (see follow-ups). Step 2 (crate) not started |
+| 2 | `em-utils` | `src/utils/` (see [0003](docs/0003-em-utils-scope.md)) | — | ported | modules `chan`, `akm`, `time`, `hex`; channel table pinned to upstream by the golden test; hex dump byte-identical to upstream's loop; timestamps are UTC (intentional fix); timer and logging follow 0004 R4/R5 |
 | 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
 | 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
 | 5 | `em-dm` | `src/dm/` | em-types | not started | |
@@ -45,6 +45,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-18 | em-utils Step 1: `tools/gen-upstream-freq-ranges`, unit tests, `upstream_freq_ranges.tsv` (work in progress) | 68 rows match an independent extraction; `--check` exit 0; 36 tests pass; bad upstream path exits 2. Bite tests: 3 of 4 caught; dropping the global `-` marker is **not** caught (follow-up). Not yet reviewed |
 | 2026-11-18 | em-utils Step 1 completed: literal fixture-text tests; review round 1 (6 findings) | `-` marker, header and fixture-row bite tests now caught. Fixed: block comment merged tokens (`8/**/1` read as `81`); added the D3 malformed-entry test at 68 rows. #1, #3, #5, #6 left as low (follow-ups) |
 | 2026-11-18 | em-utils Step 1 review round 2, plus one fix after it | both fixes confirmed. The comment fix broke an exact-text declaration match (`= /* c */{`); the declaration is now matched with any whitespace between tokens. That last fix was verified independently, but not reviewed (two-round limit) |
+| 2026-11-18 | em-utils Step 2: crate `em-utils` (`chan`, `akm`, `time`, `hex`) | 24 tests on stable and 1.85; clippy pedantic, fmt and rustdoc clean; no clones, no `unsafe`, no dependencies. `HexDump` byte-identical to upstream's loop compiled as C, for 12 inputs incl. all 256 byte values and 1000 random bytes. 13 mutation tests caught. Review round 1: 6 findings; fixed docs, a row-local forward test, and 3 forward cases. Round 2: ready to commit. #4-#6 left as low (follow-ups) |
 
 ## Open follow-ups
 
@@ -59,5 +60,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | `tools/gen-upstream-freq-ranges` | Low: non-atomic write can leave a partial fixture on a failed write (same as enums tool; file is in git); region regex `re.match(...$)` accepts a trailing newline (counts backstop it) | em-utils Step 1, review #1 |
 | `tools/gen-upstream-freq-ranges` | Low: the declaration is also matched inside a string literal (e.g. a raw string holding the table text) | em-utils Step 1 review #3 |
 | `tools/test_gen_upstream_freq_ranges.py` | Low: `min_chan` range test still passes with that guard removed (the ordering error also names `min_chan`); the fixture-preservation test fails on row count before `spacing`; success-path tests do not check that `--check` leaves the file alone or that write mode writes the right bytes | em-utils Step 1 review #5, #6 |
+| `em-utils` tests | Low: pin both century leap-year rules (2000-02-29 = 951782400 s; 2100-03-01 = 4107542400 s, no 2100-02-29); add an unknown OUI with a known suite type (`01 0F AC 08` → `None`) | em-utils Step 2 review #4, #5 |
+| `em-utils` docs | Low: `HexDump` "byte-for-byte as upstream" holds only up to upstream's `unsigned int` length; say so | em-utils Step 2 review #6 |
 | `em-utils` table | Check preserved quirks (class 83 ch 1-13 vs comment "1-9", class 136 → 5937 MHz, class 1 min 34 in JP) against the IEEE op-class tables | 0003 D2 |
 | `classification.tsv` | Cross-check the 31 provisional 1905.1 names against `rdkcentral/ieee1905-rs` (`ieee1905-core/src/cmdu_codec.rs`: `CMDUType`, `IEEE1905TLVType`) as a secondary source until 1905.1 itself is available | Step 2 discussion |

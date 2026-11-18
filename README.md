@@ -3,7 +3,7 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status:** `em-types` is ported; the other components have not been started. Progress is
+> **Status:** `em-types` and `em-utils` are ported; the other components have not been started. Progress is
 > tracked in [STATUS.md](STATUS.md).
 
 ## Porting base
@@ -41,7 +41,7 @@ Every component README names the upstream files it ports, at this commit.
 crates/
   em-types/        MacAddr, InterfaceName, Interface; wire codes MsgType, TlvType, FreqBand,
                    MediaType, ProfileType, ServiceType   (part of inc/em_base.h, see docs/0001)
-  em-utils/        utilities and timers                          (src/utils)
+  em-utils/        channel table, AKM map, UTC timestamps, hex dump  (src/utils, see docs/0003)
   em-msg/          CMDU / TLV encode, decode, validation         (src/em/em_msg.cpp)
   em-crypto/       1905 / AES-SIV / key-derivation crypto        (src/util_crypto, src/em/crypto)
   em-dm/           EasyMesh data model                           (src/dm)
