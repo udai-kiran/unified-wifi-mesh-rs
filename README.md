@@ -32,7 +32,7 @@ Every component README names the upstream files it ports, at this commit.
 
 ```
 crates/
-  em-types/        shared enums, constants, wire-level structs   (inc/em_base.h, inc/ieee80211.h)
+  em-types/        shared basics: MAC, interface, wire code types (part of inc/em_base.h, see docs/0001)
   em-utils/        utilities and timers                          (src/utils)
   em-msg/          CMDU / TLV encode, decode, validation         (src/em/em_msg.cpp)
   em-crypto/       1905 / AES-SIV / key-derivation crypto        (src/util_crypto, src/em/crypto)
@@ -40,8 +40,8 @@ crates/
   em-db/           SQLite persistence (controller)               (src/db)
   em-transport/    1905 transport: raw socket + AL-SAP client    (src/em/em.cpp socket code, src/al-sap)
   em-easyconnect/  DPP / Wi-Fi Easy Connect                      (src/em/prov/easyconnect)
+  em-cmd/          management requests, commands, IPC execution  (src/cmd)
   em-core/         protocol engine: em_t + per-area handlers     (src/em)
-  em-cmd/          command objects and CLI/IPC execution         (src/cmd)
   em-orch/         command orchestration                         (src/orch)
   em-agent/        Agent binary + OneWifi integration            (src/agent)
   em-ctrl/         Controller binary + TR-181                    (src/ctrl)
