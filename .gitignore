@@ -1,0 +1,14 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Never commit: local assistant config, specs, scratch artifacts
+.claude/
+CLAUDE.md
+*.pdf

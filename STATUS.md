@@ -1,0 +1,33 @@
+# Porting status
+
+Upstream base: `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` (`develop`).
+
+Status values: `not started` · `in progress` · `ported` (builds and has tests) · `parity verified`
+(tested against upstream behaviour).
+
+## Components
+
+Listed in the planned porting order (bottom-up). The order can change; record why when it does.
+
+| # | Crate | Upstream source | Depends on | Status | Notes |
+|---|---|---|---|---|---|
+| 1 | `em-types` | `inc/em_base.h`, `inc/ieee80211.h` | — | not started | |
+| 2 | `em-utils` | `src/utils/` | em-types | not started | |
+| 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
+| 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
+| 5 | `em-dm` | `src/dm/` | em-types | not started | |
+| 6 | `em-db` | `src/db/` | em-dm | not started | controller only |
+| 7 | `em-transport` | `src/em/em.cpp` (socket code), `src/al-sap/` | em-types | not started | raw socket + AL-SAP client |
+| 8 | `em-easyconnect` | `src/em/prov/easyconnect/` | em-crypto, em-msg | not started | |
+| 9 | `em-core` | `src/em/` | em-msg, em-dm, em-transport, em-easyconnect | not started | |
+| 10 | `em-cmd` | `src/cmd/` | em-types, em-dm | not started | |
+| 11 | `em-orch` | `src/orch/` | em-cmd, em-core | not started | |
+| 12 | `em-agent` | `src/agent/` | em-core, em-orch | not started | OneWifi bus integration |
+| 13 | `em-ctrl` | `src/ctrl/` | em-core, em-orch, em-db | not started | includes TR-181 |
+| 14 | `em-cli` | `src/cli/em_cli.cpp`, `src/cli/em_cmd_cli.cpp` | em-cmd | not started | Go UI out of scope for now |
+
+## Log
+
+| Date | Step | Result |
+|---|---|---|
+| 2026-11-18 | Repository and directory scaffolding | created |
