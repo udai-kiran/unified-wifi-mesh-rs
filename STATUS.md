@@ -12,7 +12,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | # | Crate | Upstream source | Depends on | Status | Notes |
 |---|---|---|---|---|---|
 | 1 | `em-types` | shared basics from `inc/em_base.h` (see [0001](docs/0001-em-types-scope.md) D2) | — | ported | wire codes pinned to upstream by the golden test; 31 IEEE 1905.1-only names provisional (0001 A2); rest of `em_base.h` goes to its owning crates; `ieee80211.h` deferred to em-core/em-agent |
-| 2 | `em-utils` | `src/utils/` (see [0003](docs/0003-em-utils-scope.md)) | — | in progress | Step 1 (channel-table golden data) committed as work in progress; one test gap open (see follow-ups). Step 2 (crate) not started |
+| 2 | `em-utils` | `src/utils/` (see [0003](docs/0003-em-utils-scope.md)) | — | in progress | Step 1 (channel-table golden data) done: reviewed in two rounds, low items open (see follow-ups). Step 2 (crate) not started |
 | 3 | `em-msg` | `src/em/em_msg.cpp`, `inc/em_msg.h` | em-types | not started | |
 | 4 | `em-crypto` | `src/util_crypto/`, `src/em/crypto/` | — | not started | `util_crypto` is modified-BSD; prefer an existing crate over a port |
 | 5 | `em-dm` | `src/dm/` | em-types | not started | |
@@ -43,6 +43,8 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-18 | Design note [0004](docs/0004-runtime-and-ownership.md) accepted | tokio, actors, no `.clone()` (incl. `Arc`, `Rc`, senders), no `unsafe`; enforced by `clippy.toml` |
 | 2026-11-18 | Design note [0003: em-utils scope](docs/0003-em-utils-scope.md), two review rounds | round 1: 9 findings, all confirmed (incl. table is 68 rows, not 66); round 2: 3 doc corrections applied; **accepted** |
 | 2026-11-18 | em-utils Step 1: `tools/gen-upstream-freq-ranges`, unit tests, `upstream_freq_ranges.tsv` (work in progress) | 68 rows match an independent extraction; `--check` exit 0; 36 tests pass; bad upstream path exits 2. Bite tests: 3 of 4 caught; dropping the global `-` marker is **not** caught (follow-up). Not yet reviewed |
+| 2026-11-18 | em-utils Step 1 completed: literal fixture-text tests; review round 1 (6 findings) | `-` marker, header and fixture-row bite tests now caught. Fixed: block comment merged tokens (`8/**/1` read as `81`); added the D3 malformed-entry test at 68 rows. #1, #3, #5, #6 left as low (follow-ups) |
+| 2026-11-18 | em-utils Step 1 review round 2, plus one fix after it | both fixes confirmed. The comment fix broke an exact-text declaration match (`= /* c */{`); the declaration is now matched with any whitespace between tokens. That last fix was verified independently, but not reviewed (two-round limit) |
 
 ## Open follow-ups
 
@@ -54,7 +56,8 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | `classification.tsv` | 31 IEEE 1905.1-only rows provisional (names, references) until checked against 1905.1 | 0001 A2 |
 | `em-msg` | Upstream rejects received Multi-AP Profile ≥ 4; spec Table 69 says assume own profile | 0001 A1 |
 | `em-types` | Remaining `ADDITIONS` candidates absent upstream: TLV 0xDE and messages 0x8038–0x8042, 0x8048 (vBSS, spec Appendix B; not yet reviewed); media type 0x0000 (IEEE 1905.1, unverified). TLVs 0xE3 and 0xE5 were added in Step 2 | Step 1 |
-| `tools/test_gen_upstream_freq_ranges.py` | **Next step.** Add a test that pins literal fixture text (e.g. a global row ends in `\t-\n`); today tests compare only against `build_fixture()` itself, so dropping the `-` marker passes. Re-run that bite test, then review Step 1 | em-utils Step 1 verification |
-| `tools/gen-upstream-freq-ranges` | Low: non-atomic write (same as enums tool); region regex `re.match(...$)` accepts a trailing newline (counts backstop it); unused import in tests | em-utils Step 1 |
+| `tools/gen-upstream-freq-ranges` | Low: non-atomic write can leave a partial fixture on a failed write (same as enums tool; file is in git); region regex `re.match(...$)` accepts a trailing newline (counts backstop it) | em-utils Step 1, review #1 |
+| `tools/gen-upstream-freq-ranges` | Low: the declaration is also matched inside a string literal (e.g. a raw string holding the table text) | em-utils Step 1 review #3 |
+| `tools/test_gen_upstream_freq_ranges.py` | Low: `min_chan` range test still passes with that guard removed (the ordering error also names `min_chan`); the fixture-preservation test fails on row count before `spacing`; success-path tests do not check that `--check` leaves the file alone or that write mode writes the right bytes | em-utils Step 1 review #5, #6 |
 | `em-utils` table | Check preserved quirks (class 83 ch 1-13 vs comment "1-9", class 136 → 5937 MHz, class 1 min 34 in JP) against the IEEE op-class tables | 0003 D2 |
 | `classification.tsv` | Cross-check the 31 provisional 1905.1 names against `rdkcentral/ieee1905-rs` (`ieee1905-core/src/cmdu_codec.rs`: `CMDUType`, `IEEE1905TLVType`) as a secondary source until 1905.1 itself is available | Step 2 discussion |

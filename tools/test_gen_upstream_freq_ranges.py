@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
-import io
 import importlib.machinery
 import importlib.util
+import io
 import pathlib
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,14 +24,20 @@ def _suppress():
 # Test helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_rows(global_n=30, us_n=11, eu_n=11, jp_n=9, cn_n=7):
     """Return a list of rows with the given per-region counts.
 
     Values are minimal but valid: op_class 1, chan 1-2, base 2400, spacing 5.
     """
     rows = []
-    for region, count in [("", global_n), ("US", us_n), ("EU", eu_n),
-                           ("JP", jp_n), ("CN", cn_n)]:
+    for region, count in [
+        ("", global_n),
+        ("US", us_n),
+        ("EU", eu_n),
+        ("JP", jp_n),
+        ("CN", cn_n),
+    ]:
         for _ in range(count):
             rows.append((1, 1, 2, 2400, 5, region))
     return rows
@@ -43,7 +48,7 @@ def _rows_to_body(rows):
     parts = []
     for op_class, min_chan, max_chan, base_freq, spacing, region in rows:
         parts.append(
-            f"    {{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, \"{region}\"}}"
+            f'    {{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, "{region}"}}'
         )
     return ",\n".join(parts)
 
@@ -63,27 +68,32 @@ def _make_valid_source():
 # TestStripComments
 # ---------------------------------------------------------------------------
 
-class TestStripComments(unittest.TestCase):
 
+class TestStripComments(unittest.TestCase):
     def test_line_comment_removed(self):
         """// comment is removed up to (not including) the newline."""
-        result = gen.strip_comments('a // comment\nb')
-        self.assertEqual(result, 'a \nb')
+        result = gen.strip_comments("a // comment\nb")
+        self.assertEqual(result, "a \nb")
 
     def test_block_comment_removed(self):
         """/* ... */ is removed."""
-        result = gen.strip_comments('a /* comment */ b')
-        self.assertEqual(result, 'a  b')
+        result = gen.strip_comments("a /* comment */ b")
+        self.assertEqual(result, "a   b")
 
     def test_comment_with_comma_and_semicolon(self):
         """Commas and semicolons inside // and /* */ comments are stripped."""
-        result = gen.strip_comments('x // a, b; c\ny /* d; e, f */ z')
-        self.assertEqual(result, 'x \ny  z')
+        result = gen.strip_comments("x // a, b; c\ny /* d; e, f */ z")
+        self.assertEqual(result, "x \ny   z")
 
     def test_comment_with_braces(self):
         """Braces inside comments are stripped and do not affect brace counts."""
-        result = gen.strip_comments('a /* { */ b // }\nc')
-        self.assertEqual(result, 'a  b \nc')
+        result = gen.strip_comments("a /* { */ b // }\nc")
+        self.assertEqual(result, "a   b \nc")
+
+    def test_block_comment_separates_tokens(self):
+        """A block comment acts as a space, so 8/**/1 is not read as 81."""
+        result = gen.strip_comments("{8/**/1, 1}")
+        self.assertEqual(result, "{8 1, 1}")
 
     def test_double_slash_inside_string_not_a_comment(self):
         """// inside a quoted string is part of the string, not a comment."""
@@ -94,15 +104,15 @@ class TestStripComments(unittest.TestCase):
         """A " inside a // comment does not open a string state."""
         # After the comment the x should still be in normal state.
         result = gen.strip_comments('a // "open\nb')
-        self.assertEqual(result, 'a \nb')
+        self.assertEqual(result, "a \nb")
 
 
 # ---------------------------------------------------------------------------
 # TestExtract
 # ---------------------------------------------------------------------------
 
-class TestExtract(unittest.TestCase):
 
+class TestExtract(unittest.TestCase):
     def test_valid_small_initializer(self):
         """Extract returns rows with correct field order and exact values."""
         source = (
@@ -112,10 +122,13 @@ class TestExtract(unittest.TestCase):
             "};\n"
         )
         rows = gen.extract(source)
-        self.assertEqual(rows, [
-            (81, 1, 13, 2407, 5, ""),
-            (12, 2, 11, 2412, 10, "US"),
-        ])
+        self.assertEqual(
+            rows,
+            [
+                (81, 1, 13, 2407, 5, ""),
+                (12, 2, 11, 2412, 10, "US"),
+            ],
+        )
 
     def test_comment_with_comma_semicolon_brace_line(self):
         """// comments containing commas, semicolons and braces are stripped."""
@@ -181,12 +194,33 @@ class TestExtract(unittest.TestCase):
         rows = gen.extract(source)
         self.assertEqual(len(rows), 1)
 
+    def test_comment_between_equals_and_brace_accepted(self):
+        """A comment between '=' and '{' does not hide the declaration."""
+        source = (
+            "const std::vector<freq_range> frequency_ranges = /* note */{\n"
+            '    {81, 1, 13, 2407, 5, ""}\n'
+            "};\n"
+        )
+        rows = gen.extract(source)
+        self.assertEqual(rows, [(81, 1, 13, 2407, 5, "")])
+
+    def test_extra_whitespace_in_declaration_accepted(self):
+        """Any whitespace between declaration tokens is accepted."""
+        source = (
+            "const  std::vector< freq_range >\n"
+            "    frequency_ranges  =\n"
+            "{\n"
+            '    {81, 1, 13, 2407, 5, ""}\n'
+            "};\n"
+        )
+        rows = gen.extract(source)
+        self.assertEqual(rows, [(81, 1, 13, 2407, 5, "")])
+
     def test_zero_initializers_exit1(self):
         """No frequency_ranges initializer → exit 1."""
         source = "int x = 0;\n"
-        with self.assertRaises(SystemExit) as cm:
-            with _suppress():
-                gen.extract(source)
+        with self.assertRaises(SystemExit) as cm, _suppress():
+            gen.extract(source)
         self.assertEqual(cm.exception.code, 1)
 
     def test_two_initializers_exit1(self):
@@ -197,9 +231,8 @@ class TestExtract(unittest.TestCase):
             "};\n"
         )
         source = single + "\n" + single
-        with self.assertRaises(SystemExit) as cm:
-            with _suppress():
-                gen.extract(source)
+        with self.assertRaises(SystemExit) as cm, _suppress():
+            gen.extract(source)
         self.assertEqual(cm.exception.code, 1)
 
     def test_five_field_entry_exit1(self):
@@ -209,9 +242,8 @@ class TestExtract(unittest.TestCase):
             "    {1, 1, 2, 2400, 5}\n"
             "};\n"
         )
-        with self.assertRaises(SystemExit) as cm:
-            with _suppress():
-                gen.extract(source)
+        with self.assertRaises(SystemExit) as cm, _suppress():
+            gen.extract(source)
         self.assertEqual(cm.exception.code, 1)
 
     def test_unquoted_region_exit1(self):
@@ -221,9 +253,8 @@ class TestExtract(unittest.TestCase):
             "    {1, 1, 2, 2400, 5, US}\n"
             "};\n"
         )
-        with self.assertRaises(SystemExit) as cm:
-            with _suppress():
-                gen.extract(source)
+        with self.assertRaises(SystemExit) as cm, _suppress():
+            gen.extract(source)
         self.assertEqual(cm.exception.code, 1)
 
     def test_stray_token_between_entries_exit1(self):
@@ -232,13 +263,15 @@ class TestExtract(unittest.TestCase):
         entries = []
         for op_class, min_chan, max_chan, base_freq, spacing, region in rows:
             entries.append(
-                f"{{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, \"{region}\"}}"
+                f'{{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, "{region}"}}'
             )
         # Insert a stray token after the first entry so the total {} count is
         # still 68 but the parser hits unexpected text.
         entries[0] = entries[0] + ", stray_token"
         body = ",\n    ".join(entries)
-        source = f"const std::vector<freq_range> frequency_ranges = {{\n    {body}\n}};\n"
+        source = (
+            f"const std::vector<freq_range> frequency_ranges = {{\n    {body}\n}};\n"
+        )
         stderr_buf = io.StringIO()
         with contextlib.redirect_stderr(stderr_buf):
             with self.assertRaises(SystemExit) as cm:
@@ -254,15 +287,57 @@ class TestExtract(unittest.TestCase):
             '    {01, 1, 2, 2400, 5, ""}\n'
             "};\n"
         )
-        with self.assertRaises(SystemExit) as cm:
-            with _suppress():
+        with self.assertRaises(SystemExit) as cm, _suppress():
+            gen.extract(source)
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_block_comment_inside_number_exit1(self):
+        """A block comment inside a number splits it into two tokens, causing a parse error."""
+        rows = _make_rows()
+        entries = []
+        for op_class, min_chan, max_chan, base_freq, spacing, region in rows:
+            entries.append(
+                f'{{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, "{region}"}}'
+            )
+        entries[0] = '{8/**/1, 1, 13, 2407, 5, ""}'
+        body = ",\n    ".join(entries)
+        source = (
+            f"const std::vector<freq_range> frequency_ranges = {{\n    {body}\n}};\n"
+        )
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            with self.assertRaises(SystemExit) as cm:
                 gen.extract(source)
         self.assertEqual(cm.exception.code, 1)
+        self.assertIn("expected ',' after integer", stderr_buf.getvalue())
+
+    def test_five_field_entry_in_full_table_exit1(self):
+        """A 68-entry table with one 5-field entry is rejected by the entry parser."""
+        rows = _make_rows()
+        entries = []
+        for op_class, min_chan, max_chan, base_freq, spacing, region in rows:
+            entries.append(
+                f'{{{op_class}, {min_chan}, {max_chan}, {base_freq}, {spacing}, "{region}"}}'
+            )
+        entries[10] = "{1, 1, 2, 2400, 5}"
+        body = ",\n    ".join(entries)
+        source = (
+            f"const std::vector<freq_range> frequency_ranges = {{\n    {body}\n}};\n"
+        )
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            with self.assertRaises(SystemExit) as cm:
+                gen.extract(source)
+        self.assertEqual(cm.exception.code, 1)
+        # The fifth integer must be followed by a comma, so the entry parser
+        # rejects it here, before any row-count check could run.
+        self.assertIn("expected ',' after integer", stderr_buf.getvalue())
 
 
 # ---------------------------------------------------------------------------
 # TestValidate
 # ---------------------------------------------------------------------------
+
 
 class TestValidate(unittest.TestCase):
     """Each rule in validate() is exercised with a targeted bad input."""
@@ -377,8 +452,44 @@ class TestValidate(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# TestBuildFixture
+# ---------------------------------------------------------------------------
+
+
+class TestBuildFixture(unittest.TestCase):
+    def test_literal_text_global_and_regional_rows(self):
+        """Fixture text is pinned literally: header, tab columns, '-' for a global row."""
+        rows = [(81, 1, 13, 2407, 5, ""), (12, 1, 11, 2407, 5, "US")]
+        expected = (
+            "# Generated by tools/gen-upstream-freq-ranges. Do not edit by hand.\n"
+            "# Source: rdkcentral/unified-wifi-mesh src/utils/util.cpp"
+            " @ ba4180ba36748629f10c20babc4320dd69c9db4f\n"
+            "# Regenerate: tools/gen-upstream-freq-ranges\n"
+            "# Check: tools/gen-upstream-freq-ranges --check\n"
+            "# SPDX-License-Identifier: Apache-2.0\n"
+            "op_class\tmin_chan\tmax_chan\tbase_freq\tspacing\tregion\n"
+            "81\t1\t13\t2407\t5\t-\n"
+            "12\t1\t11\t2407\t5\tUS\n"
+        )
+        self.assertEqual(gen.build_fixture(rows), expected)
+
+    def test_committed_fixture_first_and_last_rows(self):
+        """The committed fixture starts and ends with the upstream rows."""
+        fixture_path = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "crates/em-utils/tests/data/upstream_freq_ranges.tsv"
+        )
+        text = fixture_path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        self.assertEqual(lines[6], "81\t1\t13\t2407\t5\t-")
+        self.assertEqual(lines[-1], "6\t149\t157\t5000\t5\tCN")
+        self.assertEqual(len(lines), 74)
+
+
+# ---------------------------------------------------------------------------
 # TestMain
 # ---------------------------------------------------------------------------
+
 
 class TestMain(unittest.TestCase):
     """main() tests use a patched read_source so no upstream checkout is needed."""

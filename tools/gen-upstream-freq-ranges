@@ -34,6 +34,10 @@ EXPECTED_COUNTS = {"": 30, "US": 11, "EU": 11, "JP": 9, "CN": 7}
 _RE_INT = re.compile(r'0|[1-9][0-9]*')
 # Whitespace pattern used for anchored skips.
 _RE_WS = re.compile(r'\s*')
+# The table declaration; any whitespace may separate its tokens.
+_RE_DECL = re.compile(
+    r"const\s+std\s*::\s*vector\s*<\s*freq_range\s*>\s+frequency_ranges\s*=\s*\{"
+)
 
 
 def die(msg, code=1):
@@ -63,8 +67,8 @@ def read_source(upstream_path):
 def strip_comments(source):
     """Remove // and /* */ comments but not inside double-quoted strings.
 
-    Uses a character-by-character state machine. Preserves newlines from
-    line comments so that line numbers remain meaningful in error messages.
+    Uses a character-by-character state machine. Line comments keep their
+    newline; a block comment becomes one space.
     Dies on unterminated strings or block comments (exit 1).
     """
     result = []
@@ -107,6 +111,8 @@ def strip_comments(source):
             if i >= n:
                 die("error: unterminated block comment in source", 1)
             i += 2  # skip */
+            # A comment separates tokens, like whitespace: 8/**/1 is not 81.
+            result.append(" ")
 
         else:
             result.append(c)
@@ -228,8 +234,8 @@ def extract(source):
     """
     stripped = strip_comments(source)
 
-    marker = "const std::vector<freq_range> frequency_ranges = {"
-    count = stripped.count(marker)
+    matches = list(_RE_DECL.finditer(stripped))
+    count = len(matches)
     if count == 0:
         die("error: frequency_ranges initializer not found in source", 1)
     if count > 1:
@@ -239,7 +245,7 @@ def extract(source):
             1,
         )
 
-    start = stripped.index(marker) + len(marker)
+    start = matches[0].end()
 
     # Find the matching }; by tracking brace depth (depth 1 = inside outer {).
     depth = 1
