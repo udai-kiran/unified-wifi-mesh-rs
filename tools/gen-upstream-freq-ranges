@@ -4,14 +4,25 @@
 Reads src/utils/util.cpp from the pinned upstream commit via git and
 extracts the frequency_ranges table, writes (or checks) the fixture at
 crates/em-utils/tests/data/upstream_freq_ranges.tsv.
+
+Contract and known limits: the tool reads only the pinned upstream file and
+is not a C preprocessor. It fails loudly (exit 1) on the constructs it does
+not support, such as raw or prefixed literals, digit separators and
+digraphs. Known limits, not handled:
+- R2-05: conservative rejections such as SIGN_''x'' style tokens or "<::".
+- R2-06: a failed temp cleanup is not reported.
+On any change to PINNED_COMMIT, re-extract the fixture independently and
+compare before trusting --check.
 """
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
 import difflib
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PINNED_COMMIT = "ba4180ba36748629f10c20babc4320dd69c9db4f"
@@ -45,6 +56,56 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+# Constructs the generators do not parse. The pinned upstream files contain
+# none of them in code, so a match means the source changed and must be
+# reviewed by a person.
+_RAW_STRING_PREFIXES = ("R", "LR", "uR", "UR", "u8R")
+_STRING_PREFIXES = ("L", "u", "U", "u8")
+_DIGRAPHS = ("<%", "%>", "<:", ":>", "%:")
+_TRIGRAPH_THIRD_CHARS = "=/'()!<>-"
+
+
+def splice_lines(text):
+    """Remove every backslash-newline pair (C translation phase 2)."""
+    return re.sub(r"\\\r?\n", "", text)
+
+
+def _identifier_before(text, end):
+    """Return the run of identifier characters that ends just before end."""
+    start = end
+    while start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        start -= 1
+    return text[start:end]
+
+
+def _reject_unsupported_quote(text, quote_pos):
+    """Die (exit 1) if the quote at quote_pos starts a literal we do not parse.
+
+    Called only for a quote seen in code, outside comments and literals.
+    """
+    prefix = _identifier_before(text, quote_pos)
+    if text[quote_pos] == "'":
+        if prefix:
+            die(
+                "error: unsupported digit separator or prefixed character"
+                f" literal in source: {prefix}'",
+                1,
+            )
+    elif prefix in _RAW_STRING_PREFIXES:
+        die(f"error: unsupported raw string literal in source: {prefix}\"", 1)
+    elif prefix in _STRING_PREFIXES:
+        die(f"error: unsupported prefixed string literal in source: {prefix}\"", 1)
+
+
+def _reject_digraph_or_trigraph(text, pos):
+    """Die (exit 1) if a digraph or trigraph starts at pos in code."""
+    pair = text[pos:pos + 2]
+    if pair in _DIGRAPHS:
+        die(f"error: unsupported digraph {pair!r} in source", 1)
+    if pair == "??" and pos + 2 < len(text) and text[pos + 2] in _TRIGRAPH_THIRD_CHARS:
+        die(f"error: unsupported trigraph {text[pos:pos + 3]!r} in source", 1)
+
+
 def read_source(upstream_path):
     """Read the C++ source from the pinned commit via git."""
     try:
@@ -64,12 +125,35 @@ def read_source(upstream_path):
         die(f"error: git output is not valid UTF-8: {exc}", 2)
 
 
+def _literal_end(source, start):
+    """Return the index just past the string or char literal opening at start.
+
+    source[start] is '"' or "'". Backslash escapes are skipped. Raw and
+    prefixed literals never get here: strip_comments rejects them first.
+    Returns None if the literal is not terminated.
+    """
+    quote = source[start]
+    i = start + 1
+    n = len(source)
+    while i < n:
+        c = source[i]
+        if c == '\\':
+            i += 2
+        elif c == quote:
+            return i + 1
+        else:
+            i += 1
+    return None
+
+
 def strip_comments(source):
-    """Remove // and /* */ comments but not inside double-quoted strings.
+    """Remove // and /* */ comments but not inside string or char literals.
 
     Uses a character-by-character state machine. Line comments keep their
-    newline; a block comment becomes one space.
-    Dies on unterminated strings or block comments (exit 1).
+    newline; a block comment becomes one space. Expects spliced text (see
+    splice_lines). Dies (exit 1) on unterminated literals or block comments
+    and on raw or prefixed literals, digit separators, digraphs and trigraphs
+    in code.
     """
     result = []
     i = 0
@@ -77,25 +161,14 @@ def strip_comments(source):
     while i < n:
         c = source[i]
 
-        if c == '"':
-            # String literal: copy verbatim including escape sequences.
-            result.append(c)
-            i += 1
-            closed = False
-            while i < n:
-                c2 = source[i]
-                result.append(c2)
-                i += 1
-                if c2 == '\\':
-                    # Escape sequence: include next char too.
-                    if i < n:
-                        result.append(source[i])
-                        i += 1
-                elif c2 == '"':
-                    closed = True
-                    break
-            if not closed:
+        if c == '"' or c == "'":
+            # String or char literal: copy verbatim including escapes.
+            _reject_unsupported_quote(source, i)
+            end = _literal_end(source, i)
+            if end is None:
                 die("error: unterminated string literal in source", 1)
+            result.append(source[i:end])
+            i = end
 
         elif source[i:i+2] == '//':
             # Line comment: skip to end of line, keep the newline itself.
@@ -115,9 +188,36 @@ def strip_comments(source):
             result.append(" ")
 
         else:
+            _reject_digraph_or_trigraph(source, i)
             result.append(c)
             i += 1
 
+    return ''.join(result)
+
+
+def mask_literals(text):
+    """Blank out the contents of string and char literals, keeping the length.
+
+    Expects comment-free text (see strip_comments). The result is used to
+    find code tokens, so a table declaration quoted inside a string does not
+    match; indexes into the result are valid indexes into text.
+    """
+    result = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            end = _literal_end(text, i)
+            if end is None:
+                die("error: unterminated string literal in source", 1)
+            result.append(c)
+            result.append(' ' * (end - i - 2))
+            result.append(text[end - 1])
+            i = end
+        else:
+            result.append(c)
+            i += 1
     return ''.join(result)
 
 
@@ -232,9 +332,11 @@ def extract(source):
     Returns a list of (op_class, min_chan, max_chan, base_freq, spacing, region)
     tuples in table order. Dies on structural errors (exit 1).
     """
-    stripped = strip_comments(source)
+    stripped = strip_comments(splice_lines(source))
+    # Locate the declaration and its braces in code only, not in literals.
+    code = mask_literals(stripped)
 
-    matches = list(_RE_DECL.finditer(stripped))
+    matches = list(_RE_DECL.finditer(code))
     count = len(matches)
     if count == 0:
         die("error: frequency_ranges initializer not found in source", 1)
@@ -250,9 +352,9 @@ def extract(source):
     # Find the matching }; by tracking brace depth (depth 1 = inside outer {).
     depth = 1
     i = start
-    n = len(stripped)
+    n = len(code)
     while i < n and depth > 0:
-        c = stripped[i]
+        c = code[i]
         if c == '{':
             depth += 1
         elif c == '}':
@@ -264,7 +366,7 @@ def extract(source):
 
     # i is one past the closing }.  Check the ; follows.
     close_pos = i - 1
-    after = stripped[i:].lstrip()
+    after = code[i:].lstrip()
     if not after.startswith(';'):
         die("error: expected ';' after frequency_ranges closing '}'", 1)
 
@@ -294,7 +396,7 @@ def validate(rows):
             die(f"error: row {idx}: min_chan {min_chan} > max_chan {max_chan}", 1)
         if spacing == 0:
             die(f"error: row {idx}: spacing must be > 0", 1)
-        if region != "" and not re.match(r'^[A-Z]{2}$', region):
+        if region != "" and not re.fullmatch(r'[A-Z]{2}', region):
             die(
                 f"error: row {idx}: region {region!r} must be empty"
                 f" or two uppercase ASCII letters",
@@ -332,6 +434,32 @@ def build_fixture(rows):
             f"{op_class}\t{min_chan}\t{max_chan}\t{base_freq}\t{spacing}\t{region_col}\n"
         )
     return FIXTURE_HEADER + "".join(lines)
+
+
+def write_atomically(path, data):
+    """Write data to path so a failure never leaves a partial file.
+
+    The data goes to a temp file in the same directory, then os.replace
+    swaps it in. Raises OSError; the temp file is removed on failure. The
+    temp name is short and fixed-prefix so a destination name of any legal
+    length still works.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as temp_file:
+            temp_file.write(data)
+        # mkstemp creates 0600; the fixture is a normal tracked file.
+        os.chmod(temp_name, 0o644)
+        os.replace(temp_name, path)
+    except BaseException:
+        # The temp name is already gone if os.replace succeeded before an
+        # interrupt arrived. Cleanup must never replace the original error.
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
 
 
 def main():
@@ -400,8 +528,7 @@ def main():
             sys.exit(1)
     else:
         try:
-            args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_bytes(fixture_bytes)
+            write_atomically(args.out, fixture_bytes)
         except OSError as exc:
             die(f"error: cannot write fixture file: {exc}", 2)
 

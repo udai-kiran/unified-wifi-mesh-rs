@@ -6,9 +6,12 @@ use core::fmt;
 
 /// Wraps a byte slice so that `Display` prints a hex dump.
 ///
-/// The text is byte-for-byte the same as upstream `print_hex_dump`
-/// (`src/utils/util.cpp:214-259`), assuming the C locale, where printable
-/// means `0x20..=0x7e`. Each line holds up to 16 bytes:
+/// For inputs up to `u32::MAX` bytes, the text is byte-for-byte the same as
+/// upstream `print_hex_dump` (`src/utils/util.cpp:218-259`), assuming the C
+/// locale, where printable means `0x20..=0x7e`. Upstream takes the length as
+/// `unsigned int` (`inc/util.h:170`), and its `std::vector` overload casts
+/// `data.size()` to `unsigned int` (`util.cpp:216`), so a longer input would be
+/// cut short there. This port does not cut it. Each line holds up to 16 bytes:
 ///
 /// - the offset as `"  {offset:04x} "` (more digits above `0xffff`),
 /// - each byte as `" {byte:02x}"`,

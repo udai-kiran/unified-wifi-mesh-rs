@@ -149,6 +149,148 @@ class TestStripComments(unittest.TestCase):
         self.assertEqual(gen.strip_comments('"a//b/*c*/"'), '"a//b/*c*/"')
 
 
+class TestLiteralAwareScan(unittest.TestCase):
+    """Strings and char literals must not look like code to the scanner."""
+
+    def test_double_quote_char_literal_does_not_start_string(self):
+        self.assertEqual(gen.strip_comments("c = '\"'; // c\nd"), "c = '\"'; \nd")
+
+    def test_comment_marker_inside_char_literal_kept(self):
+        self.assertEqual(gen.strip_comments("c = '//'; d"), "c = '//'; d")
+
+    def test_escaped_quote_char_literal(self):
+        self.assertEqual(gen.mask_literals("a '\\'' b"), "a '  ' b")
+
+    def test_unterminated_char_literal_dies(self):
+        with _suppress(), self.assertRaises(SystemExit) as cm:
+            gen.strip_comments("c = 'x;\n")
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_mask_blanks_literal_contents_only(self):
+        self.assertEqual(gen.mask_literals('f("{x}", \'}\');'), 'f("   ", \' \');')
+
+    def test_brace_in_char_literal_does_not_end_body(self):
+        text = "{ c = '}'; d = '{'; \"}\"; }"
+        close = gen._matching_brace(gen.mask_literals(text), 0, "x")
+        self.assertEqual(close, len(text) - 1)
+
+    def test_declaration_shaped_string_ignored(self):
+        other = 'void other()\n{\n    puts("void em_msg_t::fake() {");\n}\n'
+        tables, _ = _extract(
+            other + _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])])
+        )
+        self.assertEqual([name for name, _ in tables], ["t"])
+
+    def test_brace_char_literal_in_constructor_does_not_end_it(self):
+        src = _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])]).replace(
+            "m_type = type;", "m_type = type; char c = '}';"
+        )
+        tables, mappings = _extract(src)
+        self.assertEqual(mappings, [("em_msg_type_a", "-", "t")])
+
+    def test_double_quote_char_literal_in_constructor_extracts(self):
+        src = _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])]).replace(
+            "m_type = type;", "m_type = type; char q = '\"';"
+        )
+        tables, mappings = _extract(src)
+        self.assertEqual(mappings, [("em_msg_type_a", "-", "t")])
+
+    def test_constructor_signature_in_string_is_not_a_second_constructor(self):
+        """R1-08: the constructor is found in masked text."""
+        decoy = (
+            'void other()\n{\n    puts("em_msg_t::em_msg_t(em_msg_type_t type,'
+            " em_profile_type_t profile, unsigned char *tlvs, unsigned int len)"
+            ' {");\n}\n'
+        )
+        src = decoy + _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])])
+        _, mappings = _extract(src)
+        self.assertEqual(mappings, [("em_msg_type_a", "-", "t")])
+
+    def test_switch_in_string_is_not_a_second_switch(self):
+        """R1-08: the constructor's switch is found in masked text."""
+        src = _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])]).replace(
+            "m_type = type;", 'm_type = type; puts("switch (type) {");'
+        )
+        _, mappings = _extract(src)
+        self.assertEqual(mappings, [("em_msg_type_a", "-", "t")])
+
+    def test_case_label_in_string_is_not_a_label(self):
+        """R1-08: case labels are found in masked text."""
+        src = _table("t", _row()) + _ctor([("em_msg_type_a", ["t"])]).replace(
+            "    switch (type) {\n",
+            '    switch (type) {\n        puts("case em_msg_type_zz:");\n',
+        )
+        _, mappings = _extract(src)
+        self.assertEqual(mappings, [("em_msg_type_a", "-", "t")])
+
+
+UNSUPPORTED_LEXICAL_LINES = {
+    "raw string": 'const char* d = R"x(a)x";\n',
+    "prefixed raw string": 'const char* d = u8R"x(a)x";\n',
+    "prefixed char": "wchar_t c = L'x';\n",
+    "prefixed string": 'const char* d = u8"x";\n',
+    "digit separator": "int n = 1'000;\n",
+    "digraph": "int a %: 1;\n",
+    "trigraph": "int a ??= 1;\n",
+}
+
+
+class TestUnsupportedLexing(unittest.TestCase):
+    """One lexing rule: splice lines, then reject constructs we do not parse."""
+
+    def _exit_of(self, func, *args):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit) as cm:
+            func(*args)
+        return cm.exception.code, buf.getvalue()
+
+    def test_each_construct_rejected_in_source_and_header(self):
+        for label, line in UNSUPPORTED_LEXICAL_LINES.items():
+            with self.subTest(label, file="source"):
+                code, err = self._exit_of(_extract, line + _small_source())
+                self.assertEqual(code, 1)
+                self.assertIn("unsupported", err)
+            with self.subTest(label, file="header"):
+                code, err = self._exit_of(gen.read_ext_dev_info_sz, line + BASE_H)
+                self.assertEqual(code, 1)
+                self.assertIn("unsupported", err)
+
+    def test_raw_string_decoy_around_source_rejected(self):
+        """R1-02: a raw string holding a lone quote cannot expose a payload."""
+        src = 'const char* doc = R"tag("\n")tag";\n' + _small_source()
+        code, err = self._exit_of(_extract, src)
+        self.assertEqual(code, 1)
+        self.assertIn("raw string", err)
+
+    def test_digit_separators_around_source_rejected(self):
+        """R1-02: paired digit separators cannot hide a declaration."""
+        src = "int n = 1'000;\n" + _small_source() + "int m = 2'000;\n"
+        code, err = self._exit_of(_extract, src)
+        self.assertEqual(code, 1)
+        self.assertIn("digit separator", err)
+
+    def test_constructs_inside_comments_and_plain_literals_allowed(self):
+        """The rejections apply to code only, not to comments or plain literals."""
+        src = (
+            "// R\"( L'x' 1'000 %: ??=\n/* u8\"x\" <% */\n"
+            'const char* d = "%: ??= R\\"(";\nchar c = \'x\';\n' + _small_source()
+        )
+        tables, _ = _extract(src)
+        self.assertEqual([name for name, _ in tables], ["first", "second"])
+
+    def test_line_splice_inside_identifier_is_removed(self):
+        """A backslash-newline inside a table name is spliced out first."""
+        src = _small_source().replace("void em_msg_t::first()", "void em_msg_t::fi\\\nrst()")
+        tables, _ = _extract(src)
+        self.assertEqual([name for name, _ in tables], ["first", "second"])
+
+    def test_line_splice_joins_comment_opener(self):
+        """A spliced '/' + '/' comments out the rest of the line."""
+        src = "/\\\n/ int n = 1'000;\n" + _small_source()
+        tables, _ = _extract(src)
+        self.assertEqual([name for name, _ in tables], ["first", "second"])
+
+
 # ---------------------------------------------------------------------------
 # TestExtract
 # ---------------------------------------------------------------------------
@@ -490,6 +632,120 @@ class TestReadExtDevInfoSz(unittest.TestCase):
         with _suppress(), self.assertRaises(SystemExit):
             gen.read_ext_dev_info_sz("#define EMEX_MIN_EXT_DEV_INFO_SZ 0x10\n")
 
+    def _assert_read_dies(self, text, message):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit) as cm:
+            gen.read_ext_dev_info_sz(text)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn(message, buf.getvalue())
+
+    def test_include_guard_is_allowed(self):
+        text = "#ifndef EM_BASE_H\n#define EM_BASE_H\n" + BASE_H + "#endif\n"
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_define_after_closed_conditional_is_allowed(self):
+        text = "#ifdef A\n#endif\n" + BASE_H
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_define_inside_if_0_rejected(self):
+        self._assert_read_dies("#if 0\n" + BASE_H + "#endif\n", "inside a preprocessor conditional")
+
+    def test_define_inside_ifdef_within_guard_rejected(self):
+        text = "#ifndef G\n#define G\n#ifdef A\n" + BASE_H + "#endif\n#endif\n"
+        self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_define_inside_conditional_without_guard_rejected(self):
+        self._assert_read_dies("#ifndef A\n" + BASE_H + "#endif\n", "inside a preprocessor conditional")
+
+    def test_undef_after_define_rejected(self):
+        self._assert_read_dies(BASE_H + "#undef EMEX_MIN_EXT_DEV_INFO_SZ\n", "is #undef'd")
+
+    def test_second_define_rejected(self):
+        self._assert_read_dies(
+            BASE_H + "#define EMEX_MIN_EXT_DEV_INFO_SZ 17\n", "found 2"
+        )
+
+    def test_other_macro_with_same_prefix_ignored(self):
+        text = BASE_H + "#undef EMEX_MIN_EXT_DEV_INFO_SZ_OTHER\n"
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_source_file_define_or_undef_rejected(self):
+        for line in ("#define EMEX_MIN_EXT_DEV_INFO_SZ 99\n", "#undef EMEX_MIN_EXT_DEV_INFO_SZ\n"):
+            with self.subTest(line=line), _suppress(), self.assertRaises(SystemExit) as cm:
+                gen.reject_ext_dev_info_directives("int x;\n" + line, "em_msg.cpp")
+            self.assertEqual(cm.exception.code, 1)
+
+    def test_define_after_closed_if_0_rejected(self):
+        """R1-03: a define in a later '#if 0' is conditional, guard or not."""
+        text = "#ifndef G\n#define G\n#endif\n#if 0\n" + BASE_H + "#endif\n"
+        self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_define_in_guard_else_branch_rejected(self):
+        text = "#ifndef G\n#define G\n#else\n" + BASE_H + "#endif\n"
+        self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_define_in_guard_elif_branch_rejected(self):
+        text = "#ifndef G\n#define G\n#elif 0\n" + BASE_H + "#endif\n"
+        self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_define_in_guard_elifdef_branch_rejected(self):
+        for directive in ("#elifdef A", "#elifndef A"):
+            with self.subTest(directive):
+                text = "#ifndef G\n#define G\n" + directive + "\n" + BASE_H + "#endif\n"
+                self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_define_in_conditional_that_is_not_the_last_endif_rejected(self):
+        """The guard must be closed by the file's last #endif."""
+        text = "#ifndef G\n#define G\n" + BASE_H + "#endif\n#ifdef A\n#endif\n"
+        self._assert_read_dies(text, "inside a preprocessor conditional")
+
+    def test_else_after_the_define_is_allowed(self):
+        text = "#ifndef G\n#define G\n" + BASE_H + "#else\n#endif\n"
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_closed_sibling_conditional_inside_guard_is_allowed(self):
+        text = "#ifndef G\n#define G\n#if A\n#endif\n" + BASE_H + "#endif\n"
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_define_text_inside_string_literal_not_counted(self):
+        """A directive must start its logical line; literal text is not one."""
+        text = 'const char* s = "#define EMEX_MIN_EXT_DEV_INFO_SZ 99";\n' + BASE_H
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_spliced_directive_in_header_is_read(self):
+        """R1-04: '#def' + backslash-newline + 'ine' is a define."""
+        text = "#def\\\nine EMEX_MIN_EXT_DEV_INFO_SZ 16\n"
+        self.assertEqual(gen.read_ext_dev_info_sz(text), 16)
+
+    def test_spliced_undef_in_header_rejected(self):
+        self._assert_read_dies(BASE_H + "#un\\\ndef EMEX_MIN_EXT_DEV_INFO_SZ\n", "is #undef'd")
+
+    def test_digraph_directives_in_header_rejected(self):
+        """R1-04: %:if 0 / %:endif around a define cannot disable it silently."""
+        self._assert_read_dies("%:if 0\n" + BASE_H + "%:endif\n", "digraph")
+
+    def test_spliced_undef_in_source_file_rejected(self):
+        """R1-04: '#un' + backslash-newline + 'def' is an #undef."""
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit) as cm:
+            gen.reject_ext_dev_info_directives(
+                "int x;\n#un\\\ndef EMEX_MIN_EXT_DEV_INFO_SZ\n", "em_msg.cpp"
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("must not touch", buf.getvalue())
+
+    def test_digraph_undef_in_source_file_rejected(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit) as cm:
+            gen.reject_ext_dev_info_directives(
+                "int x;\n%:undef EMEX_MIN_EXT_DEV_INFO_SZ\n", "em_msg.cpp"
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("digraph", buf.getvalue())
+
+    def test_source_file_without_directive_accepted(self):
+        gen.reject_ext_dev_info_directives("int x = EMEX_MIN_EXT_DEV_INFO_SZ;\n", "em_msg.cpp")
+
 
 # ---------------------------------------------------------------------------
 # TestValidate
@@ -762,6 +1018,15 @@ class TestMain(unittest.TestCase):
             after = out.read_bytes()
         self.assertEqual(code, 1)
         self.assertEqual(after, original)
+
+    def test_source_undef_of_ext_dev_info_sz_exits_1(self):
+        source = _full_source() + "#undef EMEX_MIN_EXT_DEV_INFO_SZ\n"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "out.tsv"
+            code, _, err = self._run_main(["prog", "--out", str(out)], source)
+            self.assertEqual(code, 1)
+            self.assertIn("must not touch EMEX_MIN_EXT_DEV_INFO_SZ", err)
+            self.assertFalse(out.exists())
 
     def test_wrong_header_constant_exits_1(self):
         with tempfile.TemporaryDirectory() as tmpdir:

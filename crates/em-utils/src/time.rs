@@ -110,6 +110,32 @@ mod tests {
     }
 
     #[test]
+    fn year_2000_is_a_leap_year() {
+        // Divisible by 400: 2000-02-29 exists.
+        assert_eq!(
+            text_at_secs(951_782_400).as_deref(),
+            Some("2000-02-29T00:00:00Z")
+        );
+        assert_eq!(
+            text_at_secs(951_868_800).as_deref(),
+            Some("2000-03-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn year_2100_is_not_a_leap_year() {
+        // Divisible by 100 but not 400: the day after 2100-02-28 is 2100-03-01.
+        assert_eq!(
+            text_at_secs(4_107_542_400).as_deref(),
+            Some("2100-03-01T00:00:00Z")
+        );
+        assert_eq!(
+            text_at_secs(4_107_542_400 - 86_400).as_deref(),
+            Some("2100-02-28T00:00:00Z")
+        );
+    }
+
+    #[test]
     fn year_end() {
         assert_eq!(
             text_at_secs(1_704_067_199).as_deref(),

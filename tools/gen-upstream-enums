@@ -7,6 +7,25 @@ fixture at crates/em-types/tests/data/upstream_enums.tsv.
 
 Also validates the hand-maintained classification.tsv against the fixture.
 A missing classification file is an error unless --no-classification is given.
+
+Contract and known limits: the tool reads only the pinned upstream header and
+is not a C preprocessor. It fails loudly (exit 1) on the constructs it does
+not support: any C trigraph anywhere in the header (including comments and
+string literals), preprocessor directives, raw or prefixed literals, digit
+separators and digraphs inside an enum body, and a backslash-newline
+anywhere except a #define directive.
+
+Correctness rests on two things: the trigraph ban, which makes C translation
+phase 1 the identity so that this tool's line splicing equals the compiler's,
+and exact splicing (a backslash followed by LF or CRLF; a final backslash
+with no newline is not a splice). The define-only splice rule is a
+conservative extra, not a proof: it is not comment-aware, so it may accept or
+reject a splice for the wrong reason (a "#define" inside a block comment, say)
+and must not be relied on. The spliced text is checked for trigraphs again,
+because a splice can join "?" and "?-" into one. Known limits, not handled:
+- R2-05: conservative rejections such as SIGN_''x'' style tokens or "<::".
+On any change to PINNED_COMMIT, re-extract the fixture independently and
+compare before trusting --check.
 """
 # SPDX-License-Identifier: Apache-2.0
 
@@ -48,6 +67,198 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+# Constructs the generators do not parse. The pinned upstream files contain
+# none of them in code, so a match means the source changed and must be
+# reviewed by a person.
+_RAW_STRING_PREFIXES = ("R", "LR", "uR", "UR", "u8R")
+_STRING_PREFIXES = ("L", "u", "U", "u8")
+_DIGRAPHS = ("<%", "%>", "<:", ":>", "%:")
+_TRIGRAPH_THIRD_CHARS = "=/'()!<>-"
+
+
+def reject_trigraphs(text):
+    """Die (exit 1) on any C trigraph anywhere in text, naming its line.
+
+    Run on the raw header, before splicing and masking. Trigraphs are replaced
+    in translation phase 1, even inside comments and string literals, and
+    ??/ becomes a backslash that can splice lines or escape a quote. Rejecting
+    them all keeps the tool's view of the text identical to the compiler's.
+    """
+    match = re.search("\\?\\?[" + re.escape(_TRIGRAPH_THIRD_CHARS) + "]", text)
+    if match is not None:
+        line_number = text.count("\n", 0, match.start()) + 1
+        die(
+            f"error: line {line_number}: trigraph '{match.group()}'"
+            " is not supported",
+            1,
+        )
+
+
+def splice_lines(text):
+    """Remove every backslash-newline pair (C translation phase 2)."""
+    return re.sub(r"\\\r?\n", "", text)
+
+
+def _identifier_before(text, end):
+    """Return the run of identifier characters that ends just before end."""
+    start = end
+    while start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        start -= 1
+    return text[start:end]
+
+
+def _reject_unsupported_quote(text, quote_pos):
+    """Die (exit 1) if the quote at quote_pos starts a literal we do not parse.
+
+    Called only for a quote seen in code, outside comments and literals.
+    """
+    prefix = _identifier_before(text, quote_pos)
+    if text[quote_pos] == "'":
+        if prefix:
+            die(
+                "error: unsupported digit separator or prefixed character"
+                f" literal in source: {prefix}'",
+                1,
+            )
+    elif prefix in _RAW_STRING_PREFIXES:
+        die(f"error: unsupported raw string literal in source: {prefix}\"", 1)
+    elif prefix in _STRING_PREFIXES:
+        die(f"error: unsupported prefixed string literal in source: {prefix}\"", 1)
+
+
+def _reject_digraph_or_trigraph(text, pos):
+    """Die (exit 1) if a digraph or trigraph starts at pos in code."""
+    pair = text[pos:pos + 2]
+    if pair in _DIGRAPHS:
+        die(f"error: unsupported digraph {pair!r} in source", 1)
+    if pair == "??" and pos + 2 < len(text) and text[pos + 2] in _TRIGRAPH_THIRD_CHARS:
+        die(f"error: unsupported trigraph {text[pos:pos + 3]!r} in source", 1)
+
+
+def _literal_end(text, start):
+    """Return the index just after the string or char literal that starts at start.
+
+    Backslash escapes are skipped. Dies (exit 1) if the literal is not closed.
+    """
+    quote = text[start]
+    i = start + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+        elif text[i] == quote:
+            return i + 1
+        else:
+            i += 1
+    die("error: unterminated string or character literal in enum body", 1)
+
+
+def strip_comments(text):
+    """Replace every // and /* */ comment with whitespace, outside literals.
+
+    A line comment keeps its newline; a block comment becomes one space.
+    Expects spliced text (see splice_lines). Dies (exit 1) on an unterminated
+    literal or block comment and on raw or prefixed literals, digit
+    separators, digraphs and trigraphs in code.
+    """
+    result = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            _reject_unsupported_quote(text, i)
+            end = _literal_end(text, i)
+            result.append(text[i:end])
+            i = end
+        elif text[i:i + 2] == "//":
+            i += 2
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text[i:i + 2] == "/*":
+            i += 2
+            while i < n and text[i:i + 2] != "*/":
+                i += 1
+            if i >= n:
+                die("error: unterminated block comment in enum body", 1)
+            i += 2
+            result.append(" ")
+        else:
+            _reject_digraph_or_trigraph(text, i)
+            result.append(c)
+            i += 1
+    return "".join(result)
+
+def blank_comments(text, blank_literals):
+    """Return text of the same length with every comment turned into spaces.
+
+    Newlines are kept, so offsets and line numbers match the input. With
+    blank_literals the contents of string and character literals are blanked
+    too (the quotes stay), so braces and keywords inside them cannot match.
+    Expects spliced text. It is used on the whole header, so it rejects only
+    what would make the lexing unreliable: unterminated literals or comments,
+    and raw or prefixed literals and digit separators in code.
+    """
+    result = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            _reject_unsupported_quote(text, i)
+            end = _literal_end(text, i)
+            literal = text[i:end]
+            if blank_literals:
+                inner = re.sub(r"[^\n]", " ", literal[1:-1])
+                literal = literal[0] + inner + literal[-1]
+            result.append(literal)
+            i = end
+        elif text[i:i + 2] == "//":
+            end = text.find("\n", i)
+            if end == -1:
+                end = n
+            result.append(" " * (end - i))
+            i = end
+        elif text[i:i + 2] == "/*":
+            end = text.find("*/", i + 2)
+            if end == -1:
+                die("error: unterminated block comment in header", 1)
+            end += 2
+            result.append(re.sub(r"[^\n]", " ", text[i:end]))
+            i = end
+        else:
+            result.append(c)
+            i += 1
+    return "".join(result)
+
+
+def check_splices_only_in_defines(header):
+    """Die (exit 1) on a backslash-newline outside a #define directive.
+
+    The pinned header splices lines only in #define continuations. Refusing
+    it elsewhere means no splice can fall inside an enum body, so splicing
+    cannot create a trigraph that the scratch compile would then see.
+    """
+    in_define = False
+    fragments = header.split("\n")
+    last_index = len(fragments) - 1
+    for index, line in enumerate(fragments):
+        line_number = index + 1
+        # Same definition as splice_lines: a backslash, then LF or CRLF. The
+        # last fragment has no newline after it, so it cannot be a splice.
+        has_newline = index < last_index
+        continued = has_newline and line.removesuffix("\r").endswith("\\")
+        if not in_define:
+            in_define = re.match(r"[ \t]*#[ \t]*define\b", line) is not None
+        if continued and not in_define:
+            die(
+                f"error: line {line_number}: backslash-newline outside a #define"
+                " directive is not supported",
+                1,
+            )
+        if not continued:
+            in_define = False
+
+
 def read_header(upstream_path):
     """Read the header from the pinned commit via git."""
     try:
@@ -75,29 +286,62 @@ def extract_enums(header, enums=ENUMS):
     DOTALL, typedef enum {(.*?)} NAME; would begin at the first typedef enum
     in the file and run on until it reached } NAME;.
 
+    Any trigraph in the header exits 1 first (see reject_trigraphs).
+    Backslash-newline is accepted only in #define directives (see
+    check_splices_only_in_defines). The header is then line-spliced, so the
+    enum bodies, the directive check and the compiled text all see the
+    spliced text.
+
     Supported C syntax: enumerator identifiers with optional ``= <constant
     expression>``, ``//`` and ``/* */`` comments (including commas inside
     comments), and a trailing comma after the last enumerator.
 
     Not supported — and guaranteed to fail loudly rather than silently:
-    - Braces inside comments: no block matches → exit 1.
-    - Preprocessor lines such as ``#if``: the piece is an invalid identifier
-      → exit 1.
+    - A declaration inside a comment or string literal is never matched, so
+      it counts as no match → exit 1 if no live declaration exists.
+    - Backslash-newline outside a #define directive → exit 1 naming the line.
+    - Preprocessor directive lines such as ``#if`` anywhere in an enum body,
+      including inside an initializer (``a = \n#if X\n1\n#endif``): the
+      generator cannot evaluate conditionals → exit 1.
+    - Raw and prefixed (L, u, U, u8) string or char literals, digit
+      separators and digraphs (``%:ifdef``) in an enum body → exit 1.
+    - Trigraphs anywhere in the header, comments and strings included → exit 1.
     - Character literals containing commas (e.g. ``','``): the piece is an
       invalid identifier → exit 1.
     """
+    reject_trigraphs(header)
+    check_splices_only_in_defines(header)
+    header = splice_lines(header)
+    # A splice can join "?" and "?-" into a trigraph that the compiler never
+    # saw in the original but the scratch compile would see in the spliced
+    # text (APLUS-02). The line number below is in the spliced text.
+    reject_trigraphs(header)
+    # Declarations are located in text with comments and literal contents
+    # blanked, so one inside a comment or string is never matched. The blanked
+    # texts have the same length as the header, so offsets carry over.
+    code_only = blank_comments(header, blank_literals=True)
+    comments_removed = blank_comments(header, blank_literals=False)
     result = []
     for name, expected_count, _width in enums:
         pattern = r"typedef\s+enum\s*\{([^{}]*)\}\s*" + re.escape(name) + r"\s*;"
-        matches = re.findall(pattern, header, re.DOTALL)
+        matches = list(re.finditer(pattern, code_only, re.DOTALL))
         if len(matches) != 1:
             die(
                 f"error: enum {name}: expected exactly 1 match, found {len(matches)}",
                 1,
             )
-        body = matches[0]
-        # Strip comments before splitting on commas
-        body_stripped = re.sub(r"//[^\n]*|/\*.*?\*/", " ", body, flags=re.S)
+        body = comments_removed[matches[0].start(1):matches[0].end(1)]
+        # Comments are already blanked; this also rejects unsupported tokens.
+        body_stripped = strip_comments(body)
+        # Checked per line, before splitting on commas, so that a directive
+        # inside an initializer is rejected too.
+        for line in body_stripped.split("\n"):
+            if line.strip().startswith("#"):
+                die(
+                    f"error: enum {name}: preprocessor directive in enum body:"
+                    f" {line.strip()!r}",
+                    1,
+                )
         pieces = body_stripped.split(",")
         identifiers = []
         for piece in pieces:
@@ -139,32 +383,35 @@ def compile_and_run(enum_data, cc):
     lines.append("}")
     src_code = "\n".join(lines) + "\n"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        src = os.path.join(tmpdir, "enums.c")
-        prog = os.path.join(tmpdir, "enums")
-        with open(src, "w", encoding="utf-8") as fh:
-            fh.write(src_code)
-        try:
-            result = subprocess.run(
-                [cc, "-std=c99", "-Wall", "-Werror", "-o", prog, src],
-                capture_output=True,
-            )
-        except OSError as exc:
-            die(f"error: could not run compiler {cc!r}: {exc}", 2)
-        if result.returncode != 0:
-            sys.stderr.buffer.write(result.stderr)
-            sys.exit(2)
-        try:
-            run = subprocess.run([prog], capture_output=True)
-        except OSError as exc:
-            die(f"error: could not run compiled program: {exc}", 2)
-        if run.returncode != 0:
-            sys.stderr.buffer.write(run.stderr)
-            sys.exit(2)
-        try:
-            return run.stdout.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            die(f"error: compiler program output is not valid UTF-8: {exc}", 2)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = os.path.join(tmpdir, "enums.c")
+            prog = os.path.join(tmpdir, "enums")
+            with open(src, "w", encoding="utf-8") as fh:
+                fh.write(src_code)
+            try:
+                result = subprocess.run(
+                    [cc, "-std=c99", "-Wall", "-Werror", "-o", prog, src],
+                    capture_output=True,
+                )
+            except OSError as exc:
+                die(f"error: could not run compiler {cc!r}: {exc}", 2)
+            if result.returncode != 0:
+                sys.stderr.buffer.write(result.stderr)
+                sys.exit(2)
+            try:
+                run = subprocess.run([prog], capture_output=True)
+            except OSError as exc:
+                die(f"error: could not run compiled program: {exc}", 2)
+            if run.returncode != 0:
+                sys.stderr.buffer.write(run.stderr)
+                sys.exit(2)
+            try:
+                return run.stdout.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                die(f"error: compiler program output is not valid UTF-8: {exc}", 2)
+    except OSError as exc:
+        die(f"error: scratch directory I/O failed while compiling: {exc}", 2)
 
 
 def parse_output(output, enum_data, enums=ENUMS):
@@ -529,11 +776,11 @@ def main():
 
     # Step 7: write or check the fixture
     if args.check:
-        if not args.out.exists():
-            print(f"error: fixture file not found: {args.out}", file=sys.stderr)
-            sys.exit(1)
         try:
             existing_bytes = args.out.read_bytes()
+        except FileNotFoundError:
+            print(f"error: fixture file not found: {args.out}", file=sys.stderr)
+            sys.exit(1)
         except OSError as exc:
             die(f"error: cannot read fixture file: {exc}", 2)
         if existing_bytes != fixture_bytes:

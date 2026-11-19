@@ -118,4 +118,13 @@ mod tests {
         assert_eq!(akm_to_suite("sae "), None);
         assert_eq!(suite_to_akm([0x00, 0x0F, 0xAC, 0x09]), None);
     }
+
+    #[test]
+    fn unknown_oui_with_known_suite_type_gives_none() {
+        // Type 08 is "sae" under 00-0F-AC, but not under another OUI.
+        assert_eq!(suite_to_akm([0x00, 0x0F, 0xAC, 0x08]), Some("sae"));
+        assert_eq!(suite_to_akm([0x00, 0x11, 0x22, 0x08]), None);
+        // Type 02 is known under three OUIs; a fourth must not match.
+        assert_eq!(suite_to_akm([0x00, 0x11, 0x22, 0x02]), None);
+    }
 }

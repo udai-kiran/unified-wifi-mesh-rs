@@ -3,6 +3,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import os
 import pathlib
 import tempfile
 import unittest
@@ -59,6 +60,24 @@ def _make_source(rows):
     return f"const std::vector<freq_range> frequency_ranges = {{\n{body}\n}};\n"
 
 
+_REAL_TABLE = (
+    "const std::vector<freq_range> frequency_ranges = {\n"
+    '    {81, 1, 13, 2407, 5, ""}\n'
+    "};\n"
+)
+
+
+def _exit_of(func, *args):
+    """Call func, which must raise SystemExit; return (exit code, stderr text)."""
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            func(*args)
+        except SystemExit as exc:
+            return exc.code, stderr.getvalue()
+    raise AssertionError("expected SystemExit")
+
+
 def _make_valid_source():
     """Return a valid C++ source with 68 rows (30 global, 11 US, 11 EU, 9 JP, 7 CN)."""
     return _make_source(_make_rows())
@@ -94,6 +113,12 @@ class TestStripComments(unittest.TestCase):
         """A block comment acts as a space, so 8/**/1 is not read as 81."""
         result = gen.strip_comments("{8/**/1, 1}")
         self.assertEqual(result, "{8 1, 1}")
+
+    def test_raw_string_rejected(self):
+        """A raw string is not parsed: strip_comments exits 1 naming it."""
+        code, err = _exit_of(gen.strip_comments, 'R"(a " // b)" x // gone\ny')
+        self.assertEqual(code, 1)
+        self.assertIn("raw string", err)
 
     def test_double_slash_inside_string_not_a_comment(self):
         """// inside a quoted string is part of the string, not a comment."""
@@ -215,6 +240,135 @@ class TestExtract(unittest.TestCase):
         )
         rows = gen.extract(source)
         self.assertEqual(rows, [(81, 1, 13, 2407, 5, "")])
+
+    def test_raw_string_decoy_before_real_table_rejected(self):
+        """A raw string holding a table declaration is rejected, not skipped."""
+        decoy = (
+            'const char* doc = R"(\n'
+            "const std::vector<freq_range> frequency_ranges = {\n"
+            '    {9, 9, 9, 9, 9, "ZZ"}\n'
+            '};\n)";\n'
+        )
+        code, err = _exit_of(gen.extract, decoy + _REAL_TABLE)
+        self.assertEqual(code, 1)
+        self.assertIn("raw string", err)
+
+    def test_raw_string_with_delimiter_and_lone_quote_rejected(self):
+        """A raw string with a custom delimiter and a lone quote is rejected."""
+        decoy = 'const char* doc = R"x(a " b // c)x";\n'
+        code, err = _exit_of(gen.extract, decoy + _REAL_TABLE)
+        self.assertEqual(code, 1)
+        self.assertIn("raw string", err)
+
+    def test_prefixed_char_literal_hiding_raw_string_rejected(self):
+        """R1-01: L'"' must not hide a raw-string decoy from the scanner."""
+        source = (
+            "wchar_t q = L'\"'; const char* doc = R\"tag(\n"
+            ')tag"; wchar_t z = L\'"\'; int p = \'x\';\n' + _make_valid_source()
+        )
+        code, err = _exit_of(gen.extract, source)
+        self.assertEqual(code, 1)
+        self.assertIn("unsupported", err)
+
+    def test_unsupported_lexical_constructs_rejected(self):
+        """Raw/prefixed literals, digit separators, digraphs, trigraphs exit 1."""
+        cases = {
+            "raw string": 'const char* d = R"x(a)x";\n',
+            "prefixed raw string": 'const char* d = u8R"x(a)x";\n',
+            "prefixed char": "wchar_t c = L'x';\n",
+            "prefixed string": 'const char* d = u8"x";\n',
+            "digit separator": "int n = 1'000;\n",
+            "digraph": "int a %: 1;\n",
+            "digraph brace": "int a <% 1;\n",
+            "trigraph": "int a ??= 1;\n",
+        }
+        for label, line in cases.items():
+            with self.subTest(label):
+                code, err = _exit_of(gen.extract, line + _REAL_TABLE)
+                self.assertEqual(code, 1)
+                self.assertIn("unsupported", err)
+
+    def test_constructs_inside_comments_and_plain_literals_allowed(self):
+        """The rejections apply to code only, not to comments or plain literals."""
+        source = (
+            '// R"( L\'x\' 1\'000 %: ??=\n'
+            '/* u8"x" <% */ const char* d = "%: ??= R\\"(";\n'
+            "char c = 'x';\n" + _REAL_TABLE
+        )
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "")])
+
+    def test_line_splices_removed_before_matching(self):
+        """A backslash-newline splits neither the declaration nor a number."""
+        source = (
+            "const std::vector<freq_range> frequency_\\\nranges = {\n"
+            '    {81, 1, 13, 24\\\n07, 5, ""}\n'
+            "};\n"
+        )
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "")])
+
+    def test_line_splice_joins_comment_opener(self):
+        """A spliced '/' + '/' is a line comment, as in C phase 2."""
+        source = "/\\\n/ const std::vector<freq_range> frequency_ranges = {\n" + _REAL_TABLE
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "")])
+
+    def test_closing_brace_in_region_string_does_not_end_table(self):
+        """R1-08: brace matching reads masked text, so "}" in a string is data."""
+        source = (
+            "const std::vector<freq_range> frequency_ranges = {\n"
+            '    {81, 1, 13, 2407, 5, "}"}\n'
+            "};\n"
+        )
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "}")])
+
+    def test_opening_brace_in_region_string_does_not_nest(self):
+        """R1-08: "{" in a string must not leave the table unclosed."""
+        source = (
+            "const std::vector<freq_range> frequency_ranges = {\n"
+            '    {81, 1, 13, 2407, 5, "{"}\n'
+            "};\n"
+        )
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "{")])
+
+    def test_brace_char_literal_does_not_end_table(self):
+        """R1-08: a '}' char literal before the table does not move its braces."""
+        source = "char c = '}';\n" + _REAL_TABLE + "char d = '{';\n"
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "")])
+
+    def test_ordinary_string_decoy_before_real_table_ignored(self):
+        """A table declaration inside an ordinary string literal is ignored."""
+        decoy = (
+            'const char* doc = "const std::vector<freq_range>'
+            ' frequency_ranges = {";\n'
+        )
+        real = (
+            "const std::vector<freq_range> frequency_ranges = {\n"
+            '    {81, 1, 13, 2407, 5, ""}\n'
+            "};\n"
+        )
+        self.assertEqual(gen.extract(decoy + real), [(81, 1, 13, 2407, 5, "")])
+
+    def test_decoy_only_exit1_not_found(self):
+        """A table declaration that only appears in a string literal → not found."""
+        source = (
+            'const char* doc = "const std::vector<freq_range>'
+            ' frequency_ranges = {};";\n'
+        )
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            with self.assertRaises(SystemExit) as cm:
+                gen.extract(source)
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("not found", stderr_buf.getvalue())
+
+    def test_char_literal_quote_before_real_table(self):
+        """A '"' char literal does not open a string that hides the table."""
+        source = (
+            "const char quote = '\"';\n"
+            "const std::vector<freq_range> frequency_ranges = {\n"
+            '    {81, 1, 13, 2407, 5, ""}\n'
+            "};\n"
+        )
+        self.assertEqual(gen.extract(source), [(81, 1, 13, 2407, 5, "")])
 
     def test_zero_initializers_exit1(self):
         """No frequency_ranges initializer → exit 1."""
@@ -369,8 +523,10 @@ class TestValidate(unittest.TestCase):
     def test_min_chan_too_large(self):
         """min_chan > 255 → exit 1 with 'min_chan' in message."""
         rows = self._base()
-        rows[0] = (1, 256, 2, 2400, 5, "")
-        self._check_dies(rows, "min_chan")
+        # max_chan 300 keeps min_chan <= max_chan, so only the range guard
+        # can produce "min_chan 256 out of range".
+        rows[0] = (1, 256, 300, 2400, 5, "")
+        self._check_dies(rows, "min_chan 256 out of range")
 
     def test_max_chan_too_large(self):
         """max_chan > 255 → exit 1 with 'max_chan' in message."""
@@ -391,10 +547,10 @@ class TestValidate(unittest.TestCase):
         self._check_dies(rows, "spacing")
 
     def test_min_chan_greater_than_max_chan(self):
-        """min_chan > max_chan → exit 1."""
+        """min_chan > max_chan → exit 1 with the ordering message."""
         rows = self._base()
         rows[0] = (1, 5, 2, 2400, 5, "")
-        self._check_dies(rows, "min_chan")
+        self._check_dies(rows, "min_chan 5 > max_chan 2")
 
     def test_spacing_zero(self):
         """spacing == 0 → exit 1 with 'spacing' in message."""
@@ -418,6 +574,15 @@ class TestValidate(unittest.TestCase):
         for i, row in enumerate(rows):
             if row[5] == "US":
                 rows[i] = (row[0], row[1], row[2], row[3], row[4], "USA")
+                break
+        self._check_dies(rows, "region")
+
+    def test_region_with_trailing_newline_rejected(self):
+        """A region 'US\\n' is not two letters (re.match with $ would accept it)."""
+        rows = self._base()
+        for i, row in enumerate(rows):
+            if row[5] == "US":
+                rows[i] = (row[0], row[1], row[2], row[3], row[4], "US\n")
                 break
         self._check_dies(rows, "region")
 
@@ -501,6 +666,7 @@ class TestMain(unittest.TestCase):
         """
         stdout_buf = io.StringIO()
         stderr_buf = io.StringIO()
+        self.last_stderr = ""
         exit_code = 0
         with patch.object(gen, "read_source", return_value=source):
             with patch("sys.argv", argv):
@@ -510,6 +676,7 @@ class TestMain(unittest.TestCase):
                             gen.main()
                         except SystemExit as exc:
                             exit_code = exc.code
+        self.last_stderr = stderr_buf.getvalue()
         return exit_code, stdout_buf.getvalue()
 
     def test_check_missing_fixture_exits_1(self):
@@ -550,12 +717,11 @@ class TestMain(unittest.TestCase):
 
     def test_write_mode_failed_validation_leaves_file_unchanged(self):
         """Write mode: validation failure leaves an existing fixture byte-identical."""
-        # Source with spacing=0 on first row: passes extraction, fails validation.
-        source = (
-            "const std::vector<freq_range> frequency_ranges = {\n"
-            '    {1, 1, 2, 2400, 0, ""}\n'
-            "};\n"
-        )
+        # Full-size table with spacing=0 on the first row: the row count is
+        # right, so validation must fail on the spacing rule itself.
+        rows = _make_rows()
+        rows[0] = (1, 1, 2, 2400, 0, "")
+        source = _make_source(rows)
         original = b"existing fixture content\n"
         with tempfile.TemporaryDirectory() as tmpdir:
             out = pathlib.Path(tmpdir) / "fixture.tsv"
@@ -567,7 +733,26 @@ class TestMain(unittest.TestCase):
             after_bytes = out.read_bytes()
 
         self.assertEqual(exit_code, 1)
+        self.assertIn("spacing must be > 0", self.last_stderr)
         self.assertEqual(after_bytes, original)
+
+    def test_write_mode_failed_replace_leaves_file_and_no_temp(self):
+        """Write mode: a failing os.replace exits 2, keeps the old file, leaves no temp file."""
+        source = _make_valid_source()
+        original = b"existing fixture content\n"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            out.write_bytes(original)
+            argv = ["gen-upstream-freq-ranges", "--out", str(out)]
+            with patch.object(gen.os, "replace", side_effect=OSError("boom")):
+                exit_code, _ = self._run_main(argv, source)
+            after_bytes = out.read_bytes()
+            leftovers = sorted(p.name for p in pathlib.Path(tmpdir).iterdir())
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("cannot write fixture file", self.last_stderr)
+        self.assertEqual(after_bytes, original)
+        self.assertEqual(leftovers, ["fixture.tsv"])
 
     def test_write_mode_success(self):
         """Write mode with valid source → exit 0, file written."""
@@ -577,9 +762,24 @@ class TestMain(unittest.TestCase):
             argv = ["gen-upstream-freq-ranges", "--out", str(out)]
             exit_code, stdout = self._run_main(argv, source)
 
+            expected = gen.build_fixture(_make_rows()).encode("utf-8")
             self.assertEqual(exit_code, 0)
             self.assertIn("ok: 68 rows", stdout)
-            self.assertTrue(out.exists())
+            self.assertEqual(out.read_bytes(), expected)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+
+    def test_write_mode_replaces_stale_fixture(self):
+        """Write mode over an existing stale file → exact expected bytes."""
+        source = _make_valid_source()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "out.tsv"
+            out.write_bytes(b"stale\n")
+            argv = ["gen-upstream-freq-ranges", "--out", str(out)]
+            exit_code, _ = self._run_main(argv, source)
+
+            expected = gen.build_fixture(_make_rows()).encode("utf-8")
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(out.read_bytes(), expected)
 
     def test_check_up_to_date_exits_0(self):
         """--check with current fixture → exit 0."""
@@ -591,11 +791,100 @@ class TestMain(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out = pathlib.Path(tmpdir) / "fixture.tsv"
             out.write_bytes(fixture_bytes)
+            os.utime(out, ns=(1_000_000_000, 1_000_000_000))
+            mtime_before = out.stat().st_mtime_ns
 
             argv = ["gen-upstream-freq-ranges", "--check", "--out", str(out)]
             exit_code, _ = self._run_main(argv, source)
 
+            after_bytes = out.read_bytes()
+            mtime_after = out.stat().st_mtime_ns
+            leftovers = sorted(p.name for p in pathlib.Path(tmpdir).iterdir())
+
         self.assertEqual(exit_code, 0)
+        self.assertEqual(after_bytes, fixture_bytes)
+        self.assertEqual(mtime_after, mtime_before)
+        self.assertEqual(leftovers, ["fixture.tsv"])
+
+
+# ---------------------------------------------------------------------------
+# TestWriteAtomically
+# ---------------------------------------------------------------------------
+
+
+class TestWriteAtomically(unittest.TestCase):
+    def test_longest_legal_basename_is_written(self):
+        """R1-06: the temp name must not depend on the destination name length."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            name_max = os.pathconf(tmpdir, "PC_NAME_MAX")
+            out = pathlib.Path(tmpdir) / ("a" * name_max)
+            gen.write_atomically(out, b"data\n")
+            self.assertEqual(out.read_bytes(), b"data\n")
+            self.assertEqual([p.name for p in pathlib.Path(tmpdir).iterdir()], [out.name])
+
+    def test_temp_file_uses_short_fixed_prefix(self):
+        """R1-06: the temp file lives in the destination directory as .tmp-*."""
+        seen = []
+        real_replace = os.replace
+
+        def spy(src, dst):
+            seen.append(pathlib.Path(src))
+            real_replace(src, dst)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            with patch.object(gen.os, "replace", side_effect=spy):
+                gen.write_atomically(out, b"x")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].parent, pathlib.Path(tmpdir))
+        self.assertTrue(seen[0].name.startswith(".tmp-"))
+
+    def test_interrupt_after_successful_replace_propagates(self):
+        """R1-07: KeyboardInterrupt after the rename stays a KeyboardInterrupt."""
+        real_replace = os.replace
+
+        def replace_then_interrupt(src, dst):
+            real_replace(src, dst)
+            raise KeyboardInterrupt
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            out.write_bytes(b"old\n")
+            with patch.object(gen.os, "replace", side_effect=replace_then_interrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    gen.write_atomically(out, b"new\n")
+            self.assertEqual(out.read_bytes(), b"new\n")
+            self.assertEqual([p.name for p in pathlib.Path(tmpdir).iterdir()], ["fixture.tsv"])
+
+    def test_interrupt_before_replace_removes_temp_file(self):
+        """An interrupt before the rename keeps the old file and removes the temp."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            out.write_bytes(b"old\n")
+            with patch.object(gen.os, "replace", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    gen.write_atomically(out, b"new\n")
+            self.assertEqual(out.read_bytes(), b"old\n")
+            self.assertEqual([p.name for p in pathlib.Path(tmpdir).iterdir()], ["fixture.tsv"])
+
+    def test_cleanup_failure_does_not_mask_original_error(self):
+        """R1-07: an error while removing the temp file is not the one raised."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            with patch.object(gen.os, "replace", side_effect=OSError("boom")):
+                with patch.object(gen.os, "unlink", side_effect=PermissionError("denied")):
+                    with self.assertRaises(OSError) as cm:
+                        gen.write_atomically(out, b"new\n")
+            self.assertEqual(str(cm.exception), "boom")
+
+    def test_success_does_not_unlink(self):
+        """After a successful os.replace nothing is unlinked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = pathlib.Path(tmpdir) / "fixture.tsv"
+            with patch.object(gen.os, "unlink") as unlink:
+                gen.write_atomically(out, b"new\n")
+            unlink.assert_not_called()
+            self.assertEqual(out.read_bytes(), b"new\n")
 
 
 if __name__ == "__main__":

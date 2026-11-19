@@ -9,6 +9,17 @@ crates/em-msg/tests/data/upstream_msg_tables.tsv.
 
 Message type and TLV type names are checked against the em-types fixture
 crates/em-types/tests/data/upstream_enums.tsv.
+
+Contract and known limits: the tool reads only the pinned upstream files and
+is not a C preprocessor. It fails loudly (exit 1) on the constructs it does
+not support, such as raw or prefixed literals, digit separators and
+digraphs. Known limits, not handled:
+- R2-02: vertical tab or form feed inside preprocessor directives.
+- R2-03: code before or after the include guard is not checked.
+- R2-05: conservative rejections such as SIGN_''x'' style tokens or "<::".
+- R2-07: table/switch brace masking is covered only by helper tests.
+On any change to PINNED_COMMIT, re-extract the fixture independently and
+compare before trusting --check.
 """
 # SPDX-License-Identifier: Apache-2.0
 
@@ -89,10 +100,8 @@ _RE_LABEL = re.compile(
 )
 # Whitespace-free ordinary case body: 'name();break;'.
 _RE_ORDINARY_CASE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\(\);break;')
-_RE_DEFINE_LINE = re.compile(
-    r'^[ \t]*#[ \t]*define[ \t]+' + EXT_DEV_INFO_SZ_NAME + r'(?![A-Za-z0-9_]).*$',
-    re.MULTILINE,
-)
+_RE_DIRECTIVE = re.compile(r'^[ \t]*#[ \t]*([A-Za-z_]+)[ \t]*(.*)$', re.MULTILINE)
+_RE_DIRECTIVE_EXT_NAME = re.compile(EXT_DEV_INFO_SZ_NAME + r'(?![A-Za-z0-9_])')
 _RE_DEFINE_STRICT = re.compile(
     r'#[ \t]*define[ \t]+' + EXT_DEV_INFO_SZ_NAME + r'[ \t]+(0|[1-9][0-9]*)[ \t]*'
 )
@@ -101,6 +110,56 @@ _RE_DEFINE_STRICT = re.compile(
 def die(msg, code=1):
     print(msg, file=sys.stderr)
     sys.exit(code)
+
+
+# Constructs the generators do not parse. The pinned upstream files contain
+# none of them in code, so a match means the source changed and must be
+# reviewed by a person.
+_RAW_STRING_PREFIXES = ("R", "LR", "uR", "UR", "u8R")
+_STRING_PREFIXES = ("L", "u", "U", "u8")
+_DIGRAPHS = ("<%", "%>", "<:", ":>", "%:")
+_TRIGRAPH_THIRD_CHARS = "=/'()!<>-"
+
+
+def splice_lines(text):
+    """Remove every backslash-newline pair (C translation phase 2)."""
+    return re.sub(r"\\\r?\n", "", text)
+
+
+def _identifier_before(text, end):
+    """Return the run of identifier characters that ends just before end."""
+    start = end
+    while start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        start -= 1
+    return text[start:end]
+
+
+def _reject_unsupported_quote(text, quote_pos):
+    """Die (exit 1) if the quote at quote_pos starts a literal we do not parse.
+
+    Called only for a quote seen in code, outside comments and literals.
+    """
+    prefix = _identifier_before(text, quote_pos)
+    if text[quote_pos] == "'":
+        if prefix:
+            die(
+                "error: unsupported digit separator or prefixed character"
+                f" literal in source: {prefix}'",
+                1,
+            )
+    elif prefix in _RAW_STRING_PREFIXES:
+        die(f"error: unsupported raw string literal in source: {prefix}\"", 1)
+    elif prefix in _STRING_PREFIXES:
+        die(f"error: unsupported prefixed string literal in source: {prefix}\"", 1)
+
+
+def _reject_digraph_or_trigraph(text, pos):
+    """Die (exit 1) if a digraph or trigraph starts at pos in code."""
+    pair = text[pos:pos + 2]
+    if pair in _DIGRAPHS:
+        die(f"error: unsupported digraph {pair!r} in source", 1)
+    if pair == "??" and pos + 2 < len(text) and text[pos + 2] in _TRIGRAPH_THIRD_CHARS:
+        die(f"error: unsupported trigraph {text[pos:pos + 3]!r} in source", 1)
 
 
 def read_source(upstream_path, path):
@@ -145,12 +204,32 @@ def load_type_names(path):
     return msg_names, tlv_names
 
 
-def strip_comments(source):
-    """Remove // and /* */ comments but not inside double-quoted strings.
+def _literal_end(text, start):
+    """Return the index just after the string or char literal that starts at start.
 
-    Uses a character-by-character state machine. Line comments keep their
-    newline; a block comment becomes one space.
-    Dies on unterminated strings or block comments (exit 1).
+    Escape sequences are skipped, so \\" and '\\'' do not end a literal.
+    Dies (exit 1) if the literal is not closed.
+    """
+    quote = text[start]
+    i = start + 1
+    while i < len(text):
+        if text[i] == '\\':
+            i += 2
+        elif text[i] == quote:
+            return i + 1
+        else:
+            i += 1
+    kind = "string" if quote == '"' else "character"
+    die(f"error: unterminated {kind} literal in source", 1)
+
+
+def strip_comments(source):
+    """Remove // and /* */ comments but not inside string or char literals.
+
+    Line comments keep their newline; a block comment becomes one space.
+    Expects spliced text (see splice_lines). Dies (exit 1) on unterminated
+    literals or block comments and on raw or prefixed literals, digit
+    separators, digraphs and trigraphs in code.
     """
     result = []
     i = 0
@@ -158,25 +237,11 @@ def strip_comments(source):
     while i < n:
         c = source[i]
 
-        if c == '"':
-            # String literal: copy verbatim including escape sequences.
-            result.append(c)
-            i += 1
-            closed = False
-            while i < n:
-                c2 = source[i]
-                result.append(c2)
-                i += 1
-                if c2 == '\\':
-                    # Escape sequence: include next char too.
-                    if i < n:
-                        result.append(source[i])
-                        i += 1
-                elif c2 == '"':
-                    closed = True
-                    break
-            if not closed:
-                die("error: unterminated string literal in source", 1)
+        if c in '"\'':
+            _reject_unsupported_quote(source, i)
+            end = _literal_end(source, i)
+            result.append(source[i:end])
+            i = end
 
         elif source[i:i+2] == '//':
             # Line comment: skip to end of line, keep the newline itself.
@@ -196,28 +261,132 @@ def strip_comments(source):
             result.append(" ")
 
         else:
+            _reject_digraph_or_trigraph(source, i)
             result.append(c)
             i += 1
 
     return ''.join(result)
 
 
+def mask_literals(stripped):
+    """Return stripped with the inside of every string and char literal blanked.
+
+    The result has the same length, so positions found in it are valid in
+    stripped. Declarations and braces are located in the masked text, so
+    text inside a literal can never look like code.
+    """
+    result = []
+    i = 0
+    n = len(stripped)
+    while i < n:
+        if stripped[i] in '"\'':
+            end = _literal_end(stripped, i)
+            result.append(stripped[i] + ' ' * (end - i - 2) + stripped[end - 1])
+            i = end
+        else:
+            result.append(stripped[i])
+            i += 1
+    return ''.join(result)
+
+
+_CONDITIONAL_OPENERS = ("if", "ifdef", "ifndef")
+_CONDITIONAL_ALTERNATIVES = ("else", "elif", "elifdef", "elifndef")
+
+
+def _include_guard_spans_file(directives):
+    """True if the first two directives are #ifndef G / #define G and the
+    last #endif of the file closes that #ifndef."""
+    if len(directives) < 3:
+        return False
+    (first_kind, first_words, _), (second_kind, second_words, _) = directives[:2]
+    if first_kind != "ifndef" or second_kind != "define":
+        return False
+    if not first_words or not second_words or first_words[0] != second_words[0]:
+        return False
+    depth = 0
+    for index, (kind, _, _) in enumerate(directives):
+        if kind in _CONDITIONAL_OPENERS:
+            depth += 1
+        elif kind == "endif":
+            depth -= 1
+            if depth == 0:
+                return index == len(directives) - 1
+    return False
+
+
+def _ext_dev_info_directives(masked):
+    """Yield (kind, text) for each #define/#undef of the minimum-length macro.
+
+    masked is comment-free text with literal contents blanked, so text inside
+    a string literal is never read as a directive. kind is
+    'conditional-define' for a define that a preprocessor conditional could
+    exclude. Only two places are unconditional: outside every conditional,
+    and directly inside the outer include guard (see
+    _include_guard_spans_file) before any #else or #elif of that guard.
+    """
+    directives = []
+    for m in _RE_DIRECTIVE.finditer(masked):
+        words = m.group(2).split()
+        directives.append((m.group(1), words, m.group(0).strip()))
+    has_guard = _include_guard_spans_file(directives)
+
+    # One entry per open conditional; True marks the outer include guard.
+    open_conditionals = []
+    guard_has_alternative = False
+    for index, (kind, words, text) in enumerate(directives):
+        if kind in _CONDITIONAL_OPENERS:
+            open_conditionals.append(has_guard and index == 0)
+        elif kind in _CONDITIONAL_ALTERNATIVES:
+            if open_conditionals == [True]:
+                guard_has_alternative = True
+        elif kind == "endif":
+            if open_conditionals:
+                open_conditionals.pop()
+        elif kind in ("define", "undef") and words and _RE_DIRECTIVE_EXT_NAME.match(words[0]):
+            outside_conditionals = not open_conditionals
+            directly_in_guard = open_conditionals == [True] and not guard_has_alternative
+            if kind == "define" and not (outside_conditionals or directly_in_guard):
+                yield "conditional-define", text
+            else:
+                yield kind, text
+
+
+def reject_ext_dev_info_directives(source_text, path):
+    """Die (exit 1) if source_text defines or undefines the macro at all."""
+    masked = mask_literals(strip_comments(splice_lines(source_text)))
+    for kind, text in _ext_dev_info_directives(masked):
+        die(f"error: {path} must not touch {EXT_DEV_INFO_SZ_NAME}: {text!r}", 1)
+
+
 def read_ext_dev_info_sz(header_text):
     """Return the value of EMEX_MIN_EXT_DEV_INFO_SZ from em_base.h text.
 
-    Dies (exit 1) unless there is exactly one strict decimal #define and
-    its value is 16.
+    Dies (exit 1) unless there is exactly one strict decimal #define, outside
+    any conditional block (the outer include guard is allowed if it spans the
+    file and the define precedes any #else or #elif of it), never #undef'd,
+    and its value is 16.
     """
-    lines = _RE_DEFINE_LINE.findall(strip_comments(header_text))
-    if len(lines) != 1:
+    defines = []
+    masked = mask_literals(strip_comments(splice_lines(header_text)))
+    for kind, text in _ext_dev_info_directives(masked):
+        if kind == "undef":
+            die(f"error: {EXT_DEV_INFO_SZ_NAME} is #undef'd: {text!r}", 1)
+        if kind == "conditional-define":
+            die(
+                f"error: {EXT_DEV_INFO_SZ_NAME} is defined inside a preprocessor"
+                f" conditional: {text!r}",
+                1,
+            )
+        defines.append(text)
+    if len(defines) != 1:
         die(
             f"error: expected exactly 1 #define {EXT_DEV_INFO_SZ_NAME},"
-            f" found {len(lines)}",
+            f" found {len(defines)}",
             1,
         )
-    m = _RE_DEFINE_STRICT.fullmatch(lines[0].strip())
+    m = _RE_DEFINE_STRICT.fullmatch(defines[0])
     if not m:
-        die(f"error: unsupported #define {EXT_DEV_INFO_SZ_NAME}: {lines[0]!r}", 1)
+        die(f"error: unsupported #define {EXT_DEV_INFO_SZ_NAME}: {defines[0]!r}", 1)
     value = int(m.group(1))
     if value != EXPECTED_EXT_DEV_INFO_SZ:
         die(
@@ -233,27 +402,20 @@ def _skip_ws(text, pos):
     return _RE_WS.match(text, pos).end()
 
 
-def _matching_brace(text, open_pos, what):
+def _matching_brace(masked, open_pos, what):
     """Return the index of the } that closes the { at open_pos.
 
-    Braces inside double-quoted strings are ignored. Dies if unmatched.
+    masked must come from mask_literals, so braces inside literals are
+    already blanked. Dies if unmatched.
     """
     depth = 0
-    i = open_pos
-    n = len(text)
-    while i < n:
-        c = text[i]
-        if c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                i += 2 if text[i] == '\\' else 1
-        elif c == '{':
+    for i in range(open_pos, len(masked)):
+        if masked[i] == '{':
             depth += 1
-        elif c == '}':
+        elif masked[i] == '}':
             depth -= 1
             if depth == 0:
                 return i
-        i += 1
     die(f"error: unmatched brace in {what}", 1)
 
 
@@ -348,42 +510,46 @@ def _parse_table_body(body, table, tlv_names, ext_dev_info_sz):
         rows.append(row)
 
 
-def _extract_tables(stripped, tlv_names, ext_dev_info_sz):
-    """Return [(name, rows)] for every void em_msg_t::name() definition."""
+def _extract_tables(stripped, masked, tlv_names, ext_dev_info_sz):
+    """Return [(name, rows)] for every void em_msg_t::name() definition.
+
+    Definitions and braces are found in masked; rows are parsed from stripped.
+    """
     tables = []
     seen = set()
-    for m in _RE_TABLE_FUNC.finditer(stripped):
+    for m in _RE_TABLE_FUNC.finditer(masked):
         name = m.group(1)
         if name in seen:
             die(f"error: table function {name} defined twice", 1)
         seen.add(name)
         open_pos = m.end() - 1
-        close_pos = _matching_brace(stripped, open_pos, f"table function {name}")
+        close_pos = _matching_brace(masked, open_pos, f"table function {name}")
         body = stripped[open_pos + 1:close_pos]
         tables.append((name, _parse_table_body(body, name, tlv_names, ext_dev_info_sz)))
     return tables
 
 
-def _switch_body(stripped):
-    """Return the text between the braces of the constructor's switch (type)."""
-    ctors = list(_RE_CTOR.finditer(stripped))
+def _switch_body(stripped, masked):
+    """Return (text, masked text) between the braces of the constructor's switch (type)."""
+    ctors = list(_RE_CTOR.finditer(masked))
     if len(ctors) != 1:
         die(f"error: expected exactly 1 em_msg_t constructor, found {len(ctors)}", 1)
     open_pos = ctors[0].end() - 1
-    close_pos = _matching_brace(stripped, open_pos, "em_msg_t constructor")
+    close_pos = _matching_brace(masked, open_pos, "em_msg_t constructor")
     ctor_body = stripped[open_pos + 1:close_pos]
+    ctor_masked = masked[open_pos + 1:close_pos]
 
-    switches = list(_RE_SWITCH.finditer(ctor_body))
+    switches = list(_RE_SWITCH.finditer(ctor_masked))
     if len(switches) != 1:
         die(f"error: expected exactly 1 switch (type), found {len(switches)}", 1)
     sw_open = switches[0].end() - 1
-    sw_close = _matching_brace(ctor_body, sw_open, "switch (type)")
-    return ctor_body[sw_open + 1:sw_close]
+    sw_close = _matching_brace(ctor_masked, sw_open, "switch (type)")
+    return ctor_body[sw_open + 1:sw_close], ctor_masked[sw_open + 1:sw_close]
 
 
-def _case_segments(sw_body):
+def _case_segments(sw_body, sw_masked):
     """Return [(message type, text after the label)] for each case; default is skipped."""
-    labels = list(_RE_LABEL.finditer(sw_body))
+    labels = list(_RE_LABEL.finditer(sw_masked))
     segments = []
     for idx, label in enumerate(labels):
         if label.group(1) is None:  # default:
@@ -435,11 +601,11 @@ def _wsc_mappings(msg_type, compact, table_names):
     ]
 
 
-def _extract_mappings(stripped, table_names, msg_names):
+def _extract_mappings(stripped, masked, table_names, msg_names):
     """Return [(msg_type, wsc, table)] from the constructor's switch."""
     mappings = []
     seen_types = set()
-    for msg_type, segment in _case_segments(_switch_body(stripped)):
+    for msg_type, segment in _case_segments(*_switch_body(stripped, masked)):
         if msg_type in seen_types:
             die(f"error: case {msg_type} appears twice", 1)
         seen_types.add(msg_type)
@@ -461,10 +627,11 @@ def extract(source, msg_names, tlv_names, ext_dev_info_sz):
     Every table function must be mapped exactly once. Counts are checked
     separately by validate().
     """
-    stripped = strip_comments(source)
-    tables = _extract_tables(stripped, tlv_names, ext_dev_info_sz)
+    stripped = strip_comments(splice_lines(source))
+    masked = mask_literals(stripped)
+    tables = _extract_tables(stripped, masked, tlv_names, ext_dev_info_sz)
     names = {name for name, _ in tables}
-    mappings = _extract_mappings(stripped, names, msg_names)
+    mappings = _extract_mappings(stripped, masked, names, msg_names)
 
     mapped = {}
     for _, _, table in mappings:
@@ -562,6 +729,7 @@ def main():
 
     # Step 2: Extract tables and mappings.
     ext_dev_info_sz = read_ext_dev_info_sz(header_text)
+    reject_ext_dev_info_directives(source, SOURCE_PATH)
     tables, mappings = extract(source, msg_names, tlv_names, ext_dev_info_sz)
 
     # Step 3: Validate (dies before any write on failure).
