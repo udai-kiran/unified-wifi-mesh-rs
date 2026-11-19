@@ -10,7 +10,8 @@
 //!
 //! - TLVs that are not in the table are accepted.
 //! - Only mandatory rows are length-checked, and only on the first TLV of
-//!   their type. The check is `3 + value.len() < min_len`.
+//!   their type. The check is `3 + value.len() < min_len`, where `min_len` is
+//!   upstream's minimum or, for the 25 rows in [`crate::spec_min`], the spec's.
 //! - Optional rows are never a violation, whatever their length.
 //! - A message type with an empty table, or with no table, gets framing
 //!   checks only. So does AP-Autoconfiguration WSC without an M1 or M2
@@ -18,7 +19,9 @@
 //!
 //! Intentional differences: validation is stateless (upstream never resets
 //! its presence flags or error counter), errors are returned instead of
-//! printed, and no length is subtracted before it is checked.
+//! printed, and no length is subtracted before it is checked. For 25 rows
+//! where upstream's minimum rejects TLVs the spec allows, the minimum is the
+//! spec's ([`crate::spec_min`], note 0008 D8).
 //!
 //! Stricter checks (length of every instance, length of optional TLVs) are not
 //! done, because upstream's own senders would fail them.
@@ -29,6 +32,7 @@ use em_types::{MsgType, ProfileType, TlvType};
 
 use crate::error::FramingError;
 use crate::header::CmduHeader;
+use crate::spec_min;
 use crate::tables::{Requirement, Row, TABLES, Table, WscKind};
 use crate::tlv::{Tlv, TlvIter};
 use crate::wsc::{WSC_M1, WSC_M2, wsc_msg_type};
@@ -38,7 +42,8 @@ use crate::wsc::{WSC_M1, WSC_M2, wsc_msg_type};
 pub enum ViolationKind {
     /// A mandatory TLV is absent.
     Missing,
-    /// A mandatory TLV is shorter than the table's minimum length.
+    /// A mandatory TLV is shorter than the minimum length checked for its row
+    /// (upstream's, or the spec minimum from [`crate::spec_min`]).
     TooShort,
     /// A TLV that must not be present (for this profile) is present.
     NotAllowed,
@@ -104,8 +109,9 @@ pub fn validate(cmdu: &[u8], profile: ProfileType) -> Result<(), ValidateError> 
         return Ok(());
     };
     let mut violations = Vec::new();
-    for row in table.rows {
-        if let Some(violation) = check_row(row, tlv_area, profile) {
+    for (index, row) in table.rows.iter().enumerate() {
+        let min_len = spec_min::min_len(table, index, row);
+        if let Some(violation) = check_row(row, min_len, tlv_area, profile) {
             violations.push(violation);
         }
     }
@@ -132,12 +138,13 @@ fn choose_table(msg_type: MsgType, tlv_area: &[u8]) -> Option<&'static Table> {
         .find(|table| table.msg_type == msg_type && table.wsc == wanted)
 }
 
-/// Checks one row against the first TLV of its type.
-fn check_row(row: &Row, tlv_area: &[u8], profile: ProfileType) -> Option<Violation> {
+/// Checks one row against the first TLV of its type. `min_len` is the length to
+/// check for, which may be lower than `row.min_len` (see [`spec_min`]).
+fn check_row(row: &Row, min_len: u16, tlv_area: &[u8], profile: ProfileType) -> Option<Violation> {
     let found = first_tlv_of_type(tlv_area, row.tlv_type);
     let kind = match (row.rule.resolve(profile), found) {
         (Requirement::Mandatory, None) => ViolationKind::Missing,
-        (Requirement::Mandatory, Some(tlv)) if 3 + tlv.value.len() < usize::from(row.min_len) => {
+        (Requirement::Mandatory, Some(tlv)) if 3 + tlv.value.len() < usize::from(min_len) => {
             ViolationKind::TooShort
         }
         (Requirement::Bad, Some(_)) => ViolationKind::NotAllowed,
@@ -1077,5 +1084,129 @@ mod tests {
         )]);
         assert_eq!(table.to_string(), "1 TLV rule(s) broken");
         assert!(table.source().is_none());
+    }
+
+    // Spec minimum lengths ---------------------------------------------------
+
+    /// The violation kinds that `tlv_type` gets in a message of `msg_type`.
+    fn kinds_for(
+        msg_type: MsgType,
+        tlvs: &[(TlvType, Vec<u8>)],
+        profile: u8,
+        tlv_type: TlvType,
+    ) -> Vec<ViolationKind> {
+        match check(msg_type, tlvs, profile) {
+            Ok(()) => Vec::new(),
+            Err(ValidateError::Table(violations)) => violations
+                .into_iter()
+                .filter(|violation| violation.tlv_type == tlv_type)
+                .map(|violation| violation.kind)
+                .collect(),
+            Err(error) => panic!("{error}"),
+        }
+    }
+
+    #[test]
+    fn spec_minimum_is_checked_for_every_listed_row() {
+        for entry in spec_min::SPEC_MIN_LENS {
+            let table = TABLES
+                .iter()
+                .find(|table| table.upstream_name == entry.table)
+                .unwrap_or_else(|| panic!("no table {}", entry.table));
+            let row = table.rows[entry.row];
+            let profile = PROFILES
+                .into_iter()
+                .find(|&profile| row.rule.resolve(ProfileType(profile)) == Requirement::Mandatory)
+                .unwrap_or_else(|| panic!("{} row {} is never mandatory", entry.table, entry.row));
+
+            let at_minimum = [z(entry.tlv_type, usize::from(entry.min_len))];
+            let kinds = kinds_for(table.msg_type, &at_minimum, profile, entry.tlv_type);
+            assert!(
+                !kinds.contains(&ViolationKind::TooShort),
+                "{} row {} at spec minimum",
+                entry.table,
+                entry.row
+            );
+
+            if entry.min_len > 3 {
+                let one_short = [z(entry.tlv_type, usize::from(entry.min_len) - 1)];
+                let kinds = kinds_for(table.msg_type, &one_short, profile, entry.tlv_type);
+                assert!(
+                    kinds.contains(&ViolationKind::TooShort),
+                    "{} row {} one octet short of spec minimum",
+                    entry.table,
+                    entry.row
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn combined_infra_metrics_one_transmitter_link_metric_passes_both_rows() {
+        let tlvs = [z(TlvType::TRANSMITTER_LINK_METRIC, 44)];
+        let kinds = kinds_for(
+            MsgType::COMBINED_INFRASTRUCTURE_METRICS,
+            &tlvs,
+            1,
+            TlvType::TRANSMITTER_LINK_METRIC,
+        );
+        assert_eq!(kinds, Vec::new());
+
+        // One octet short: both rows report it.
+        let short = [z(TlvType::TRANSMITTER_LINK_METRIC, 43)];
+        let kinds = kinds_for(
+            MsgType::COMBINED_INFRASTRUCTURE_METRICS,
+            &short,
+            1,
+            TlvType::TRANSMITTER_LINK_METRIC,
+        );
+        assert_eq!(
+            kinds,
+            vec![ViolationKind::TooShort, ViolationKind::TooShort]
+        );
+    }
+
+    #[test]
+    fn overrides_are_keyed_by_row_not_by_tlv_type() {
+        // AP Radio Basic Capabilities is lowered to 11 in three tables, but the
+        // WSC M1 row keeps upstream's laxer minimum of 2.
+        for total in 3..=10 {
+            let tlvs = [
+                z(TlvType::AP_RADIO_BASIC_CAPABILITIES, total),
+                wsc_tlv(4, 264),
+            ];
+            let kinds = kinds_for(
+                MsgType::AP_AUTOCONFIGURATION_WSC,
+                &tlvs,
+                1,
+                TlvType::AP_RADIO_BASIC_CAPABILITIES,
+            );
+            assert_eq!(kinds, Vec::new(), "total {total}");
+        }
+    }
+
+    #[test]
+    fn unlisted_mandatory_row_keeps_upstream_minimum() {
+        // topo_resp row 0, DEVICE_INFORMATION, is not in spec_min: upstream's 19 applies.
+        let short = [z(TlvType::DEVICE_INFORMATION, 18)];
+        assert_eq!(
+            kinds_for(
+                MsgType::TOPOLOGY_RESPONSE,
+                &short,
+                1,
+                TlvType::DEVICE_INFORMATION
+            ),
+            vec![ViolationKind::TooShort]
+        );
+        let at_minimum = [z(TlvType::DEVICE_INFORMATION, 19)];
+        assert_eq!(
+            kinds_for(
+                MsgType::TOPOLOGY_RESPONSE,
+                &at_minimum,
+                1,
+                TlvType::DEVICE_INFORMATION
+            ),
+            Vec::new()
+        );
     }
 }

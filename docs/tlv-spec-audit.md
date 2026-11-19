@@ -72,9 +72,9 @@ The port decisions follow 0008 D7 and D8. Each of the 288 rows that differ from 
 
 | port_rule | Rows | Meaning |
 |---|---:|---|
-| SPEC | 270 | The spec settles the point; the port follows it |
+| SPEC | 268 | The spec settles the point; the port follows it |
 | UPSTREAM | 5 | The spec is silent; the port keeps upstream's bytes |
-| UNSURE | 13 | The spec text can be read two ways, or defers to a document not available; the consumer decides and records it in its note |
+| UNSURE | 15 | The spec text can be read two ways, or defers to a document not available; the consumer decides and records it in its note |
 
 How the rules were assigned:
 - **First pass:** six parallel agents decided the rows from the spec text, reading sections
@@ -85,12 +85,13 @@ How the rules were assigned:
     accepts the full range;
   - UPSTREAM only where the spec has no text at all.
 - **Coordinator, then review round 1:** the coordinator changed rows 76, 114, 136, 176 and 192;
-  review rounds 1 and 2 changed rows 3, 200, 203, 221, 258, 305, 311, 332, 333, 337 and 340.
+  review rounds 1 and 2 changed rows 3, 200, 203, 221, 258, 305, 311, 332, 333, 337 and 340;
+  the em-msg minimum-length review changed rows 314, 321 and 340, and the text of rows 320 and 324.
   - **76:** a count with no minimum is SPEC.
   - **114 and 192:** TLVs are found by type, not position.
   - **136:** reserved bits are ignored (EasyMesh §3.1.2).
-  - **176, 305 and 340:** every read is bounds-checked through `Reader`, and no minimum beyond
-    the spec is required.
+  - **176 and 305:** every read is bounds-checked through `Reader`, and no minimum beyond the spec
+    is required.
   - **258:** not a wire point; the port does not copy upstream's inverted success check.
   - **311:** EasyMesh Table 14 (§6) extends 1905.1 Table 6-12 with `0x0108` (Wi-Fi 6) and
     `0x0109` (Wi-Fi 7), both with n=0. Upstream's `0x0108` is valid; its 10 media-specific octets
@@ -100,7 +101,10 @@ How the rules were assigned:
   - **337:** Table 15 does not extend SupportedFreqBand (Table 6-25), so 6 GHz there is UNSURE.
     An informative NOTE in §6.1 expects the Controller to echo the AutoconfigFreqBand value, which
     favours `0x03`.
-  - The finding text of rows 311, 332 and 337 over-states the defect.
+  - **314:** Table 6-10 repeats the interface group "k – 1 times", so one interface is always
+    present. Upstream's 19-octet minimum is the spec minimum.
+  - **321, 340:** see UNSURE below.
+  - The finding text of rows 311, 314, 332 and 337 over-states the defect.
 
 **UPSTREAM (5):** byte order the TLV table does not name (D6 keeps upstream's bytes):
 - CAC Duration (row 8, big-endian upstream);
@@ -109,7 +113,7 @@ How the rules were assigned:
 - TID-to-Link `Num_Mapping` (19, little-endian);
 - Metric Collection Interval (195, little-endian).
 
-**UNSURE (13):**
+**UNSURE (15):**
 - HE and Wi-Fi 6 MCS set order, and MCS NSS Length meaning, which are defined only in IEEE 802.11
   (rows 3, 221, 222). Row 3's byte order is still big-endian per the spec.
 - TID-to-Link Direction values, from IEEE 802.11be (23);
@@ -120,6 +124,8 @@ How the rules were assigned:
 - reporting a BSS outside the requested radios (200);
 - which BSSs `Num_BSS` counts (231);
 - 1905.1 bridging tuple count `L` (315);
+- Link Metric Query length: Table 6-16 fixes 8 octets but omits the EUI-48 for "all neighbors" (321);
+- WSC minimum length, which 1905.1 leaves to WSC v2.0.7 Tables 8/9, not available (340);
 - the neighbor-device group repeat (317);
 - 6 GHz in SupportedFreqBand (337).
 

@@ -6,7 +6,9 @@
 //! `autoconfig_search` and `i1905_ack`), in the order of the constructor's
 //! `switch`. The rows were generated from the golden fixture
 //! `tests/data/upstream_msg_tables.tsv`, and a test checks that they still
-//! equal it. Do not edit the rows by hand.
+//! equal it. Do not edit the rows by hand. For 25 of these rows, where upstream
+//! is stricter than the spec, [`crate::spec_min`] gives validation a lower
+//! minimum length; the rows here keep upstream's values.
 
 use em_types::{MsgType, ProfileType, TlvType};
 

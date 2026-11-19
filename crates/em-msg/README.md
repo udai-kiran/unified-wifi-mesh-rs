@@ -13,6 +13,7 @@ Synchronous, depends only on `em-types`, no `unsafe`, no clones.
 | `wsc` | WSC Message Type selector (M1 = 4, M2 = 5) | `em_configuration_t::get_wsc_msg_type` (`em_configuration.cpp`) |
 | `tables` | The 70 validation tables as static data | the table functions `autoconfig_search` .. `i1905_ack` (`em_msg.cpp`) |
 | `validate` | `validate(cmdu, profile)` | `em_msg_t::validate` (`em_msg.cpp`) |
+| `spec_min` | Spec minimum lengths that replace upstream's stricter ones (25 rows) | - |
 | `body` | `Reader`, `Writer` for TLV bodies | hand-written readers and writers replace upstream's packed C structs copied into the frame (note 0008) |
 | `error` | `FramingError`, `BuildError`, `DecodeError`, `EncodeError` | - |
 
@@ -62,6 +63,9 @@ Design: [note 0008](../../docs/0008-tlv-body-codec.md), D1 and D3.
 - The size budgets count the CMDU only: 1500 bytes (raw socket) and 65517 bytes (AL-SAP).
 - Stricter checks (length of every instance, length of optional TLVs) are not done, because
   upstream's own senders would fail them (note 0005 D3).
+- 25 mandatory-row minimum lengths are lowered to the spec minimum where upstream rejects
+  spec-valid TLVs (`spec_min`, note 0005 D3 and 0008 D8). The upstream tables themselves are kept
+  verbatim.
 
 ## Status
 

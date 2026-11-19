@@ -20,6 +20,7 @@
 //! | [`builder`] | [`MsgBuilder`] and the size budgets | `em_msg_builder_t`, `add_tlv` |
 //! | [`wsc`] | [`wsc_msg_type`] | `em_configuration_t::get_wsc_msg_type` |
 //! | [`tables`] | [`TABLES`], the 70 validation tables | the table functions of `em_msg_t` |
+//! | [`spec_min`] | [`SPEC_MIN_LENS`](spec_min::SPEC_MIN_LENS), lower minimums for 25 rows | upstream's minimum for those rows in `validate`; the upstream tables are kept as they are |
 //! | [`mod@validate`] | [`validate()`] | `em_msg_t::validate` |
 //!
 //! Depends only on `em-types`, no `unsafe`.
@@ -32,6 +33,7 @@ pub mod body;
 pub mod builder;
 pub mod error;
 pub mod header;
+pub mod spec_min;
 pub mod tables;
 pub mod tlv;
 pub mod validate;

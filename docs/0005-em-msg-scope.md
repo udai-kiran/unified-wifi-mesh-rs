@@ -142,7 +142,8 @@ Default behaviour matches upstream, including what it accepts:
 
 - Wire format identical: header layout, `0x80` / `0x40` flag bits, big-endian lengths, End of
   Message `00 00 00` when building.
-- Validation: same rows, order, per-profile rule and minimum length; mandatory TLVs are
+- Validation: same rows, order, per-profile rule and minimum length (except the 25 spec minimums
+  below); mandatory TLVs are
   length-checked on their first instance only; optional TLVs are not length-checked; unknown TLVs
   are accepted; walk stops at End of Message by type, ignoring its length and trailing bytes; empty
   tables and unlisted types get framing checks only; WSC with no M1/M2 selector gets framing checks
@@ -155,6 +156,27 @@ Default behaviour matches upstream, including what it accepts:
 
 Stricter checks (length of every instance, optional TLV lengths) are **not** added now. Upstream's
 own senders would fail them. Recorded as a follow-up to revisit with the spec.
+
+**Intentional difference ([0008](0008-tlv-body-codec.md) D8, 2026-11-19): spec minimum lengths.**
+For 25 mandatory rows, upstream's minimum length rejects TLVs that the EasyMesh or IEEE 1905.1
+table allows. Usually a count is 0, a conditional field is absent, or a failed scan carries no
+results. `spec_min.rs` lowers those minimums to the spec minimum, with the arithmetic for each.
+
+The rows in `tables.rs` stay upstream's, still checked by the golden test against the fixture.
+Tests tie each override to its upstream row, so a fixture change fails loudly.
+
+Rules:
+- **Lower only.** No minimum is raised; the 18 (TLV, minimum) pairs where upstream is laxer than the spec (they match 24 upstream rows, 9 of which can be mandatory) stay
+  as they are.
+- **The zero case.** A count with no stated minimum is taken to allow 0. Each entry says whether
+  its zero case is explicit in the spec text or inferred this way.
+- **Not lowered.** Rows whose spec minimum is unsure keep upstream's value: WSC (its content is
+  defined in WSC v2.0.7, not available), Link Metric Query (Table 6-16 contradicts itself), and
+  rows that depend on DPP or IEEE 802.11 documents that are not available.
+- **Body decoders.** A TLV that passes validation may be shorter than upstream's struct, so body
+  decoders (note 0008) bound every read themselves.
+
+Data: the audit in [tlv-spec-audit.md](tlv-spec-audit.md).
 
 ### D4. Golden data for the validation tables (Step 1)
 
