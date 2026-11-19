@@ -155,17 +155,17 @@ wire_code! {
     pub struct MsgType(u16);
     const HEX_WIDTH: usize = 4;
     entries: [
-        (TOPOLOGY_DISCOVERY, 0x0000, spec, "em_msg_type_topo_disc", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
+        (TOPOLOGY_DISCOVERY, 0x0000, spec, "em_msg_type_topo_disc", "IEEE 1905.1 Table 6-4; message §6.3.1"),
         (TOPOLOGY_NOTIFICATION, 0x0001, spec, "em_msg_type_topo_notif", "Table 21, §17.1; message §17.1.5"),
         (TOPOLOGY_QUERY, 0x0002, spec, "em_msg_type_topo_query", "Table 21, §17.1; message §17.1.38"),
         (TOPOLOGY_RESPONSE, 0x0003, spec, "em_msg_type_topo_resp", "Table 21, §17.1; message §17.1.4"),
-        (VENDOR_SPECIFIC, 0x0004, spec, "em_msg_type_topo_vendor", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (LINK_METRIC_QUERY, 0x0005, spec, "em_msg_type_link_metric_query", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (LINK_METRIC_RESPONSE, 0x0006, spec, "em_msg_type_link_metric_resp", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
+        (VENDOR_SPECIFIC, 0x0004, spec, "em_msg_type_topo_vendor", "IEEE 1905.1 Table 6-4; message §6.3.13"),
+        (LINK_METRIC_QUERY, 0x0005, spec, "em_msg_type_link_metric_query", "IEEE 1905.1 Table 6-4; message §6.3.5"),
+        (LINK_METRIC_RESPONSE, 0x0006, spec, "em_msg_type_link_metric_resp", "IEEE 1905.1 Table 6-4; message §6.3.6"),
         (AP_AUTOCONFIGURATION_SEARCH, 0x0007, spec, "em_msg_type_autoconf_search", "Table 21, §17.1; message §17.1.1"),
         (AP_AUTOCONFIGURATION_RESPONSE, 0x0008, spec, "em_msg_type_autoconf_resp", "Table 21, §17.1; message §17.1.2"),
         (AP_AUTOCONFIGURATION_WSC, 0x0009, spec, "em_msg_type_autoconf_wsc", "Table 21, §17.1; message §17.1.3"),
-        (AP_AUTOCONFIGURATION_RENEW, 0x000A, spec, "em_msg_type_autoconf_renew", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
+        (AP_AUTOCONFIGURATION_RENEW, 0x000A, spec, "em_msg_type_autoconf_renew", "IEEE 1905.1 Table 6-4; message §6.3.10"),
         (IEEE1905_ACK, 0x8000, spec, "em_msg_type_1905_ack", "Table 21, §17.1; message §17.1.32"),
         (AP_CAPABILITY_QUERY, 0x8001, spec, "em_msg_type_ap_cap_query", "Table 21, §17.1; message §17.1.6"),
         (AP_CAPABILITY_REPORT, 0x8002, spec, "em_msg_type_ap_cap_rprt", "Table 21, §17.1; message §17.1.7"),
@@ -239,23 +239,23 @@ wire_code! {
     pub struct TlvType(u8);
     const HEX_WIDTH: usize = 2;
     entries: [
-        (END_OF_MESSAGE, 0x00, spec, "em_tlv_type_eom", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (AL_MAC_ADDRESS, 0x01, spec, "em_tlv_type_al_mac_address", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (MAC_ADDRESS, 0x02, spec, "em_tlv_type_mac_address", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (DEVICE_INFORMATION, 0x03, spec, "em_tlv_type_device_info", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (DEVICE_BRIDGING_CAPABILITY, 0x04, spec, "em_tlv_type_device_bridging_cap", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (NON_1905_NEIGHBOR_DEVICE_LIST, 0x06, spec, "em_tlv_type_non1905_neigh_list", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (IEEE1905_NEIGHBOR_DEVICE_LIST, 0x07, spec, "em_tlv_type_1905_neigh_list", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (LINK_METRIC_QUERY, 0x08, spec, "em_tlv_type_link_metric", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (TRANSMITTER_LINK_METRIC, 0x09, spec, "em_tlv_type_transmitter_link_metric", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (RECEIVER_LINK_METRIC, 0x0A, spec, "em_tlv_type_receiver_link_metric", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (VENDOR_SPECIFIC, 0x0B, spec, "em_tlv_type_vendor_specific", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (LINK_METRIC_RESULT_CODE, 0x0C, spec, "em_tlv_type_link_metric_result_code", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (SEARCHED_ROLE, 0x0D, spec, "em_tlv_type_searched_role", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (AUTOCONFIG_FREQ_BAND, 0x0E, spec, "em_tlv_type_autoconf_freq_band", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (SUPPORTED_ROLE, 0x0F, spec, "em_tlv_type_supported_role", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (SUPPORTED_FREQ_BAND, 0x10, spec, "em_tlv_type_supported_freq_band", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
-        (WSC, 0x11, spec, "em_tlv_type_wsc", "IEEE 1905.1 (unverified: 1905.1 text not available)"),
+        (END_OF_MESSAGE, 0x00, spec, "em_tlv_type_eom", "IEEE 1905.1 TLV §6.4.1"),
+        (AL_MAC_ADDRESS, 0x01, spec, "em_tlv_type_al_mac_address", "IEEE 1905.1 TLV §6.4.3"),
+        (MAC_ADDRESS, 0x02, spec, "em_tlv_type_mac_address", "IEEE 1905.1 TLV §6.4.4"),
+        (DEVICE_INFORMATION, 0x03, spec, "em_tlv_type_device_info", "IEEE 1905.1 TLV §6.4.5"),
+        (DEVICE_BRIDGING_CAPABILITY, 0x04, spec, "em_tlv_type_device_bridging_cap", "IEEE 1905.1 TLV §6.4.6"),
+        (NON_1905_NEIGHBOR_DEVICE_LIST, 0x06, spec, "em_tlv_type_non1905_neigh_list", "IEEE 1905.1 TLV §6.4.8"),
+        (IEEE1905_NEIGHBOR_DEVICE_LIST, 0x07, spec, "em_tlv_type_1905_neigh_list", "IEEE 1905.1 TLV §6.4.9"),
+        (LINK_METRIC_QUERY, 0x08, spec, "em_tlv_type_link_metric", "IEEE 1905.1 TLV §6.4.10"),
+        (TRANSMITTER_LINK_METRIC, 0x09, spec, "em_tlv_type_transmitter_link_metric", "IEEE 1905.1 TLV §6.4.11"),
+        (RECEIVER_LINK_METRIC, 0x0A, spec, "em_tlv_type_receiver_link_metric", "IEEE 1905.1 TLV §6.4.12"),
+        (VENDOR_SPECIFIC, 0x0B, spec, "em_tlv_type_vendor_specific", "IEEE 1905.1 TLV §6.4.2"),
+        (LINK_METRIC_RESULT_CODE, 0x0C, spec, "em_tlv_type_link_metric_result_code", "IEEE 1905.1 TLV §6.4.13"),
+        (SEARCHED_ROLE, 0x0D, spec, "em_tlv_type_searched_role", "IEEE 1905.1 TLV §6.4.14"),
+        (AUTOCONFIG_FREQ_BAND, 0x0E, spec, "em_tlv_type_autoconf_freq_band", "IEEE 1905.1 TLV §6.4.15"),
+        (SUPPORTED_ROLE, 0x0F, spec, "em_tlv_type_supported_role", "IEEE 1905.1 TLV §6.4.16"),
+        (SUPPORTED_FREQ_BAND, 0x10, spec, "em_tlv_type_supported_freq_band", "IEEE 1905.1 TLV §6.4.17"),
+        (WSC, 0x11, spec, "em_tlv_type_wsc", "IEEE 1905.1 TLV §6.4.18"),
         (SUPPORTED_SERVICE, 0x80, spec, "em_tlv_type_supported_service", "Table 22, §17.2; TLV §17.2.1"),
         (SEARCHED_SERVICE, 0x81, spec, "em_tlv_type_searched_service", "Table 22, §17.2; TLV §17.2.2"),
         (AP_RADIO_IDENTIFIER, 0x82, spec, "em_tlv_type_radio_id", "Table 22, §17.2; TLV §17.2.3"),
@@ -377,10 +377,10 @@ wire_code! {
     pub struct FreqBand(u8);
     const HEX_WIDTH: usize = 2;
     entries: [
-        (BAND_2_4_GHZ, 0x00, spec, "em_freq_band_24", "Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)"),
-        (BAND_5_GHZ, 0x01, spec, "em_freq_band_5", "Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)"),
-        (BAND_60_GHZ, 0x02, spec, "em_freq_band_60", "Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)"),
-        (BAND_6_GHZ, 0x03, spec, "em_freq_band_6", "Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)"),
+        (BAND_2_4_GHZ, 0x00, spec, "em_freq_band_24", "Table 15, §6 (extends IEEE 1905.1 Table 6-23)"),
+        (BAND_5_GHZ, 0x01, spec, "em_freq_band_5", "Table 15, §6 (extends IEEE 1905.1 Table 6-23)"),
+        (BAND_60_GHZ, 0x02, spec, "em_freq_band_60", "Table 15, §6 (extends IEEE 1905.1 Table 6-23)"),
+        (BAND_6_GHZ, 0x03, spec, "em_freq_band_6", "Table 15, §6 (extends IEEE 1905.1 Table 6-23)"),
     ]
 }
 
@@ -393,15 +393,15 @@ wire_code! {
     pub struct MediaType(u16);
     const HEX_WIDTH: usize = 4;
     entries: [
-        (IEEE_802_3AB, 0x0001, spec, "em_media_type_ieee8023ab", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11B_2_4_GHZ, 0x0100, spec, "em_media_type_ieee80211b_24", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11G_2_4_GHZ, 0x0101, spec, "em_media_type_ieee80211g_24", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11A_5_GHZ, 0x0102, spec, "em_media_type_ieee80211a_5", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11N_2_4_GHZ, 0x0103, spec, "em_media_type_ieee80211n_24", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11N_5_GHZ, 0x0104, spec, "em_media_type_ieee80211n_5", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11AC_5_GHZ, 0x0105, spec, "em_media_type_ieee80211ac_5", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11AD_60_GHZ, 0x0106, spec, "em_media_type_ieee80211ad_60", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
-        (IEEE_802_11AF, 0x0107, spec, "em_media_type_ieee80211af", "IEEE 1905.1 media type (unverified: 1905.1 text not available)"),
+        (IEEE_802_3AB, 0x0001, spec, "em_media_type_ieee8023ab", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11B_2_4_GHZ, 0x0100, spec, "em_media_type_ieee80211b_24", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11G_2_4_GHZ, 0x0101, spec, "em_media_type_ieee80211g_24", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11A_5_GHZ, 0x0102, spec, "em_media_type_ieee80211a_5", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11N_2_4_GHZ, 0x0103, spec, "em_media_type_ieee80211n_24", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11N_5_GHZ, 0x0104, spec, "em_media_type_ieee80211n_5", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11AC_5_GHZ, 0x0105, spec, "em_media_type_ieee80211ac_5", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11AD_60_GHZ, 0x0106, spec, "em_media_type_ieee80211ad_60", "IEEE 1905.1 Table 6-12, §6.4.7"),
+        (IEEE_802_11AF, 0x0107, spec, "em_media_type_ieee80211af", "IEEE 1905.1 Table 6-12, §6.4.7"),
     ]
 }
 

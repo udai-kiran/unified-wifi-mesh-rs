@@ -1,15 +1,15 @@
 upstream_type	upstream_identifier	class	rust_name	spec_reference	reason
-em_msg_type_t	em_msg_type_topo_disc	spec	TOPOLOGY_DISCOVERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_topo_disc	spec	TOPOLOGY_DISCOVERY	IEEE 1905.1 Table 6-4; message §6.3.1	-
 em_msg_type_t	em_msg_type_topo_notif	spec	TOPOLOGY_NOTIFICATION	Table 21, §17.1; message §17.1.5	-
 em_msg_type_t	em_msg_type_topo_query	spec	TOPOLOGY_QUERY	Table 21, §17.1; message §17.1.38	-
 em_msg_type_t	em_msg_type_topo_resp	spec	TOPOLOGY_RESPONSE	Table 21, §17.1; message §17.1.4	-
-em_msg_type_t	em_msg_type_topo_vendor	spec	VENDOR_SPECIFIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_msg_type_t	em_msg_type_link_metric_query	spec	LINK_METRIC_QUERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_msg_type_t	em_msg_type_link_metric_resp	spec	LINK_METRIC_RESPONSE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_topo_vendor	spec	VENDOR_SPECIFIC	IEEE 1905.1 Table 6-4; message §6.3.13	-
+em_msg_type_t	em_msg_type_link_metric_query	spec	LINK_METRIC_QUERY	IEEE 1905.1 Table 6-4; message §6.3.5	-
+em_msg_type_t	em_msg_type_link_metric_resp	spec	LINK_METRIC_RESPONSE	IEEE 1905.1 Table 6-4; message §6.3.6	-
 em_msg_type_t	em_msg_type_autoconf_search	spec	AP_AUTOCONFIGURATION_SEARCH	Table 21, §17.1; message §17.1.1	-
 em_msg_type_t	em_msg_type_autoconf_resp	spec	AP_AUTOCONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.2	-
 em_msg_type_t	em_msg_type_autoconf_wsc	spec	AP_AUTOCONFIGURATION_WSC	Table 21, §17.1; message §17.1.3	-
-em_msg_type_t	em_msg_type_autoconf_renew	spec	AP_AUTOCONFIGURATION_RENEW	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_msg_type_t	em_msg_type_autoconf_renew	spec	AP_AUTOCONFIGURATION_RENEW	IEEE 1905.1 Table 6-4; message §6.3.10	-
 em_msg_type_t	em_msg_type_1905_ack	spec	IEEE1905_ACK	Table 21, §17.1; message §17.1.32	-
 em_msg_type_t	em_msg_type_ap_cap_query	spec	AP_CAPABILITY_QUERY	Table 21, §17.1; message §17.1.6	-
 em_msg_type_t	em_msg_type_ap_cap_rprt	spec	AP_CAPABILITY_REPORT	Table 21, §17.1; message §17.1.7	-
@@ -71,23 +71,23 @@ em_msg_type_t	em_msg_type_ap_mld_config_resp	spec	AP_MLD_CONFIGURATION_RESPONSE	
 em_msg_type_t	em_msg_type_bsta_mld_config_req	spec	BSTA_MLD_CONFIGURATION_REQUEST	Table 21, §17.1; message §17.1.65	-
 em_msg_type_t	em_msg_type_bsta_mld_config_resp	spec	BSTA_MLD_CONFIGURATION_RESPONSE	Table 21, §17.1; message §17.1.66	-
 em_msg_type_t	em_msg_type_avail_spectrum_inquiry	spec	AVAILABLE_SPECTRUM_INQUIRY	Table 21, §17.1; message §17.1.67	-
-em_tlv_type_t	em_tlv_type_eom	spec	END_OF_MESSAGE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_al_mac_address	spec	AL_MAC_ADDRESS	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_mac_address	spec	MAC_ADDRESS	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_device_info	spec	DEVICE_INFORMATION	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_device_bridging_cap	spec	DEVICE_BRIDGING_CAPABILITY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_non1905_neigh_list	spec	NON_1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_1905_neigh_list	spec	IEEE1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_link_metric	spec	LINK_METRIC_QUERY	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_transmitter_link_metric	spec	TRANSMITTER_LINK_METRIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_receiver_link_metric	spec	RECEIVER_LINK_METRIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_vendor_specific	spec	VENDOR_SPECIFIC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_link_metric_result_code	spec	LINK_METRIC_RESULT_CODE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_searched_role	spec	SEARCHED_ROLE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_autoconf_freq_band	spec	AUTOCONFIG_FREQ_BAND	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_supported_role	spec	SUPPORTED_ROLE	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_supported_freq_band	spec	SUPPORTED_FREQ_BAND	IEEE 1905.1 (unverified: 1905.1 text not available)	-
-em_tlv_type_t	em_tlv_type_wsc	spec	WSC	IEEE 1905.1 (unverified: 1905.1 text not available)	-
+em_tlv_type_t	em_tlv_type_eom	spec	END_OF_MESSAGE	IEEE 1905.1 TLV §6.4.1	-
+em_tlv_type_t	em_tlv_type_al_mac_address	spec	AL_MAC_ADDRESS	IEEE 1905.1 TLV §6.4.3	-
+em_tlv_type_t	em_tlv_type_mac_address	spec	MAC_ADDRESS	IEEE 1905.1 TLV §6.4.4	-
+em_tlv_type_t	em_tlv_type_device_info	spec	DEVICE_INFORMATION	IEEE 1905.1 TLV §6.4.5	-
+em_tlv_type_t	em_tlv_type_device_bridging_cap	spec	DEVICE_BRIDGING_CAPABILITY	IEEE 1905.1 TLV §6.4.6	-
+em_tlv_type_t	em_tlv_type_non1905_neigh_list	spec	NON_1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 TLV §6.4.8	-
+em_tlv_type_t	em_tlv_type_1905_neigh_list	spec	IEEE1905_NEIGHBOR_DEVICE_LIST	IEEE 1905.1 TLV §6.4.9	-
+em_tlv_type_t	em_tlv_type_link_metric	spec	LINK_METRIC_QUERY	IEEE 1905.1 TLV §6.4.10	-
+em_tlv_type_t	em_tlv_type_transmitter_link_metric	spec	TRANSMITTER_LINK_METRIC	IEEE 1905.1 TLV §6.4.11	-
+em_tlv_type_t	em_tlv_type_receiver_link_metric	spec	RECEIVER_LINK_METRIC	IEEE 1905.1 TLV §6.4.12	-
+em_tlv_type_t	em_tlv_type_vendor_specific	spec	VENDOR_SPECIFIC	IEEE 1905.1 TLV §6.4.2	-
+em_tlv_type_t	em_tlv_type_link_metric_result_code	spec	LINK_METRIC_RESULT_CODE	IEEE 1905.1 TLV §6.4.13	-
+em_tlv_type_t	em_tlv_type_searched_role	spec	SEARCHED_ROLE	IEEE 1905.1 TLV §6.4.14	-
+em_tlv_type_t	em_tlv_type_autoconf_freq_band	spec	AUTOCONFIG_FREQ_BAND	IEEE 1905.1 TLV §6.4.15	-
+em_tlv_type_t	em_tlv_type_supported_role	spec	SUPPORTED_ROLE	IEEE 1905.1 TLV §6.4.16	-
+em_tlv_type_t	em_tlv_type_supported_freq_band	spec	SUPPORTED_FREQ_BAND	IEEE 1905.1 TLV §6.4.17	-
+em_tlv_type_t	em_tlv_type_wsc	spec	WSC	IEEE 1905.1 TLV §6.4.18	-
 em_tlv_type_t	em_tlv_type_supported_service	spec	SUPPORTED_SERVICE	Table 22, §17.2; TLV §17.2.1	-
 em_tlv_type_t	em_tlv_type_searched_service	spec	SEARCHED_SERVICE	Table 22, §17.2; TLV §17.2.2	-
 em_tlv_type_t	em_tlv_type_radio_id	spec	AP_RADIO_IDENTIFIER	Table 22, §17.2; TLV §17.2.3	-
@@ -193,21 +193,21 @@ em_tlv_type_t	em_tlv_type_avail_spectrum_inquiry_reg	spec	AVAILABLE_SPECTRUM_INQ
 em_tlv_type_t	em_tlv_type_avail_spectrum_inquiry_rsp	spec	AVAILABLE_SPECTRUM_INQUIRY_RESPONSE	Table 127, §17.2.105	-
 em_tlv_type_t	em_tlv_type_vendor_operational_bss	vendor	VENDOR_OPERATIONAL_BSS	-	Not defined in EasyMesh v6.0 (absent from Table 22 and §17.2); upstream non-standard TLV carrying em_ap_vendor_operational_bss_t
 em_tlv_type_t	em_tlv_type_max	sentinel	-	-	Upper bound marker (0xF3); not a TLV type
-em_freq_band_t	em_freq_band_24	spec	BAND_2_4_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
-em_freq_band_t	em_freq_band_5	spec	BAND_5_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
-em_freq_band_t	em_freq_band_60	spec	BAND_60_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
-em_freq_band_t	em_freq_band_6	spec	BAND_6_GHZ	Table 15, §6.1 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_24	spec	BAND_2_4_GHZ	Table 15, §6 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_5	spec	BAND_5_GHZ	Table 15, §6 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_60	spec	BAND_60_GHZ	Table 15, §6 (extends IEEE 1905.1 Table 6-23)	-
+em_freq_band_t	em_freq_band_6	spec	BAND_6_GHZ	Table 15, §6 (extends IEEE 1905.1 Table 6-23)	-
 em_freq_band_t	em_freq_band_unknown	sentinel	-	-	Not a band: 0x04 is reserved per Table 15. Upstream nevertheless creates its controller and agent AL nodes with this value (src/ctrl/em_ctrl.cpp:1144, src/orch/em_orch_agent.cpp:259) and copies get_band() into the AutoconfigFreqBand / SupportedFreqBand TLVs (src/em/config/em_configuration.cpp:4404-4411, :4559-4562; response sent from :4504-4507), so 0x04 can appear on the wire. Upstream defect; FreqBand keeps the raw value but names no constant
-em_media_type_t	em_media_type_ieee8023ab	spec	IEEE_802_3AB	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211b_24	spec	IEEE_802_11B_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211g_24	spec	IEEE_802_11G_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211a_5	spec	IEEE_802_11A_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211n_24	spec	IEEE_802_11N_2_4_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211n_5	spec	IEEE_802_11N_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211ac_5	spec	IEEE_802_11AC_5_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211ad_60	spec	IEEE_802_11AD_60_GHZ	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_ieee80211af	spec	IEEE_802_11AF	IEEE 1905.1 media type (unverified: 1905.1 text not available)	-
-em_media_type_t	em_media_type_max	sentinel	-	-	Upper bound marker (0x0108); not a media type
+em_media_type_t	em_media_type_ieee8023ab	spec	IEEE_802_3AB	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211b_24	spec	IEEE_802_11B_2_4_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211g_24	spec	IEEE_802_11G_2_4_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211a_5	spec	IEEE_802_11A_5_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211n_24	spec	IEEE_802_11N_2_4_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211n_5	spec	IEEE_802_11N_5_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211ac_5	spec	IEEE_802_11AC_5_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211ad_60	spec	IEEE_802_11AD_60_GHZ	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_ieee80211af	spec	IEEE_802_11AF	IEEE 1905.1 Table 6-12, §6.4.7	-
+em_media_type_t	em_media_type_max	sentinel	-	-	Upper bound marker (0x0108) in upstream's enum. EasyMesh Table 14 (§6) assigns 0x0108 to Wi-Fi 6 and 0x0109 to Wi-Fi 7 (n=0); adding them is an em-types follow-up (STATUS.md)
 em_profile_type_t	em_profile_type_reserved	sentinel	-	-	0x00 is Reserved per Table 69. Upstream uses it as an unset default and, on receive, treats a decoded 0x00 as Profile-1 (src/em/config/em_configuration.cpp:6307, :6412); no production writer sends it. Reserved values are handled by the codec per Table 69, not named in the API
 em_profile_type_t	em_profile_type_1	spec	MULTI_AP_PROFILE_1	Table 69, §17.2.47	-
 em_profile_type_t	em_profile_type_2	spec	MULTI_AP_PROFILE_2	Table 69, §17.2.47	-

@@ -15,11 +15,7 @@ Provenance of the committed `upstream_enums.tsv` (recorded by hand; not regenera
 - **EasyMesh rows** were checked against the Wi-Fi EasyMesh Specification v6.0 text: message types
   (Table 21, §17.1), TLV types (Table 22 and Tables 126/127, §17.2), frequency band (Table 15),
   Multi-AP Profile (Table 69) and SupportedService (Table 23).
-- **31 rows are provisional** (design note 0001, amendment A2): the 1905.1-only message types,
-  TLVs and media types whose `spec_reference` reads `… (unverified …)`. Their values are fixed by
-  the pinned upstream enums; their Rust names and references wait for a check against IEEE 1905.1.
-- List them with:
-  `awk -F'\t' 'NR>1 && $5 ~ /unverified/' classification.tsv`
+- **IEEE 1905.1 rows** (31: message types, TLV types and media types) were checked against IEEE Std 1905.1 Table 6-4 (§6.3), the TLV tables of §6.4 and Table 6-12 (§6.4.7) by two independent extractions on 2026-11-19; all names and values match (see [docs/tlv-spec-audit.md](../../../../docs/tlv-spec-audit.md)).
 
 ## Bumping the pinned upstream commit
 

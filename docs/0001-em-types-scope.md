@@ -98,7 +98,7 @@ reassigns each one and updates the table's Status column. A type with no owner b
 | `Interface { name: Option<InterfaceName>, mac: MacAddr, media: MediaType }` | `em_interface_t` | plain struct; `None` = name not known (D5) |
 | `MsgType(u16)` | `em_msg_type_t` | open wire code (D3) |
 | `TlvType(u8)` | `em_tlv_type_t` | open wire code |
-| `FreqBand(u8)` | `em_freq_band_t` | open wire code: 1905.1 Table 6-23 plus EasyMesh Table 15, which adds 0x03 = 6 GHz (checked against the spec v6.0 text, §6.1) |
+| `FreqBand(u8)` | `em_freq_band_t` | open wire code: 1905.1 Table 6-23 plus EasyMesh Table 15, which adds 0x03 = 6 GHz (checked against the spec v6.0 text, §6) |
 | `MediaType(u16)` | `em_media_type_t` | open wire code: 1905.1 media type, 2 octets |
 | `ProfileType(u8)` | `em_profile_type_t` | open wire code: Multi-AP Profile TLV (spec Table 69) |
 | `ServiceType(u8)` | `em_service_type_t` | open wire code: SupportedService/SearchedService (spec Table 23), plus upstream's 0xA0/0xA1 |
@@ -454,6 +454,15 @@ them later is an API change to `em-types`, recorded in `STATUS.md` when it happe
 This is an **explicit exception** to the D4 / Consequences requirement that the classification be
 reviewed against the spec text before Step 2. It applies to these 31 rows only. All EasyMesh rows
 were checked against the EasyMesh v6.0 text.
+
+**Resolved 2026-11-19.** The TLV spec audit ([tlv-spec-audit.md](tlv-spec-audit.md)) read the
+IEEE 1905.1 text and checked all 31 rows:
+- message types against Table 6-4;
+- TLVs against §6.4.1–§6.4.18;
+- media types against Table 6-12.
+
+Every name and value matches, so no rename was needed. The `spec_reference` texts now cite those
+sections.
 
 ### A3 (2026-11-18, Step 2): public API beyond the D5 list
 

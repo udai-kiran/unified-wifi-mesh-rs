@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (rev 3; two review rounds, round 2 by the Claude correctness reviewer; final fixes not reviewed: two-round limit). Codec choice and D6 decided by the user (2026-11-19) |
+| Status | **Accepted** (rev 4; two review rounds on rev 3, round 2 by the Claude correctness reviewer; rev 4 not reviewed: two-round limit). Codec choice, D6, D7 and D8 decided by the user (2026-11-19) |
 | Date | 2026-11-19 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-msg` (TLV bodies, added per consumer under 0005 D1); every consumer crate that ports a TLV reader or writer |
@@ -12,8 +12,8 @@
 Note 0005 ported the CMDU header, TLV framing, builder and validation, and left TLV *bodies* to be
 added later, each with the consumer that uses it (0005 D1, decision 2). `docs/em_base-coverage.md`
 assigns 216 `em_base.h` types to `em-msg`; most are TLV body layouts. Each body needs a decoder and
-an encoder whose bytes match upstream exactly, because upstream builds bodies by filling packed C
-structs and copying them into the frame.
+an encoder. Upstream builds bodies by filling packed C structs and copying them into the frame, so
+the bytes follow upstream (D6) except where the spec states a point explicitly (D7, D8).
 
 The framing in `em-msg` is hand-written on byte slices (`split_at_checked`, `u16::from_be_bytes`).
 It stays that way: it is small, verified against 76 upstream frames, and its edge cases are pinned
@@ -189,6 +189,72 @@ upstream defect", with the sender line, and listed in `STATUS.md` follow-ups so 
 if the EasyMesh specification shows network order. Tests pin the little-endian bytes with a
 non-symmetric value.
 
+### D7. Spec wins for bit layouts (decided by the user, 2026-11-19)
+
+Where the pinned upstream sender places bits differently from the EasyMesh or IEEE 1905.1
+table (bit positions inside an octet, reserved bits, field order inside a bit-field octet), the
+port follows the specification on the wire and records the difference as an intentional
+difference with the spec section and the upstream line. First case: AP HE Capabilities
+(EasyMesh 17.2.10, Table 32), where upstream's sender (`src/em/em.cpp:1443-1451`) puts each
+second-octet flag one bit too low (DL OFDMA at bit 0, SU beamformer at bit 6; the spec has them at
+bits 1 and 7, bit 0 reserved); upstream's receivers read the value into a fixed struct
+(`src/em/capability/em_capability.cpp:1582-1597`, `:1861-1875`). This narrows D2's "the
+sender is authoritative" to what the spec leaves unstated; D6 (host-order fields kept
+little-endian where the spec states no byte order) is unchanged. The spec audit of every TLV
+records the remaining differences ([tlv-spec-audit.md](tlv-spec-audit.md)).
+
+### D8. Spec wins wherever it is explicit (decided by the user, 2026-11-19)
+
+D7 extends from bits to every point the specification states:
+- field order and size;
+- presence conditions and counts;
+- string and SSID lengths;
+- the TLV header itself;
+- byte order where a TLV table names it;
+- value ranges.
+
+Where upstream differs, the port follows the spec. Where the spec text is silent on the point, the
+port keeps upstream's bytes (D6).
+
+Each body that differs from upstream records the difference in its doc comment, with the spec
+section and the upstream line. Its tests pin the spec bytes.
+
+This replaces earlier rules wherever the spec is explicit:
+- D2's "taken from the code that writes and reads the bytes";
+- D2's "accepted lengths follow upstream";
+- the "sender is authoritative" rule in the Context section;
+- D3 item 1's round trip of upstream's sender bytes;
+- D3 items 2 and 6, which treat upstream's alternate lengths as the contract.
+
+The fixtures for those points are spec bytes. Upstream's alternate lengths become receive-side
+tolerances, which the consumer decides. A tolerance kept by the consumer gets its D3 item 6
+fixture, and its truncation test (item 2) excludes it. Examples are the Profile TLV's 4 octets and the empty
+Backhaul STA MLD value.
+
+The decision for every audit finding is in the `port_rule` column of
+[`data/tlv-spec-audit.tsv`](data/tlv-spec-audit.tsv):
+- `SPEC`: the spec settles the point;
+- `UPSTREAM`: the spec is silent;
+- `UNSURE`: the wording needs a second look; the consumer decides.
+
+Consequences named by the audit ([tlv-spec-audit.md](tlv-spec-audit.md)):
+- SSID Length counts the SSID octets with no NUL (AP Operational BSS, BSS Configuration Report).
+- DPP Chirp Value Hash Length is 1 octet.
+- Beacon Metrics Query always carries `Num_Ids`.
+- Agent AP MLD Configuration is a full TLV, header included. Receivers step each entry by
+  `SSID Length`.
+- TID-to-Link Mapping Policy carries its mapping octets.
+- VHT Capabilities MCS maps are big-endian.
+- AP Radio Basic Capabilities op-class groups are contiguous.
+- AL MAC Address is exactly 6 octets.
+
+Byte order: EasyMesh §3.1.2 points to IEEE 1905.1 for bit and byte ordering "unless otherwise
+stated". The 1905.1 text on the project's spec server states no general byte order, so D6 still
+applies to fields whose TLV table names no order.
+
+Interoperability: on these TLVs the port's bytes differ from an unpatched upstream peer's. Each
+consumer note records the effect on interop, and any receive-side tolerance it chooses.
+
 ## Acceptance criteria (Step 1)
 
 1. `Reader` and `Writer` in `em-msg`, no new dependencies, no `unsafe`, no clones; build, test,
@@ -218,3 +284,5 @@ non-symmetric value.
   rate-limited): Step 1 narrowed to the helper so bodies stay with their consumer (0005 D1);
   Channel Scan Result and CAC Status questions recorded for the `em-core` channel step; Backhaul
   STA MLD empty value and citations corrected. Not reviewed after these fixes: two-round limit.
+- rev 4, decided by the user after the TLV spec audit: D7 (spec wins for bit layouts) and D8
+  (spec wins wherever it is explicit; silent points keep upstream's bytes per D6).
