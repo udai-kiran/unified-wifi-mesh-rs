@@ -16,7 +16,7 @@ Rev 3 changes:
   the network SSID configuration (D2).
 - Type classification decided by the user: Step 1 produces the per-type table and the user
   approves it before Step 2 (D7 item 2).
-- AP MLD exact-capacity SSID decided by the user: option 3 (D7 item 4).
+- AP MLD exact-capacity SSID decided by the user: option 3 (D7 item 4); amended by A1.
 
 Rev 3, review round 1 fixes:
 
@@ -60,11 +60,14 @@ found:
   Conversely, the model **stores** records that coverage gives to `em-msg` (for example the
   native scan row `em_scan_result_t` and its key, filled from a decoded
   `em_channel_scan_result_t`, `em_channel.cpp:2426-2450`).
-- **Record sizes vary widely** (estimated from the pinned declarations): STA about 4 KiB plus ten
-  HAL beacon reports, plus a heap-owned frame body up to 11 426 bytes (`EM_MAX_FRAME_BODY_LEN`,
-  `em_base.h:74`; IEs parsed into `malloc`ed tags, `dm_sta.cpp:494-502`); BSS about 1.9 KiB plus
-  vendor IEs; radio capability about 10 KiB; **policy about 49 KiB** (`qos_mgt[EM_MAX_STA_PER_AGENT]`,
-  `em_base.h:3808-3848`). Exact HAL-dependent sizes cannot be verified from these declarations.
+- **Record sizes vary widely.** Measured in Step 1 with GCC 15.2 on x86_64 LP64, compiling the
+  pinned `em_base.h` against the pinned OneWifi and HAL declarations (`sizeof`): STA 4 568 bytes
+  including its ten HAL beacon reports, plus a heap-owned frame body up to 11 426 bytes
+  (`EM_MAX_FRAME_BODY_LEN`, `em_base.h:74`; IEs parsed into `malloc`ed tags, `dm_sta.cpp:494-502`);
+  BSS 4 320 bytes (rev 3 estimated 1.9 KiB; the 2 310-byte vendor-element array was missed); radio
+  capability 10 528 bytes; **policy 50 524 bytes** (`qos_mgt[EM_MAX_STA_PER_AGENT]`,
+  `em_base.h:3808-3848`); the unassociated-STA query list 395 393 bytes. Other stored records:
+  network SSID 1 264, AP MLD 3 316, scan result 1 124, device 2 104, radio 424 bytes.
 - **String fields** are NUL-terminated `char[N]` (N−1 payload bytes) in most places, but not
   uniformly: `MAX_WIFI_SSID_LEN` is `32 + 1`; AP MLD copies a wire length equal to
   `sizeof(ssid_t)` and forces the last byte to NUL; the extended-device reader accepts up to 255
@@ -152,7 +155,7 @@ Synchronous, depends on `em-types` (and `em-utils` only if needed), no `unsafe`,
 ### D3. Record representation: ownership chosen field by field
 
 Decided by the user (2026-11-19). It replaces rev 1's "all records `Copy`" (option A, withdrawn):
-that does not fit the estimated sizes from the pinned declarations, and a record holding a `Vec`
+that does not fit the measured record sizes (Context), and a record holding a `Vec`
 cannot be `Copy` at all.
 
 - **Small values are `Copy`:** MACs, ids and keys, enums, counters, and short fixed-capacity
@@ -190,9 +193,8 @@ cannot be `Copy` at all.
 - Subject to the type classification and AP MLD decision in D7, field sets, retained enum values
   and accepted limits match upstream except for the intentional differences below.
 - **Intentional differences:** capacity is enforced with an error (defect 1); over-long input is an
-  error where it exceeds the approved native limit (defect 2); a 33-byte AP MLD SSID whose last
-  byte is not NUL is rejected where upstream truncates it (D7 item 4, subject to Step 1 confirming
-  `sizeof(ssid_t)`); identity fields are initialised explicitly from
+  error where it exceeds the approved native limit (defect 2); a 32-byte AP MLD SSID with no NUL
+  keeps all 32 bytes where upstream overwrites the last one (D7 item 4, amendment A1); identity fields are initialised explicitly from
   the controller identity, including the network id where the consumer needs it (defect 3, fixed
   in Step 3 after reading the controller command consumers); records preserve every field, including
   `ctrl_id.media` (which upstream's assignment copies, `dm_network.cpp:192`); no shared mutable
@@ -293,7 +295,7 @@ Record its full hash and, for every HAL source needed, the repository and immuta
 versioned artifact and digest, plus header paths; record platform header and toolchain versions
 and preprocessing settings needed to reproduce the declarations. The target ABI for platform
 typedefs is **x86_64 Linux, LP64**. Resolve and cite the external manifest against those sources,
-and confirm all header-dependent values, including the assumed 33-byte `ssid_t`, from that pin.
+and confirm all header-dependent values from that pin (`ssid_t` is 32 bytes, amendment A1).
 If a required source or assumption cannot be confirmed, stop and report the discrepancy instead
 of generating the inventory. The user approves the OneWifi hash before the inventory is generated;
 the separate approval of the classification table remains required before Step 2.
@@ -334,35 +336,46 @@ Answered by the user (2026-11-19):
    controller-side node records and network-wide SSID configuration; `em-core` obtains reads and
    sends updates through messages, not model copies. Any external index contains keys, not
    authoritative records, and `&`/`&mut` stay inside the owner.
-4. *(Decided 2026-11-19: option 3.)* **AP MLD exact-capacity SSID.** The length rule applies to the
-   decoded AP MLD SSID field; accepting that field does not itself write an AP MLD model row.
-   Upstream accepts `ssid_len == sizeof(ssid_t)` and overwrites the last byte with NUL before haul lookup
-   (`em_configuration.cpp:2776-2779, 2803-2808`), silently changing an SSID whose last byte is not
-   NUL. The port accepts `ssid_len` up to 32; it accepts `ssid_len == sizeof(ssid_t)` (33, assuming
-   OneWifi's `ssid_t` is `32 + 1`) only if the last byte is NUL. A 33-byte field with a non-NUL
-   last byte is rejected as malformed (intentional difference: upstream truncates); longer
-   lengths are rejected as upstream does. Step 1 must confirm the assumed `sizeof(ssid_t)` at the
-   selected OneWifi pin. For every accepted length, normalize the decoded SSID field to the bytes
-   before the first NUL within the field, or all field bytes if none is present: this is the
-   upstream C-string interpretation, including for embedded NULs and padding. Haul lookup compares
-   those bytes against the configured SSID's bytes before its first NUL, as upstream's `strncmp` does;
-   the first matching configuration with at least one haul supplies its first haul; an empty SSID
-   or no eligible match remains unresolved (`dm_easy_mesh.cpp:2876-2893`). An unresolved haul
-   leaves all AP MLD rows unchanged: neither insert nor replace a row. Upstream passes the decoded
-   row with the unresolved haul to the model, which returns before a row write
+4. *(Decided 2026-11-19; amended by A1 the same day.)* **AP MLD exact-capacity SSID.** `ssid_t`
+   is `char[32]` (`rdkb-halif-wifi` @ `1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5`,
+   `include/wifi_hal_generic.h:262`, reached through `em_base.h` → `wifi_webconfig.h` → OneWifi
+   `include/wifi_base.h:31`), not `32 + 1` as option 3 assumed. Upstream rejects
+   `ssid_len > sizeof(ssid_t)` (`em_configuration.cpp:2776-2779`), copies the field and overwrites
+   byte 32 with NUL before haul lookup (`em_configuration.cpp:2803-2808`), so a valid 32-byte SSID
+   (the 802.11 maximum) silently loses its last byte. **The port (A1):** the length rule applies to
+   the decoded AP MLD SSID field, and accepting the field does not itself write an AP MLD model row.
+   `ssid_len` up to 32 is accepted; longer lengths are rejected as upstream does. The SSID is the
+   bytes before the first NUL within the field, or all field bytes if none is present (upstream's
+   C-string interpretation for embedded NULs and padding); no byte is overwritten, so a 32-byte SSID
+   with no NUL keeps all 32 bytes (intentional difference: upstream truncates it to 31). The
+   configured-SSID store holds up to 32 bytes natively so lookups can match such an SSID. Haul lookup
+   compares those bytes with the configured SSID's bytes before its first NUL, as upstream's
+   `strncmp` does; the first matching configuration with at least one haul supplies its first haul;
+   an empty SSID or no eligible match remains unresolved (`dm_easy_mesh.cpp:2876-2893`). An
+   unresolved haul leaves all AP MLD rows unchanged: neither insert nor replace a row. Upstream
+   passes the decoded row with the unresolved haul to the model, which returns before a row write
    (`em_configuration.cpp:2803-2808, 2836`, `dm_easy_mesh.cpp:3709-3717`). Continue processing
    affiliated-BSS updates independently, as upstream does (`em_configuration.cpp:2838-2851`).
-   The pinned sender emits `sizeof(ssid_t)` and `strncpy` pads NUL-terminated short names
-   (`em_configuration.cpp:1393-1394`); the configuration path
-   terminates the source SSID (`em_configuration.cpp:332-334`). Option 3 accepts all such
-   upstream-sender traffic. The consumer tests a short field with an embedded NUL, a 32-byte field
-   with no NUL, 33 with a final NUL, 33 with a non-NUL final byte, and longer lengths; it also
-   tests a sender fixture containing `mesh` plus NUL padding with `ssid_len == 33`, resolving to
-   the configured haul. For length-valid empty and unmatched SSIDs, and a matching configuration
-   with no hauls, assert that the decoded field is accepted but the AP MLD row count and existing
-   rows are unchanged. With an affiliated BSS that upstream would update, assert its update still
-   occurs despite the unresolved haul.
+   The pinned sender emits `sizeof(ssid_t)` bytes and `strncpy` pads NUL-terminated names of at most
+   31 bytes (`em_configuration.cpp:1393-1394`; the configuration path terminates the source SSID,
+   `em_configuration.cpp:332-334`); A1 accepts all such upstream-sender traffic. The consumer tests a
+   short field with an embedded NUL, 32 bytes with a final NUL, 32 bytes with no NUL (kept whole and
+   matched against a 32-byte configured SSID), and 33 or more (rejected); it also tests a sender
+   fixture containing `mesh` plus NUL padding with `ssid_len == 32`, resolving to the configured
+   haul. For length-valid empty and unmatched SSIDs, and a matching configuration with no hauls,
+   assert that the decoded field is accepted but the AP MLD row count and existing rows are
+   unchanged. With an affiliated BSS that upstream would update, assert its update still occurs
+   despite the unresolved haul.
    Spec validity is not verified; an 802.11 SSID is at most 32 bytes.
+
+### Amendments
+
+- **A1 (2026-11-19, user decision, during Step 1).** Step 1 confirmed `ssid_t` is 32 bytes at the
+  approved pins (OneWifi `59be72f8d95d21d3644f16c536c281f2d6a3fbcb`, `rdkb-halif-wifi`
+  `1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5`), not 33. Option 3 rested on 33 and would have rejected
+  valid 32-byte SSIDs, so the user chose: accept up to 32 bytes, take the bytes before the first NUL
+  (all 32 if none), never overwrite a byte (D7 item 4). Not reviewed: recorded as a decision
+  amendment.
 
 ## Acceptance criteria
 

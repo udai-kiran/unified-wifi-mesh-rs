@@ -1,0 +1,130 @@
+# DRAFT, pending user approval. Categories, owners and reasons are proposed, not decisions.
+# em_base.h line is - for external and C scalar types; evidence paths are at the pinned upstream commit unless they refer to external headers or docs.
+# stored-native includes native values serialized field by field; dual-use identifies an actual wire-layout component or wire code also stored.
+# A dash means no evidence was identified for that use; absence is not proof of no other caller. Coverage-only rows remain in scope.
+type	em_base.h_line	category	proposed_owner	reason	stored_evidence	wire_evidence
+BOOL	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.wideBandWidthChannelPresent; retain its native representation.	include/wifi_hal_extender.h:876	-
+SecurityTypeMap	3894	stored-native	em-dm	static lookup table (string to code), held as `&'static` data per note 0007 D3; not model state	inc/em_base.h:3899	-
+UCHAR	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.opClass; retain its native representation.	include/wifi_hal_extender.h:866	-
+UINT	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.tsf; retain its native representation.	include/wifi_hal_extender.h:875	-
+ULLONG	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.startTime; retain its native representation.	include/wifi_hal_extender.h:868	-
+USHORT	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.duration; retain its native representation.	include/wifi_hal_extender.h:869	-
+bool	-	stored-native	em-dm	Reached through stored em_device_info_t.report_unsuccess_assocs; retain its native representation.	inc/em_base.h:2576	-
+bssid_t	-	dual-use	em-types	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:3835	src/em/config/em_configuration.cpp:429
+char	-	stored-native	em-dm	Reached through stored em_short_string_t.<alias>; retain its native representation.	inc/em_base.h:413	-
+data_elem_attr_id_t	2262	wire-only	em-msg	WSC attribute identifiers used by wire readers and writers; reassign from em-dm.	-	src/em/config/em_configuration.cpp:5905; src/em/config/em_configuration.cpp:6078
+data_elem_attr_t	2256	wire-only	em-msg	WSC attribute header used by wire readers and writers; reassign from em-dm.	-	src/em/config/em_configuration.cpp:5918; src/em/config/em_configuration.cpp:6070
+em_8021q_settings_policy_t	3792	stored-native	em-dm	Reached through stored em_policy_t.def_8021q_settings; retain its native representation.	inc/em_base.h:3840	-
+em_affiliated_ap_info_t	2849	stored-native	em-dm	Reached through stored em_ap_mld_info_t.affiliated_ap; retain its native representation.	inc/em_base.h:2867	src/em/config/em_configuration.cpp:1407
+em_affiliated_bsta_info_t	2870	stored-native	em-dm	Reached through stored em_bsta_mld_info_t.affiliated_bsta; retain its native representation.	inc/em_base.h:2886	src/em/config/em_configuration.cpp:1460
+em_affiliated_sta_info_t	2889	stored-native	em-dm	Reached through stored em_assoc_sta_mld_info_t.affiliated_sta; retain its native representation.	inc/em_base.h:2902	src/em/config/em_configuration.cpp:1512
+em_alarm_samples_t	1404	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:1418	src/em/metrics/em_metrics.cpp:1001
+em_ap_he_cap_t	1911	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2982	src/em/capability/em_capability.cpp:1584
+em_ap_he_mcs_maps_t	1906	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:1914	inc/em_base.h:1914; src/em/capability/em_capability.cpp:1584
+em_ap_ht_cap_t	1881	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2980	src/em/capability/em_capability.cpp:1546
+em_ap_mld_info_t	2857	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_ap_mld.h:26	src/em/config/em_configuration.cpp:1390
+em_ap_radio_advanced_cap_t	2218	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2987	src/em/config/em_configuration.cpp:4330
+em_ap_vht_cap_t	1891	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2981	src/em/capability/em_capability.cpp:1571
+em_assoc_sta_mld_info_t	2894	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_assoc_sta_mld.h:26	src/em/config/em_configuration.cpp:424
+em_backhaul_bss_config_policy_t	3815	stored-native	em-dm	Reached through stored em_policy_t.backhaul_bss_config; retain its native representation.	inc/em_base.h:3845	-
+em_bss_id_t	2775	stored-native	em-dm	Reached through stored em_bss_info_t.id; retain its native representation.	inc/em_base.h:2788	-
+em_bss_info_t	2783	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_bss.h:27	src/em/em.cpp:2054
+em_bsta_mld_info_t	2876	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_bsta_mld.h:26	src/em/config/em_configuration.cpp:1445
+em_cac_cap_method_t	2086	dual-use	em-dm	Stored CAC method is nested in the radio layout read directly from the CAC TLV; retain a native counterpart.	inc/em_base.h:2096	inc/em_base.h:2096; inc/em_base.h:2102; src/em/capability/em_capability.cpp:1612; src/em/capability/em_capability.cpp:1631
+em_cac_cap_radio_t	2093	dual-use	em-dm	CAC radio layout is read directly from the TLV into stored capability; retain a native counterpart.	inc/em_base.h:2989	inc/em_base.h:2102; src/em/capability/em_capability.cpp:1612; src/em/capability/em_capability.cpp:1631
+em_cac_comp_info_t	2699	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_cac_comp.h:26	-
+em_cac_comp_rprt_pair_t	1508	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2705	src/em/channel/em_channel.cpp:1492
+em_cac_op_class_t	546	dual-use	em-dm	Stored operating-class layout is nested in the radio layout read directly from the CAC TLV; retain a native counterpart.	inc/em_base.h:2090	inc/em_base.h:2090; inc/em_base.h:2096; inc/em_base.h:2102; src/em/capability/em_capability.cpp:1612; src/em/capability/em_capability.cpp:1631
+em_channel_scan_cap_radio_t	2063	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2986	src/em/capability/em_capability.cpp:1377
+em_client_filters_cfg_t	2174	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:3847	src/em/policy_cfg/em_policy_cfg.cpp:455
+em_device_id_t	2540	stored-native	em-dm	Reached through stored em_device_info_t.id; retain its native representation.	inc/em_base.h:2571	-
+em_device_info_t	2570	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_device.h:28	-
+em_eht_operations_bss_t	2027	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2046	src/em/em.cpp:2055
+em_eht_operations_radio_t	2043	stored-native	em-dm	Reached through stored em_eht_operations_t.radios; retain its native representation.	inc/em_base.h:2052	-
+em_eht_operations_t	2050	stored-native	em-dm	Reached through stored em_radio_cap_info_t.eht_ops; retain its native representation.	inc/em_base.h:2985	-
+em_ext_device_info_t	2559	stored-native	em-dm	Reached through stored em_device_info_t.extended_info; retain its native representation.	inc/em_base.h:2626	src/em/config/em_configuration.cpp:1292
+em_freq_band_t	501	dual-use	em-types	Stored enum also represents a wire code; keep the existing em-types native counterpart.	inc/em_base.h:2936	src/em/config/em_configuration.cpp:4560
+em_haul_type_t	2488	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2660	src/em/config/em_configuration.cpp:5924
+em_ieee_1905_security_cap_t	2629	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2637	src/em/config/em_configuration.cpp:4438
+em_ieee_1905_security_info_t	2635	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_ieee_1905_security.h:27	-
+em_interface_name_t	410	stored-native	em-types	Reached through stored em_interface_t.name; retain its native representation.	inc/em_base.h:2513	-
+em_interface_preference_t	2507	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_easy_mesh.h:62	-
+em_interface_t	2512	stored-native	em-types	Stored model root; preserve fields in its native representation.	inc/dm_easy_mesh.h:64	-
+em_link_report_t	1412	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2765	src/em/metrics/em_metrics.cpp:951
+em_link_stats_alarm_cfg_t	2168	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:3846	src/em/policy_cfg/em_policy_cfg.cpp:445
+em_long_string_t	414	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/em_base.h:2521	-
+em_media_spec_data_t	1561	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2937	inc/em_base.h:1573; src/em/config/em_configuration.cpp:1203
+em_media_type_t	2230	dual-use	em-types	Stored enum also represents a wire code; keep the existing em-types native counterpart.	inc/em_base.h:2509	docs/0001-em-types-scope.md:102; inc/em_base.h:1562
+em_metric_cltn_interval_t	2105	dual-use	em-dm	Stored metric interval is copied directly into the TLV layout; retain a native counterpart.	inc/em_base.h:2990	src/em/em.cpp:1892; src/em/em.cpp:1899
+em_mlo_policy_t	516	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_easy_mesh.h:101	-
+em_neighbor_info_t	2839	stored-native	em-dm	Neighbor wrapper stores this record; it is outside the selected stored roots.	inc/dm_neighbor.h:26	-
+em_neighbor_t	1073	stored-native	em-dm	Reached through stored em_scan_result_t.neighbor; retain its native representation.	inc/em_base.h:1091	-
+em_network_info_t	2520	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_network.h:26	-
+em_network_ssid_info_t	2646	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_network_ssid.h:26	-
+em_op_class_id_t	2678	stored-native	em-dm	Reached through stored em_op_class_info_t.id; retain its native representation.	inc/em_base.h:2685	-
+em_op_class_info_t	2684	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_op_class.h:26	-
+em_op_class_type_t	2665	stored-native	em-dm	Reached through stored em_op_class_id_t.type; retain its native representation.	inc/em_base.h:2680	-
+em_per_op_class_channels_list_t	525	stored-native	em-dm	Reached through stored em_scan_cap_op_class_info_t.channels; retain its native representation.	inc/em_base.h:539	-
+em_policy_id_t	3778	stored-native	em-dm	Reached through stored em_policy_t.id; retain its native representation.	inc/em_base.h:3822	-
+em_policy_id_type_t	3760	stored-native	em-dm	Reached through stored em_policy_id_t.type; retain its native representation.	inc/em_base.h:3782	-
+em_policy_t	3821	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_policy.h:26	-
+em_profile_2_ap_cap_t	1750	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2988	src/em/config/em_configuration.cpp:4322
+em_profile_type_t	493	dual-use	em-types	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2573	src/em/config/em_configuration.cpp:4448
+em_qos_mgt_policy_t	3808	stored-native	em-dm	Reached through stored em_policy_t.qos_mgt; retain its native representation.	inc/em_base.h:3843	-
+em_radio_cap_info_t	2977	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_radio_cap.h:26	-
+em_radio_id_t	2926	stored-native	em-dm	Reached through stored em_radio_info_t.id; retain its native representation.	inc/em_base.h:2933	-
+em_radio_info_t	2932	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_radio.h:26	-
+em_radio_wifi6_cap_data_t	1965	stored-native	em-dm	Reached through stored em_radio_cap_info_t.wifi6_cap; retain its native representation.	inc/em_base.h:2983	src/em/em.cpp:1481
+em_scan_cap_op_class_info_t	536	stored-native	em-dm	Reached through stored em_channel_scan_cap_radio_t.op_classes; retain its native representation.	inc/em_base.h:2070	src/em/capability/em_capability.cpp:1447
+em_scan_result_id_t	1064	stored-native	em-dm	Native scan row/key; the decoded channel-scan TLV has a separate wire type.	inc/em_base.h:1085	src/em/channel/em_channel.cpp:2426
+em_scan_result_t	1084	stored-native	em-dm	Native scan row/key; the decoded channel-scan TLV has a separate wire type.	inc/dm_scan_result.h:26	src/em/channel/em_channel.cpp:2426
+em_scanner_type_t	1059	stored-native	em-dm	Reached through stored em_scan_result_id_t.scanner_type; retain its native representation.	inc/em_base.h:1070	-
+em_short_string_t	413	stored-native	em-dm	Reached through stored em_interface_preference_t.platform; retain its native representation.	inc/em_base.h:2508	-
+em_small_string_t	419	stored-native	em-dm	Reached through stored em_device_info_t.primary_device_type; retain its native representation.	inc/em_base.h:2614	-
+em_ssid_2_vid_map_info_t	2640	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_ssid_2_vid_map.h:26	-
+em_ssid_info_traffic_separ_pol_t	3797	stored-native	em-dm	Reached through stored em_traffic_separation_policy_t.ssid_info; retain its native representation.	inc/em_base.h:3805	-
+em_sta_info_t	2708	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_sta.h:26	-
+em_steering_policy_type_t	3785	stored-native	em-dm	Reached through stored em_policy_t.policy; retain its native representation.	inc/em_base.h:3825	-
+em_string_t	418	stored-native	em-dm	Reached through stored em_network_info_t.mscs_disallowed_sta; retain its native representation.	inc/em_base.h:2526	-
+em_target_sta_map_t	2769	stored-native	em-dm	Selects a model STA map; it is not a stored field or wire code.	src/dm/dm_easy_mesh.cpp:3006	-
+em_tid_to_link_info_t	2918	stored-native	em-dm	Stored model root; preserve fields in its native representation.	inc/dm_tid_to_link.h:26	src/em/config/em_configuration.cpp:1669
+em_tid_to_link_map_info_t	2905	stored-native	em-dm	Reached through stored em_tid_to_link_info_t.tid_to_link_mapping; retain its native representation.	inc/em_base.h:2923	src/em/config/em_configuration.cpp:1678
+em_tiny_string_t	420	stored-native	em-dm	Reached through stored em_device_info_t.country_code; retain its native representation.	inc/em_base.h:2587	-
+em_traffic_separation_policy_t	3803	stored-native	em-dm	Reached through stored em_policy_t.traffic_separ; retain its native representation.	inc/em_base.h:3841	-
+em_unassoc_query_channel_t	620	stored-native	em-dm	Native query state; TLV bytes are written field by field.	inc/em_base.h:636	src/em/metrics/em_metrics.cpp:2702
+em_unassoc_query_list_t	645	stored-native	em-dm	Native query state; TLV bytes are written field by field.	inc/dm_easy_mesh.h:97	src/em/metrics/em_metrics.cpp:2702
+em_unassoc_query_opclass_t	633	stored-native	em-dm	Native query state; TLV bytes are written field by field.	inc/em_base.h:647	src/em/metrics/em_metrics.cpp:2702
+em_unassoc_sta_metric_entry_t	665	stored-native	em-dm	Native metrics state; TLV uses a separate response layout.	inc/dm_easy_mesh.h:100	src/em/metrics/em_metrics.cpp:2807
+em_unassoc_sta_metrics_rsp_t	673	stored-native	em-dm	Native metrics state; TLV uses a separate response layout.	inc/dm_easy_mesh.h:96	src/em/metrics/em_metrics.cpp:2807
+em_vap_mode_t	2497	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2787	src/em/config/em_configuration.cpp:1639
+em_wifi6_cap_role_head_tlv_t	1929	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:1960	src/em/em.cpp:1498
+em_wifi6_cap_role_tail_tlv_t	1936	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:1962	src/em/em.cpp:1524
+em_wifi6_role_wire_t	1959	stored-native	em-dm	Reached through stored em_radio_wifi6_cap_data_t.roles; retain its native representation.	inc/em_base.h:1967	src/em/em.cpp:1497
+em_wifi7_agent_cap_t	2016	stored-native	em-dm	Reached through stored em_radio_cap_info_t.wifi7_cap; retain its native representation.	inc/em_base.h:2984	src/em/em.cpp:1608
+em_wifi7_freq_record_tlv_t	1970	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:1978	src/em/em.cpp:1623
+em_wifi7_freq_records_t	1976	stored-native	em-dm	Reached through stored em_wifi7_mlo_cap_records_t.ap_str; retain its native representation.	inc/em_base.h:2006	src/em/em.cpp:1618
+em_wifi7_mlo_cap_records_t	2005	stored-native	em-dm	Reached through stored em_wifi7_agent_cap_t.mlo_cap_records; retain its native representation.	inc/em_base.h:2018	src/em/em.cpp:1618
+em_wifi7_mlo_cap_support_tlv_t	1990	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2017	src/em/em.cpp:1613
+emex_device_role_t	2550	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2567	src/em/config/em_configuration.cpp:1327
+emex_product_class_t	2546	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2566	src/em/config/em_configuration.cpp:1324
+float	-	stored-native	em-dm	Reached through stored em_link_stats_alarm_cfg_t.link_quality_threshold; retain its native representation.	inc/em_base.h:2171	-
+ieee_1905_security_t	2533	stored-native	em-dm	Reached through stored em_device_info_t.sec_1905; retain its native representation.	inc/em_base.h:2616	-
+int	-	stored-native	em-dm	Reached through stored em_radio_info_t.noise; retain its native representation.	inc/em_base.h:2940	-
+mac_addr_t	-	dual-use	em-types	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2175	inc/em_base.h:2175; src/em/policy_cfg/em_policy_cfg.cpp:455
+mac_address_t	-	dual-use	em-types	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2514	src/em/config/em_configuration.cpp:425
+signed char	-	stored-native	em-dm	Reached through stored em_neighbor_t.signal_strength; retain its native representation.	inc/em_base.h:1076	-
+signed int	-	stored-native	em-dm	Reached through stored em_sta_info_t.signal_strength; retain its native representation.	inc/em_base.h:2721	-
+size_t	-	stored-native	em-dm	Reached through stored em_bss_info_t.vendor_elements_len; retain its native representation.	inc/em_base.h:2835	-
+ssid_t	-	dual-use	em-dm	Stored representation also supplies a wire code or wire-layout component; retain a native counterpart.	inc/em_base.h:2648	src/em/config/em_configuration.cpp:1393
+time_t	-	stored-native	em-dm	Reached through stored em_sta_info_t.beacon_query_sent_time; retain its native representation.	inc/em_base.h:2738	-
+uint32_t	-	stored-native	em-dm	Reached through stored em_device_info_t.uptime; retain its native representation.	inc/em_base.h:2620	-
+uint8_t	-	stored-native	em-dm	Reached through stored em_device_info_t.is_emplus_agent; retain its native representation.	inc/em_base.h:2618	-
+unsigned char	-	stored-native	em-dm	Reached through stored mac_address_t.<alias>; retain its native representation.	include/wifi_hal_generic.h:259	-
+unsigned int	-	stored-native	em-dm	Reached through stored em_device_info_t.coll_interval; retain its native representation.	inc/em_base.h:2575	-
+unsigned long long	-	stored-native	em-dm	Reached through stored ULLONG.<mapping>; retain its native representation.	include/wifi_hal_generic.h:82	-
+unsigned short	-	stored-native	em-dm	Reached through stored em_network_info_t.num_of_devices; retain its native representation.	inc/em_base.h:2522	-
+vendor_ext_attr_id_t	2332	wire-only	em-msg	Vendor-extension identifier codes used by wire readers and writers; reassign from em-dm.	-	src/em/config/em_configuration.cpp:4916; src/em/config/em_configuration.cpp:5923
+wifi_BeaconReport_t	-	stored-native	em-dm	Reached through stored em_sta_info_t.beacon_reports; retain its native representation.	inc/em_base.h:2764	-
+wifi_WideBWChannel_t	-	stored-native	em-dm	Reached through stored wifi_BeaconReport_t.wideBandwidthChannel; retain its native representation.	include/wifi_hal_extender.h:877	-
+wifi_channelBandwidth_t	-	stored-native	em-dm	Reached through stored em_neighbor_t.bandwidth; retain its native representation.	inc/em_base.h:1077	-
+wifi_ieee80211Variant_t	-	stored-native	em-dm	Reached through stored em_device_info_t.backhaul_media_type; retain its native representation.	inc/em_base.h:2600	-

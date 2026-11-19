@@ -1,0 +1,32 @@
+# External dependencies for em-dm Step 1; definitions verified against pinned git blobs.
+# unified-wifi-mesh: develop (CI branch in .github/workflows/build.yml:4-7); supplied upstream pin ba4180ba36748629f10c20babc4320dd69c9db4f; commit 2026-11-17T11:13:51-08:00.
+# OneWifi: develop 59be72f8d95d21d3644f16c536c281f2d6a3fbcb; commit 2026-11-17T08:37:08-08:00; user-approved.
+# rdkb-halif-wifi: develop 1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5; commit 2026-11-09T19:00:50Z.
+# rdk-wifi-hal: develop 7b6400c9f06a7303be65c7a540d11932bad91fa4; commit 2026-11-17T05:55:36-08:00; no reached type requires it.
+# External pins: newest commit on default branch at or before the upstream commit date; HAL repos selected from OneWifi build/linux/rpi/setup.sh:11-12.
+# Header chain: inc/em_base.h:32 -> OneWifi include/wifi_webconfig.h:29 -> include/wifi_base.h:31 -> HAL include/wifi_hal.h:83,112.
+# ABI: x86_64 Linux LP64; GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1), glibc 2.43 (Ubuntu 2.43-2ubuntu2.7).
+# Preprocessing baseline: C++ header branch; include guards active normally; no prior definitions of BOOL/UCHAR/USHORT/UINT/ULLONG; no platform feature overrides.
+# Platform entries document the selected ABI; uint8_t/uint32_t resolve through bits/types.h:38,42; size_t uses GCC __SIZE_TYPE__; time_t uses bits/types.h:113,160 and bits/typesizes.h:34,64.
+# The distinct ssid_t=char[32] and MAX_WIFI_SSID_LEN=33 in em_base.h:296 must not be conflated.
+name	kind	definition	repository	revision	commit_date	source
+BOOL	type-macro	unsigned char	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:94
+MAC_ADDR_LEN	constant	6	OneWifi	59be72f8d95d21d3644f16c536c281f2d6a3fbcb	2026-11-17T08:37:08-08:00	include/wifi_base.h:205
+UCHAR	type-macro	unsigned char	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:102
+UINT	type-macro	unsigned int	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:110
+ULLONG	type-macro	unsigned long long	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:82
+USHORT	type-macro	unsigned short	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:90
+WIFI_AP_MAX_VENDOR_IE_LEN	constant	2310	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_ap.h:3237
+bool	abi	bool; size=1	platform	gcc-15.2.0	-	/usr/lib/gcc/x86_64-linux-gnu/15/include/stdbool.h:44
+bssid_t	alias	typedef mac_address_t bssid_t;	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:261
+mac_addr_t	alias	typedef unsigned char mac_addr_t[MAC_ADDR_LEN];	OneWifi	59be72f8d95d21d3644f16c536c281f2d6a3fbcb	2026-11-17T08:37:08-08:00	include/wifi_base.h:239
+mac_address_t	alias	typedef unsigned char mac_address_t[6];	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:259
+size_t	abi	unsigned long; size=8	platform	gcc-15.2.0	-	/usr/lib/gcc/x86_64-linux-gnu/15/include/stddef.h:229
+ssid_t	alias	typedef char ssid_t[32];	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:262
+time_t	abi	signed long; size=8	platform	glibc-2.43	-	/usr/include/x86_64-linux-gnu/bits/types/time_t.h:10
+uint32_t	abi	unsigned int; size=4	platform	glibc-2.43	-	/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:26
+uint8_t	abi	unsigned char; size=1	platform	glibc-2.43	-	/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:24
+wifi_BeaconReport_t	struct	typedef struct { UCHAR opClass; UCHAR channel; ULLONG startTime; USHORT duration; UCHAR frameInfo; UCHAR rcpi; UCHAR rsni; bssid_t bssid; UCHAR antenna; UINT tsf; BOOL wideBandWidthChannelPresent; wifi_WideBWChannel_t wideBandwidthChannel; USHORT numRepetitions; } wifi_BeaconReport_t;	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_extender.h:864
+wifi_WideBWChannel_t	struct	typedef struct { UCHAR bandwidth; UCHAR centerSeg0; UCHAR centerSeg1; } wifi_WideBWChannel_t;	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_extender.h:535
+wifi_channelBandwidth_t	enum	typedef enum { WIFI_CHANNELBANDWIDTH_20MHZ = 0x1, WIFI_CHANNELBANDWIDTH_40MHZ = 0x2, WIFI_CHANNELBANDWIDTH_80MHZ = 0x4, WIFI_CHANNELBANDWIDTH_160MHZ = 0x8, WIFI_CHANNELBANDWIDTH_80_80MHZ = 0x10, WIFI_CHANNELBANDWIDTH_320MHZ = 0x20 } wifi_channelBandwidth_t;	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:344
+wifi_ieee80211Variant_t	enum	typedef enum { WIFI_80211_VARIANT_A = 0x01, WIFI_80211_VARIANT_B = 0x02, WIFI_80211_VARIANT_G = 0x04, WIFI_80211_VARIANT_N = 0x08, WIFI_80211_VARIANT_H = 0x10, WIFI_80211_VARIANT_AC = 0x20, WIFI_80211_VARIANT_AD = 0x40, WIFI_80211_VARIANT_AX = 0x80, WIFI_80211_VARIANT_BE = 0x100, WIFI_80211_VARIANT_BN = 0x200 } wifi_ieee80211Variant_t;	rdkb-halif-wifi	1deddfc22ba9899dfa64ee69ae9b9454e4e25ec5	2026-11-09T19:00:50Z	include/wifi_hal_generic.h:327
