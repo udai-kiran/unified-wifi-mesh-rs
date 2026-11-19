@@ -11,17 +11,30 @@ A missing classification file is an error unless --no-classification is given.
 Contract and known limits: the tool reads only the pinned upstream header and
 is not a C preprocessor. It fails loudly (exit 1) on the constructs it does
 not support: any C trigraph anywhere in the header (including comments and
-string literals), preprocessor directives, raw or prefixed literals, digit
-separators and digraphs inside an enum body, and a backslash-newline
-anywhere except a #define directive.
+string literals), a bare carriage return (a CR not followed by LF) anywhere,
+the %: digraph anywhere in code (so a %:if block cannot hide a declaration),
+preprocessor directives, raw or prefixed literals, digit separators and
+digraphs inside an enum body, the translation-dependent predefined macros
+(__LINE__, __FILE__, __COUNTER__, __DATE__, __TIME__, __TIMESTAMP__,
+__BASE_FILE__, __INCLUDE_LEVEL__) inside an enum body, a "typedef enum"
+candidate that lies inside a preprocessor conditional other than the include
+guard or on a directive line (no conditional is evaluated), and a
+backslash-newline anywhere except a #define directive.
 
-Correctness rests on two things: the trigraph ban, which makes C translation
-phase 1 the identity so that this tool's line splicing equals the compiler's,
-and exact splicing (a backslash followed by LF or CRLF; a final backslash
-with no newline is not a splice). The define-only splice rule is a
-conservative extra, not a proof: it is not comment-aware, so it may accept or
-reject a splice for the wrong reason (a "#define" inside a block comment, say)
-and must not be relied on. The spliced text is checked for trigraphs again,
+The trigraph ban makes C translation phase 1 the identity, and splicing
+removes a backslash followed by LF or CRLF (a final backslash with no newline
+is not a splice). This is close to, but not exactly, the compiler: GCC also
+joins a backslash followed by spaces and a newline. Known silent limits on
+hand-made headers (none occur in the pinned file): header macros or includes
+that change an initializer's meaning; a #define continued through a
+multi-line block comment; a vertical tab, form feed or BOM before '#'; a
+backslash-space line join in a // comment; a guard-like conditional that does
+not span the file; a decoy inside a function body or an unused macro
+argument. On any change to PINNED_COMMIT, re-extract independently. The define-only splice rule is a
+heuristic, not a proof: it is not comment-aware, so it may accept or reject a
+splice for the wrong reason (a "#define" inside a block comment, say) and must
+not be relied on. APLUS-02 remains a known false rejection: a continued
+#define that follows a block comment on the same line is rejected. The spliced text is checked for trigraphs again,
 because a splice can join "?" and "?-" into one. Known limits, not handled:
 - R2-05: conservative rejections such as SIGN_''x'' style tokens or "<::".
 On any change to PINNED_COMMIT, re-extract the fixture independently and
@@ -89,6 +102,23 @@ def reject_trigraphs(text):
         line_number = text.count("\n", 0, match.start()) + 1
         die(
             f"error: line {line_number}: trigraph '{match.group()}'"
+            " is not supported",
+            1,
+        )
+
+
+def reject_bare_carriage_returns(text):
+    """Die (exit 1) on a CR that is not immediately followed by LF.
+
+    GCC ends a // comment at a bare CR, but this tool ends it only at LF, so
+    it would blank live tokens that the compiler still sees. The line number
+    counts LFs, so it is the physical line of the bare CR.
+    """
+    match = re.search(r"\r(?!\n)", text)
+    if match is not None:
+        line_number = text.count("\n", 0, match.start()) + 1
+        die(
+            f"error: line {line_number}: bare carriage return"
             " is not supported",
             1,
         )
@@ -278,6 +308,76 @@ def read_header(upstream_path):
         die(f"error: git output is not valid UTF-8: {exc}", 2)
 
 
+_DIRECTIVE_LINE = re.compile(r"^[ \t]*#[ \t]*([A-Za-z_]+)([^\n]*)$", re.MULTILINE)
+_CONDITIONAL_OPENERS = ("if", "ifdef", "ifndef")
+_CONDITIONAL_ALTERNATIVES = ("else", "elif", "elifdef", "elifndef")
+
+# These expand to values that depend on where the tool puts the declaration in
+# the scratch source, so the compiled value would differ from upstream's.
+_TRANSLATION_DEPENDENT_MACROS = re.compile(
+    r"\b(__LINE__|__FILE__|__COUNTER__|__DATE__|__TIME__|__TIMESTAMP__"
+    r"|__BASE_FILE__|__INCLUDE_LEVEL__)\b"
+)
+
+
+def find_directive_lines(code_only):
+    """Return (start, end, kind, words) for each directive line in code_only.
+
+    code_only is spliced and comment-blanked, so a continued #define is one
+    line here. start and end are offsets of the line without its newline.
+    """
+    directives = []
+    for match in _DIRECTIVE_LINE.finditer(code_only):
+        words = match.group(2).split()
+        directives.append((match.start(), match.end(), match.group(1), words))
+    return directives
+
+
+def _include_guard_spans_file(directives):
+    """True if the directives open with #ifndef G / #define G and the last
+    #endif closes that #ifndef, with no #else or #elif of it.
+
+    Same definition as tools/gen-upstream-msg-tables.
+    """
+    if len(directives) < 3:
+        return False
+    (_, _, first_kind, first_words), (_, _, second_kind, second_words) = directives[:2]
+    if first_kind != "ifndef" or second_kind != "define":
+        return False
+    if not first_words or not second_words or first_words[0] != second_words[0]:
+        return False
+    depth = 0
+    for index, (_, _, kind, _) in enumerate(directives):
+        if kind in _CONDITIONAL_OPENERS:
+            depth += 1
+        elif kind in _CONDITIONAL_ALTERNATIVES:
+            if depth == 1:
+                return False
+        elif kind == "endif":
+            depth -= 1
+            if depth == 0:
+                return index == len(directives) - 1
+    return False
+
+
+def is_in_unsupported_directive_context(directives, position):
+    """True if position is on a directive line or inside a conditional that is
+    not the include guard. No condition is evaluated."""
+    has_guard = _include_guard_spans_file(directives)
+    # One entry per open conditional; True marks the include guard.
+    open_conditionals = []
+    for index, (start, end, kind, _) in enumerate(directives):
+        if start > position:
+            break
+        if start <= position <= end:
+            return True
+        if kind in _CONDITIONAL_OPENERS:
+            open_conditionals.append(has_guard and index == 0)
+        elif kind == "endif" and open_conditionals:
+            open_conditionals.pop()
+    return not all(open_conditionals)
+
+
 def extract_enums(header, enums=ENUMS):
     """Extract (name, body_text, identifiers) for each enum in enums order.
 
@@ -286,7 +386,8 @@ def extract_enums(header, enums=ENUMS):
     DOTALL, typedef enum {(.*?)} NAME; would begin at the first typedef enum
     in the file and run on until it reached } NAME;.
 
-    Any trigraph in the header exits 1 first (see reject_trigraphs).
+    Any bare CR or trigraph in the header exits 1 first (see
+    reject_bare_carriage_returns and reject_trigraphs).
     Backslash-newline is accepted only in #define directives (see
     check_splices_only_in_defines). The header is then line-spliced, so the
     enum bodies, the directive check and the compiled text all see the
@@ -306,9 +407,16 @@ def extract_enums(header, enums=ENUMS):
     - Raw and prefixed (L, u, U, u8) string or char literals, digit
       separators and digraphs (``%:ifdef``) in an enum body → exit 1.
     - Trigraphs anywhere in the header, comments and strings included → exit 1.
+    - A bare CR (not followed by LF) anywhere in the header → exit 1.
+    - The ``%:`` digraph anywhere in code (outside comments and strings) → exit 1.
+    - A candidate declaration inside a preprocessor conditional other than the
+      include guard, or on a directive line such as a #define → exit 1.
+    - __LINE__, __FILE__, __COUNTER__, __DATE__, __TIME__, __TIMESTAMP__,
+      __BASE_FILE__ or __INCLUDE_LEVEL__ in code in an enum body → exit 1.
     - Character literals containing commas (e.g. ``','``): the piece is an
       invalid identifier → exit 1.
     """
+    reject_bare_carriage_returns(header)
     reject_trigraphs(header)
     check_splices_only_in_defines(header)
     header = splice_lines(header)
@@ -321,13 +429,41 @@ def extract_enums(header, enums=ENUMS):
     # texts have the same length as the header, so offsets carry over.
     code_only = blank_comments(header, blank_literals=True)
     comments_removed = blank_comments(header, blank_literals=False)
+    # A directive spelled with the %: digraph would not be seen as a
+    # conditional below, so a declaration under "%:if 0" could be chosen
+    # silently. The pinned header has none; reject it anywhere in code.
+    digraph_hash = code_only.find("%:")
+    if digraph_hash != -1:
+        line_number = code_only.count("\n", 0, digraph_hash) + 1
+        die(f"error: line {line_number}: unsupported digraph '%:' in source", 1)
+    directives = find_directive_lines(code_only)
     result = []
     for name, expected_count, _width in enums:
         pattern = r"typedef\s+enum\s*\{([^{}]*)\}\s*" + re.escape(name) + r"\s*;"
         matches = list(re.finditer(pattern, code_only, re.DOTALL))
+        # Checked on every candidate, before the count: a decoy in a disabled
+        # branch or a #define must not be silently chosen or silently ignored.
+        for candidate in matches:
+            if is_in_unsupported_directive_context(directives, candidate.start()):
+                line_number = code_only.count("\n", 0, candidate.start()) + 1
+                die(
+                    f"error: enum {name}: declaration inside a preprocessor"
+                    f" conditional or directive is not supported"
+                    f" (line {line_number})",
+                    1,
+                )
         if len(matches) != 1:
             die(
                 f"error: enum {name}: expected exactly 1 match, found {len(matches)}",
+                1,
+            )
+        macro = _TRANSLATION_DEPENDENT_MACROS.search(
+            code_only, matches[0].start(1), matches[0].end(1)
+        )
+        if macro is not None:
+            die(
+                f"error: enum {name}: {macro.group()} in enum body is not"
+                " supported (its value depends on the scratch source layout)",
                 1,
             )
         body = comments_removed[matches[0].start(1):matches[0].end(1)]

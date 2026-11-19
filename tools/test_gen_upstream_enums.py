@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
-import io
 import importlib.machinery
 import importlib.util
+import io
 import pathlib
 import sys
 import tempfile
@@ -51,10 +51,12 @@ def _run_main(*cli_args):
     stderr = io.StringIO()
     argv = ["gen-upstream-enums", "--upstream", "unused"] + [str(a) for a in cli_args]
     code = 0
-    with mock.patch.object(sys, "argv", argv), \
-            mock.patch.object(gen, "read_header", return_value=_synthetic_header()), \
-            contextlib.redirect_stdout(stdout), \
-            contextlib.redirect_stderr(stderr):
+    with (
+        mock.patch.object(sys, "argv", argv),
+        mock.patch.object(gen, "read_header", return_value=_synthetic_header()),
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
         try:
             gen.main()
         except SystemExit as exc:
@@ -63,7 +65,6 @@ def _run_main(*cli_args):
 
 
 class TestExtractEnums(unittest.TestCase):
-
     def test_extract_one_enum_with_comments(self):
         """Test 1: synthetic header with one enum, block+line comments with commas."""
         # The \n is a real newline in this regular string.
@@ -150,10 +151,7 @@ class TestExtractEnums(unittest.TestCase):
 
     def test_extract_continued_define_elsewhere_accepted(self):
         """R2-04: a continued #define, and its continuation lines, may splice."""
-        header = (
-            "#define TWO (1 | \\\n   2 | \\\n   4)\n"
-            "typedef enum { a, b } t_t;\n"
-        )
+        header = "#define TWO (1 | \\\n   2 | \\\n   4)\ntypedef enum { a, b } t_t;\n"
         result = gen.extract_enums(header, enums=[("t_t", 2, 2)])
         self.assertEqual(result[0][2], ["a", "b"])
 
@@ -180,10 +178,7 @@ class TestExtractEnums(unittest.TestCase):
 
     def test_extract_declaration_in_line_comment_decoy_ignored(self):
         """R2-01: a commented-out declaration beside the real one is ignored."""
-        header = (
-            "// typedef enum { a = 7 } t_t;\n"
-            "typedef enum { a = 9 } t_t;\n"
-        )
+        header = "// typedef enum { a = 7 } t_t;\ntypedef enum { a = 9 } t_t;\n"
         result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
         self.assertEqual(result[0][2], ["a"])
         self.assertIn("9", result[0][1])
@@ -219,15 +214,12 @@ class TestExtractEnums(unittest.TestCase):
 
     def test_extract_constructs_inside_comments_and_plain_literals_allowed(self):
         """The rejections apply to code only, not to comments or plain literals."""
-        header = (
-            'typedef enum { a = sizeof("%: R\\"( L\'"), /* <% 1\'000 */ b } t_t;'
-        )
+        header = 'typedef enum { a = sizeof("%: R\\"( L\'"), /* <% 1\'000 */ b } t_t;'
         result = gen.extract_enums(header, enums=[("t_t", 2, 2)])
         self.assertEqual(result[0][2], ["a", "b"])
 
 
 class TestTrigraphsAndSplices(unittest.TestCase):
-
     def _assert_trigraph_exit1(self, header, expected_line):
         code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
         self.assertEqual(code, 1)
@@ -237,9 +229,7 @@ class TestTrigraphsAndSplices(unittest.TestCase):
     def test_trigraph_in_line_comment_exit1(self):
         """APLUS-01: ??/ at the end of a // comment would extend the comment."""
         header = (
-            "// ??/\n"
-            "typedef enum { a = 7 } t_t;\n"
-            "typedef enum real { a = 9 } t_t;\n"
+            "// ??/\ntypedef enum { a = 7 } t_t;\ntypedef enum real { a = 9 } t_t;\n"
         )
         self._assert_trigraph_exit1(header, 1)
 
@@ -253,13 +243,7 @@ class TestTrigraphsAndSplices(unittest.TestCase):
 
     def test_trigraph_across_splice_reproduction_exit1(self):
         """APLUS-02: the reproduction is rejected (here for its trigraph)."""
-        header = (
-            "typedef enum { a = sizeof(\n"
-            "/*\n"
-            "#define X \\\n"
-            '*/ "?\\\n'
-            '?-") } t_t;\n'
-        )
+        header = 'typedef enum { a = sizeof(\n/*\n#define X \\\n*/ "?\\\n?-") } t_t;\n'
         code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
         self.assertEqual(code, 1)
         self.assertIn("trigraph '??-'", err)
@@ -277,7 +261,7 @@ class TestTrigraphsAndSplices(unittest.TestCase):
 
     def test_lone_double_question_mark_accepted(self):
         """?? not followed by a trigraph character is ordinary text."""
-        header = "// what??\ntypedef enum { a = sizeof(\"what??\") } t_t; // ??x\n"
+        header = '// what??\ntypedef enum { a = sizeof("what??") } t_t; // ??x\n'
         result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
         self.assertEqual(result[0][2], ["a"])
 
@@ -295,14 +279,165 @@ class TestTrigraphsAndSplices(unittest.TestCase):
         self.assertIn("line 1", err)
 
     def test_backslash_cr_cr_lf_is_not_a_splice(self):
-        """splice_lines joins only backslash, optional one CR, LF."""
-        header = "typedef enum { a } t_t;\n// c \\\r\r\n"
+        """splice_lines joins only backslash, optional one CR, LF.
+
+        The declaration directly follows the comment line, so a splicer that
+        consumed two CRs would join it into the comment. The extractor itself
+        rejects the bare CR, so the boundary is tested on splice_lines.
+        """
+        text = "// c \\\r\r\ntypedef enum { a } t_t;\n"
+        self.assertEqual(gen.splice_lines(text), text)
+
+    def test_backslash_cr_cr_lf_rejected_as_bare_cr(self):
+        header = "// c \\\r\r\ntypedef enum { a } t_t;\n"
+        code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+        self.assertEqual(code, 1)
+        self.assertIn("line 1: bare carriage return", err)
+
+    def test_trigraph_line_is_physical_line_after_continued_define(self):
+        """APLUS-09: the raw scan reports line 3; the spliced text would say 2."""
+        header = "#define N (1 + \\\n  2)\n// ??/\ntypedef enum { a } t_t;\n"
+        self._assert_trigraph_exit1(header, 3)
+
+    def test_bare_cr_ends_line_comment_exit1(self):
+        """APLUS-06: GCC ends a // comment at a bare CR; the tool would not."""
+        header = "typedef enum { a = 7 // comment\r + 2\n } t_t;\n"
+        code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+        self.assertEqual(code, 1)
+        self.assertIn("line 1: bare carriage return", err)
+
+    def test_bare_cr_line_number_and_trailing_cr(self):
+        header = "\n\ntypedef enum { a } t_t;\r"
+        code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+        self.assertEqual(code, 1)
+        self.assertIn("line 3: bare carriage return", err)
+
+    def test_crlf_line_endings_accepted(self):
+        header = "// c\r\ntypedef enum { a } t_t;\r\n"
+        result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
+        self.assertEqual(result[0][2], ["a"])
+
+
+class TestDirectiveContextAndMacros(unittest.TestCase):
+    def _assert_context_exit1(self, header, expected_line):
+        code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "enum t_t: declaration inside a preprocessor conditional"
+            " or directive is not supported",
+            err,
+        )
+        self.assertIn(f"(line {expected_line})", err)
+
+    def test_digraph_conditional_decoy_exit1(self):
+        header = (
+            "%:if 0\n"
+            "typedef enum { a = 7 } t_t;\n"
+            "%:endif\n"
+            "typedef enum real { a = 9 } t_t;\n"
+        )
+        code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+        self.assertEqual(code, 1)
+        self.assertIn("error: line 1: unsupported digraph '%:' in source", err)
+
+    def test_digraph_inside_comment_or_string_allowed(self):
+        header = '/* %:if */ const char *s = "%:";\ntypedef enum { a = 9 } t_t;\n'
+        result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
+        self.assertEqual(len(result), 1)
+
+    def test_decoy_in_if_0_exit1(self):
+        """APLUS-07: the disabled declaration must not be selected."""
+        header = (
+            "#if 0\n"
+            "typedef enum { a = 7 } t_t;\n"
+            "#endif\n"
+            "typedef enum real { a = 9 } t_t;\n"
+        )
+        self._assert_context_exit1(header, 2)
+
+    def test_decoy_on_define_line_exit1(self):
+        header = (
+            "#define DECOY typedef enum { a = 7 } t_t;\n"
+            "typedef enum real { a = 9 } t_t;\n"
+        )
+        self._assert_context_exit1(header, 1)
+
+    def test_real_declaration_in_ifdef_exit1(self):
+        header = "#ifdef X\ntypedef enum { a } t_t;\n#endif\n"
+        self._assert_context_exit1(header, 2)
+
+    def test_real_declaration_in_else_branch_exit1(self):
+        header = "#ifdef X\n#else\ntypedef enum { a } t_t;\n#endif\n"
+        self._assert_context_exit1(header, 3)
+
+    def test_declaration_after_closed_conditional_accepted(self):
+        header = "#ifdef X\n#define Y 1\n#endif\ntypedef enum { a } t_t;\n"
+        result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
+        self.assertEqual(result[0][2], ["a"])
+
+    def test_declaration_inside_include_guard_only_accepted(self):
+        header = (
+            "#ifndef G_H\n#define G_H\n"
+            "#ifdef X\n#define Y 1\n#endif\n"
+            "typedef enum { a } t_t;\n"
+            "#endif // G_H\n"
+        )
+        result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
+        self.assertEqual(result[0][2], ["a"])
+
+    def test_declaration_in_conditional_inside_guard_exit1(self):
+        header = (
+            "#ifndef G_H\n#define G_H\n"
+            "#ifdef X\ntypedef enum { a } t_t;\n#endif\n"
+            "#endif\n"
+        )
+        self._assert_context_exit1(header, 4)
+
+    def test_guard_with_else_is_not_a_guard_exit1(self):
+        header = "#ifndef G_H\n#define G_H\ntypedef enum { a } t_t;\n#else\n#endif\n"
+        self._assert_context_exit1(header, 3)
+
+    def test_decoy_in_if_0_with_two_candidates_exit1_not_count_error(self):
+        header = (
+            "#ifndef G_H\n#define G_H\n"
+            "#if 0\ntypedef enum { a = 7 } t_t;\n#endif\n"
+            "typedef enum { a = 9 } t_t;\n"
+            "#endif\n"
+        )
+        self._assert_context_exit1(header, 4)
+
+    def test_source_location_macros_rejected(self):
+        """APLUS-08: the scratch source puts the declaration on another line."""
+        for macro in (
+            "__LINE__",
+            "__FILE__",
+            "__COUNTER__",
+            "__DATE__",
+            "__TIME__",
+            "__TIMESTAMP__",
+            "__BASE_FILE__",
+            "__INCLUDE_LEVEL__",
+        ):
+            with self.subTest(macro):
+                header = f"typedef enum {{ a = {macro} }} t_t;\n"
+                code, err = _exit_of(gen.extract_enums, header, enums=[("t_t", 1, 2)])
+                self.assertEqual(code, 1)
+                self.assertIn(f"{macro} in enum body is not supported", err)
+
+    def test_source_location_macro_in_comment_or_string_accepted(self):
+        header = (
+            'typedef enum { a = sizeof("__LINE__") /* __LINE__ */ } t_t; // __FILE__\n'
+        )
+        result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
+        self.assertEqual(result[0][2], ["a"])
+
+    def test_longer_identifier_containing_macro_name_accepted(self):
+        header = "typedef enum { a = MY__LINE__X } t_t;\n"
         result = gen.extract_enums(header, enums=[("t_t", 1, 2)])
         self.assertEqual(result[0][2], ["a"])
 
 
 class TestParseOutput(unittest.TestCase):
-
     def _enum2(self):
         """Shared fixtures: 2-identifier enum, width 2."""
         enums = [("my_t", 2, 2)]
@@ -322,7 +457,7 @@ class TestParseOutput(unittest.TestCase):
         enums, enum_data = self._enum2()
         code, err = _exit_of(gen.parse_output, "", enum_data, enums=enums)
         self.assertEqual(code, 2)
-        self.assertIn('expected 2 rows, got 0', err)
+        self.assertIn("expected 2 rows, got 0", err)
 
     def test_parse_one_row_missing_exit2(self):
         """Test 8: one row missing from output → exit 2."""
@@ -330,7 +465,7 @@ class TestParseOutput(unittest.TestCase):
         output = "my_t\ta\t0\n"  # only the first of two expected rows
         code, err = _exit_of(gen.parse_output, output, enum_data, enums=enums)
         self.assertEqual(code, 2)
-        self.assertIn('expected 2 rows, got 1', err)
+        self.assertIn("expected 2 rows, got 1", err)
 
     def test_parse_rows_reordered_exit2(self):
         """Test 9: two rows in wrong order → completeness check → exit 2."""
@@ -338,7 +473,7 @@ class TestParseOutput(unittest.TestCase):
         output = "my_t\tb\t1\nmy_t\ta\t0\n"  # b before a, expected a then b
         code, err = _exit_of(gen.parse_output, output, enum_data, enums=enums)
         self.assertEqual(code, 2)
-        self.assertIn('first difference at index 0', err)
+        self.assertIn("first difference at index 0", err)
         self.assertIn("expected ('my_t', 'a'), got ('my_t', 'b')", err)
 
     def test_parse_extra_unknown_row_exit2(self):
@@ -361,7 +496,6 @@ class TestParseOutput(unittest.TestCase):
 
 
 class TestValidateClassification(unittest.TestCase):
-
     def test_valid_classification_returns_empty(self):
         """Test 11: valid 2-row classification for 2 fixture rows → empty list."""
         rows = [("t_t", "a", "0x00"), ("t_t", "b", "0x01")]
@@ -381,16 +515,22 @@ class TestValidateClassification(unittest.TestCase):
         rows = [("t_t", "a", "0x00")]
         content = (
             _CLS_HEADER
-            + "\n"                                       # blank: line 2
-            + "t_t\ta\tspec\tA\tTable 1 §1\t-\n"        # line 3
-            + "t_t\ta\tspec\tB\tTable 1 §1\t-\n"        # line 4 (duplicate pair, different rust_name)
+            + "\n"  # blank: line 2
+            + "t_t\ta\tspec\tA\tTable 1 §1\t-\n"  # line 3
+            + "t_t\ta\tspec\tB\tTable 1 §1\t-\n"  # line 4 (duplicate pair, different rust_name)
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             cls_path = pathlib.Path(tmpdir) / "classification.tsv"
             cls_path.write_text(content, encoding="utf-8")
             errors = gen.validate_classification(cls_path, rows, False)
-        pair_msgs = [e for e in errors if "duplicate (upstream_type, upstream_identifier) pair" in e]
-        self.assertEqual(len(pair_msgs), 1, f"expected one duplicate-pair error; got: {errors}")
+        pair_msgs = [
+            e
+            for e in errors
+            if "duplicate (upstream_type, upstream_identifier) pair" in e
+        ]
+        self.assertEqual(
+            len(pair_msgs), 1, f"expected one duplicate-pair error; got: {errors}"
+        )
         self.assertIn("at lines 3 and 4", pair_msgs[0])
         self.assertFalse(
             any("duplicate (upstream_type, rust_name) pair" in e for e in errors),
@@ -402,19 +542,26 @@ class TestValidateClassification(unittest.TestCase):
         rows = [("t_t", "a", "0x00"), ("t_t", "b", "0x01")]
         content = (
             _CLS_HEADER
-            + "\n"                                       # blank: line 2
-            + "t_t\ta\tspec\tA\tTable 1 §1\t-\n"        # line 3
-            + "t_t\tb\tspec\tA\tTable 1 §1\t-\n"        # line 4 (same rust_name)
+            + "\n"  # blank: line 2
+            + "t_t\ta\tspec\tA\tTable 1 §1\t-\n"  # line 3
+            + "t_t\tb\tspec\tA\tTable 1 §1\t-\n"  # line 4 (same rust_name)
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             cls_path = pathlib.Path(tmpdir) / "classification.tsv"
             cls_path.write_text(content, encoding="utf-8")
             errors = gen.validate_classification(cls_path, rows, False)
-        name_msgs = [e for e in errors if "duplicate (upstream_type, rust_name) pair" in e]
-        self.assertEqual(len(name_msgs), 1, f"expected one duplicate-rust_name error; got: {errors}")
+        name_msgs = [
+            e for e in errors if "duplicate (upstream_type, rust_name) pair" in e
+        ]
+        self.assertEqual(
+            len(name_msgs), 1, f"expected one duplicate-rust_name error; got: {errors}"
+        )
         self.assertIn("at lines 3 and 4", name_msgs[0])
         self.assertFalse(
-            any("duplicate (upstream_type, upstream_identifier) pair" in e for e in errors),
+            any(
+                "duplicate (upstream_type, upstream_identifier) pair" in e
+                for e in errors
+            ),
             f"identifiers differ, so no duplicate-pair error expected; got: {errors}",
         )
 
@@ -422,8 +569,7 @@ class TestValidateClassification(unittest.TestCase):
         """Test 13: whitespace-only spec_reference on a spec row."""
         rows = [("t_t", "a", "0x00")]
         content = (
-            _CLS_HEADER
-            + "t_t\ta\tspec\tA\t  \t-\n"  # spec_reference is two spaces
+            _CLS_HEADER + "t_t\ta\tspec\tA\t  \t-\n"  # spec_reference is two spaces
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             cls_path = pathlib.Path(tmpdir) / "classification.tsv"
@@ -448,10 +594,7 @@ class TestValidateClassification(unittest.TestCase):
     def test_spec_row_rust_name_dash_error(self):
         """Test 14: spec row with rust_name '-' → error mentioning rust_name."""
         rows = [("t_t", "a", "0x00")]
-        content = (
-            _CLS_HEADER
-            + "t_t\ta\tspec\t-\tTable 1 §1\t-\n"
-        )
+        content = _CLS_HEADER + "t_t\ta\tspec\t-\tTable 1 §1\t-\n"
         with tempfile.TemporaryDirectory() as tmpdir:
             cls_path = pathlib.Path(tmpdir) / "classification.tsv"
             cls_path.write_text(content, encoding="utf-8")
@@ -470,7 +613,6 @@ class TestValidateClassification(unittest.TestCase):
 
 
 class TestCompileAndRun(unittest.TestCase):
-
     def test_scratch_dir_permission_error_exit2(self):
         """A PermissionError creating the scratch directory is an I/O error, exit 2."""
         enum_data = [("t_t", " a", ["a"])]
@@ -484,7 +626,6 @@ class TestCompileAndRun(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -494,16 +635,24 @@ class TestMain(unittest.TestCase):
 
     def test_no_classification_skips_validation(self):
         code, stdout, _err = _run_main(
-            "--out", self.out, "--classification", self.missing_cls,
+            "--out",
+            self.out,
+            "--classification",
+            self.missing_cls,
             "--no-classification",
         )
         self.assertEqual(code, 0)
         self.assertIn("classification: skipped", stdout)
-        self.assertTrue(self.out.read_text(encoding="utf-8").startswith("# Generated by"))
+        self.assertTrue(
+            self.out.read_text(encoding="utf-8").startswith("# Generated by")
+        )
 
     def test_missing_classification_exit1_without_flag(self):
         code, _out, err = _run_main(
-            "--out", self.out, "--classification", self.missing_cls,
+            "--out",
+            self.out,
+            "--classification",
+            self.missing_cls,
         )
         self.assertEqual(code, 1)
         self.assertIn("classification file not found", err)
@@ -512,7 +661,10 @@ class TestMain(unittest.TestCase):
         """Validate-before-write: a classification failure must not touch --out."""
         self.out.write_text("previous fixture\n", encoding="utf-8")
         code, _out, _err = _run_main(
-            "--out", self.out, "--classification", self.missing_cls,
+            "--out",
+            self.out,
+            "--classification",
+            self.missing_cls,
         )
         self.assertEqual(code, 1)
         self.assertEqual(self.out.read_text(encoding="utf-8"), "previous fixture\n")
@@ -521,7 +673,10 @@ class TestMain(unittest.TestCase):
         """An ENAMETOOLONG --out is an I/O error (2), not 'not found' (1)."""
         long_out = self.tmp / ("x" * 300)
         code, _out, err = _run_main(
-            "--check", "--out", long_out, "--no-classification",
+            "--check",
+            "--out",
+            long_out,
+            "--no-classification",
         )
         self.assertEqual(code, 2)
         self.assertIn("cannot read fixture file", err)
@@ -535,7 +690,10 @@ class TestMain(unittest.TestCase):
 
     def test_check_mode_missing_fixture_exit1(self):
         code, _out, err = _run_main(
-            "--check", "--out", self.out, "--no-classification",
+            "--check",
+            "--out",
+            self.out,
+            "--no-classification",
         )
         self.assertEqual(code, 1)
         self.assertIn("fixture file not found", err)
