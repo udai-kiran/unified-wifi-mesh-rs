@@ -3,7 +3,7 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status:** `em-types` and `em-utils` are ported; the other components have not been started. Progress is
+> **Status:** `em-types` and `em-utils` are ported, `em-msg` is in progress (framing and validation done); the others have not been started. Progress is
 > tracked in [STATUS.md](STATUS.md).
 
 ## Porting base
