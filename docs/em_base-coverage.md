@@ -11,14 +11,14 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | em-dm | 47 |
 | do not port | 17 |
 | em-cmd | 16 |
-| em-core | 15 |
+| em-core | 16 |
 | pending (0002) | 13 |
 | em-types | 8 |
 | em-db | 7 |
 | em-transport | 6 |
 | em-agent | 3 |
 | em-cli | 3 |
-| em-crypto | 3 |
+| em-crypto | 2 |
 | em-ctrl | 3 |
 | em-orch | 3 |
 | deferred (ieee80211, D6) | 2 |
@@ -317,7 +317,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 3079 | struct | `em_assoc_sta_mld_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
 | 3092 | struct | `em_tid_to_link_mapping_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
 | 3108 | struct | `em_tid_to_link_map_policy_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
-| 3119 | struct | `em_crypto_info_t` | em-crypto | key material | planned |
+| 3119 | struct | `em_crypto_info_t` | em-core | WSC session state (note 0006 D5) | planned |
 | 3140 | enum | `em_bus_event_type_t` | replaced (D7) | not ported as-is; each value maps to a native type per [bus-event inventory](bus-event-inventory.md) | n/a |
 | 3215 | struct | `em_subdoc_info_t` | em-agent | OneWifi webconfig subdoc | planned |
 | 3220 | struct | `em_commit_info_t` | pending (0002) | command/request/action payload; owner decided by note 0002 (em-cmd / em-core / em-orch boundary) | pending |
