@@ -1,6 +1,6 @@
 # em-core
 
-Protocol engine: the per-node `em_t` with its state machine and per-area handlers (configuration, discovery, provisioning, capability, channel, metrics, steering, policy, vendor), plus the `em_mgr_t` event loop.
+Protocol engine library: the node table with each node's state machine, and synchronous per-area handlers (configuration, discovery, provisioning, capability, channel, metrics, steering, policy, vendor) over borrowed state (`EngineCtx`). The `em_mgr_t` event loop is not here: it becomes the role actor in `em-ctrl` / `em-agent` (note [0002](../../docs/0002-cmd-core-orch.md) D1, D9).
 
 ## Upstream source
 

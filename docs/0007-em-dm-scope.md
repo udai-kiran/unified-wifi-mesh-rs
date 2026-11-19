@@ -147,6 +147,9 @@ Synchronous, depends on `em-types` (and `em-utils` only if needed), no `unsafe`,
   they send read and update requests to the owner, and the message that starts their work
   carries a small `Copy` snapshot of the fields it needs. Any index outside the owner holds keys,
   not records. `em-db` persistence is requested by the owner.
+  **Amended by [0002](0002-cmd-core-orch.md) D1 (2026-11-19):** there are no per-node tasks. The
+  role actor owns the model and the node table, and engine handlers borrow the model directly
+  (`&Model` / `&mut Model`). The rule that only the owner holds records stands.
 - **Agent side:** the agent's own actor owns its single `NodeModel`.
 - Upstream's "copy the model into the command" is not ported; D5 lists what note 0002 must cover.
 - Fixed upstream arrays become collections whose upstream limits are **enforced**: inserting a new

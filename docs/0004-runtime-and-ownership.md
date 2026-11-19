@@ -100,6 +100,10 @@ This rule is **binding for all code, including tests and examples**:
 
 ### R6. Transport shape (outline; details in the `em-transport` note)
 
+> **Amended by [0002](0002-cmd-core-orch.md) D9 (2026-11-19):** the role actor in `em-ctrl` /
+> `em-agent` owns the single frame sender and the receiver of frames. `em-core` is a library of
+> handlers that the role actor calls. Read "`em-core`" below as "the role actor".
+
 `em-transport` is an actor, or a pair of tasks, that owns the socket: the raw `AF_PACKET` socket
 or the AL-SAP UNIX sockets to `ieee1905-rs`.
 

@@ -1,6 +1,6 @@
 # em-orch
 
-Command orchestration: pending/active queues that drive `em_t` nodes, with controller and agent variants.
+Command orchestration as a synchronous library: pending/active queues, oldest-first activation, deadlines, cancel and node removal. Controller and agent rules come through `OrchRole` hooks that return effects (note [0002](../../docs/0002-cmd-core-orch.md) D2, D4).
 
 ## Upstream source
 

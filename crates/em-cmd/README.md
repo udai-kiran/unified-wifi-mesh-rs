@@ -1,6 +1,6 @@
 # em-cmd
 
-Command objects (`em_cmd_*`) and command execution over the UNIX-socket IPC.
+Orchestrated command types from every source (IPC, internal, platform, engine): one native struct per command, plan variants, origin and status codes. The IPC bridges that decode requests live in the role crates (note [0002](../../docs/0002-cmd-core-orch.md) D2, D3, D7).
 
 ## Upstream source
 
