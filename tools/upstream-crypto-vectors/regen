@@ -1,0 +1,618 @@
+#!/usr/bin/env python3
+"""Generate or check the pinned upstream OpenSSL 3 crypto oracle fixture.
+
+Reads only pinned git objects from the upstream checkout. Complete definitions
+are extracted at their checked boundaries into a temporary declaration shim;
+the pinned AES-SIV source and header are compiled whole. No upstream working
+files are consulted. The fixture includes compiler and provider provenance, so
+regeneration on a different toolchain may legitimately differ and needs review.
+
+Exit 0: success; 1: invalid extraction/content or fixture mismatch;
+2: usage, I/O, git, compiler or harness failure. --generated-form runs the
+separate randomized SEC1 point-form check and never writes the fixture;
+--verify-signature checks external SHA-256/DER signatures with the upstream
+verifier without modifying the fixture.
+"""
+# SPDX-License-Identifier: Apache-2.0
+
+import argparse
+import collections
+import hashlib
+import hmac
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+PIN = "ba4180ba36748629f10c20babc4320dd69c9db4f"
+ROOT = Path(__file__).resolve().parents[2]
+TOOL = ROOT / "tools/upstream-crypto-vectors"
+FIXTURE = ROOT / "crates/em-crypto/tests/data/upstream_crypto_vectors.tsv"
+EM = "src/em/crypto/em_crypto.cpp"
+EC = "src/em/prov/easyconnect/ec_crypto.cpp"
+EH = "inc/em_crypto.h"
+CH = "inc/ec_crypto.h"
+UTIL = "inc/util.h"
+SIV_C = "src/util_crypto/aes_siv.c"
+SIV_H = "src/util_crypto/aes_siv.h"
+
+# All verbatim ranges in D4 item 2; each entry is (path, inclusive start/end,
+# exact first line, destination, kind). The last token is also checked and
+# brace-bearing definitions must end at their outermost closing brace.
+RANGES = [
+    (EH, 45, 45, "#define SHA256_MAC_LEN 32", "constants", "macro"),
+    (EH, 46, 46, "#define AES_BLOCK_SIZE 16", "constants", "macro"),
+    (EH, 147, 149, "inline static uint8_t platform_hmac_SHA256(uint8_t *key, size_t keylen, uint8_t num_elem, uint8_t **addr, size_t *len, uint8_t *hmac){", "em_inline", "function"),
+    (EH, 181, 183, "inline static uint8_t platform_SHA256(uint8_t num_elem, uint8_t **addr, size_t *len, uint8_t *digest){", "em_inline", "function"),
+    (UTIL, 44, 50, "static inline uint16_t SWAP_LITTLE_ENDIAN(uint16_t x) {", "endian", "function"),
+    (EM, 260, 304, "uint8_t em_crypto_t::platform_hash(const EVP_MD * hashing_algo, uint8_t num_elem, uint8_t **addr, size_t *len, uint8_t *digest)", "definitions", "function"),
+    (EM, 305, 401, "uint8_t em_crypto_t::platform_hmac_hash(const EVP_MD * hashing_algo, uint8_t *key, size_t keylen, uint8_t num_elem, uint8_t **addr, size_t *len, uint8_t *hmac)", "definitions", "function"),
+    (EM, 402, 417, "void em_crypto_t:: append_u32_net(const uint32_t *memory_pointer, uint8_t **packet_ppointer)", "definitions", "function"),
+    (EM, 419, 473, "uint8_t em_crypto_t:: wps_key_derivation_function(uint8_t *key, uint8_t *label_prefix, size_t label_prefix_len, char *label, uint8_t *res, uint32_t res_len)", "definitions", "function"),
+    (EM, 474, 550, "uint8_t em_crypto_t::platform_cipher_encrypt(const EVP_CIPHER *cipher_type, uint8_t *key, uint8_t *iv, uint8_t *plain, uint32_t plain_len, uint8_t *cipher_text, uint32_t *cipher_len, bool disable_padding)", "definitions", "function"),
+    (EM, 551, 638, "uint32_t em_crypto_t::platform_cipher_decrypt(const EVP_CIPHER *cipher_type, uint8_t *key, uint8_t *iv, uint8_t *data, uint32_t data_len, bool disable_padding)", "definitions", "function"),
+    (EM, 640, 665, "uint8_t em_crypto_t::aes_key_wrap(uint8_t *kek, size_t kek_len,", "definitions", "function"),
+    (EM, 667, 701, "uint8_t em_crypto_t::aes_key_unwrap(uint8_t *kek, size_t kek_len,", "definitions", "function"),
+    (EM, 1900, 1961, "bool em_crypto_t::kdf_hash_length(const EVP_MD *algo,", "definitions", "function"),
+    (EM, 66, 83, "uint8_t em_crypto_t::g_dh1536_p[] =  {", "definitions", "array"),
+    (EM, 84, 84, "uint8_t em_crypto_t::g_dh1536_g[] = { 0x02 };", "definitions", "array"),
+    (EM, 706, 773, "EVP_PKEY* em_crypto_t::create_dh_pkey(BIGNUM *p, BIGNUM *g, BIGNUM *bn_priv, BIGNUM *bn_pub)", "definitions", "function"),
+    (EM, 776, 819, "uint8_t em_crypto_t::platform_compute_shared_secret(uint8_t **shared_secret, uint16_t *shared_secret_len,", "definitions", "function"),
+    (EM, 1048, 1053, "void em_crypto_t::cleanup_bignums(BIGNUM *p, BIGNUM *g, BIGNUM *priv, BIGNUM *pub) {", "definitions", "function"),
+    (EM, 1056, 1145, "uint8_t em_crypto_t::compute_secret_internal(BIGNUM *p, BIGNUM *g, BIGNUM *bn_priv,", "definitions", "function"),
+    (EM, 828, 872, "std::string em_crypto_t::base64_encode(const uint8_t *input, size_t length) {", "definitions", "function"),
+    # Extra upstream definition needed to record base64url encoding.
+    (EM, 883, 904, "std::string em_crypto_t::base64url_encode(const uint8_t *input, size_t length) {", "definitions", "function"),
+    (EM, 907, 925, "std::optional<std::vector<uint8_t>> em_crypto_t::base64url_decode(const std::string& input) {", "definitions", "function"),
+    (EM, 1005, 1046, "std::optional<std::vector<uint8_t>> em_crypto_t::base64_decode(const std::string& input) {", "definitions", "function"),
+    (EM, 1190, 1224, "SSL_KEY* em_crypto_t::ec_key_from_base64_der(const std::string& base64_der_pubkey)", "definitions", "function"),
+    (EM, 1226, 1254, "std::string em_crypto_t::ec_key_to_base64_der(const SSL_KEY *key) {", "definitions", "function"),
+    (EM, 1353, 1405, "SSL_KEY *em_crypto_t::generate_ec_key(int nid)", "definitions", "function"),
+    (EM, 927, 1003, "std::optional<std::vector<uint8_t>> em_crypto_t::sign_data_ecdsa(const std::vector<uint8_t>& data_to_sign, EVP_PKEY* private_key, const EVP_MD * md)", "definitions", "function"),
+    (EM, 1767, 1811, "bool em_crypto_t::verify_signature(const std::vector<uint8_t> &message,", "definitions", "function"),
+    (EC, 13, 60, "uint8_t* ec_crypto::compute_key_hash(const SSL_KEY *key, const char *prefix)", "definitions", "function"),
+    (EC, 214, 297, "size_t ec_crypto::hkdf(const EVP_MD *h, bool skip_extract, uint8_t *ikm, size_t ikmlen,", "definitions", "function"),
+    (EC, 1081, 1091, "std::vector<uint8_t> ec_crypto::gen_psk(const std::string& pass, const std::string& ssid)", "definitions", "function"),
+    (CH, 221, 234, "static std::pair<BIGNUM *, BIGNUM *> get_ec_x_y(const EC_GROUP* group, const EC_POINT *point, BN_CTX *bn_ctx = NULL) {", "ec_inline", "function"),
+    (CH, 249, 253, "static inline BIGNUM* get_ec_x(const EC_GROUP* group, const EC_POINT *point, BN_CTX *bn_ctx = NULL) {", "ec_inline", "function"),
+    (CH, 438, 445, "static inline BIGNUM* compute_ec_ss_x(const EC_GROUP* group, const BIGNUM* priv, const EC_POINT* pub, BN_CTX* bn_ctx = NULL) {", "ec_inline", "function"),
+]
+
+class ContentError(Exception):
+    pass
+
+class ToolError(Exception):
+    pass
+
+
+def run(command, **kwargs):
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+    except OSError as exc:
+        raise ToolError(f"cannot run {command[0]}: {exc}") from exc
+    if result.returncode:
+        detail = (result.stderr + result.stdout).decode("utf-8", "replace").strip()
+        raise ToolError(f"command failed ({result.returncode}): {' '.join(map(str, command))}\n{detail}")
+    return result.stdout
+
+
+def read_sources(upstream):
+    result = {}
+    for path in sorted({item[0] for item in RANGES} | {SIV_C, SIV_H}):
+        result[path] = run(["git", "--no-replace-objects", "-C", str(upstream), "show", f"{PIN}:{path}"])
+    return result
+
+
+def mask_noncode(text):
+    """Mask comments and ordinary C/C++ literals while preserving positions."""
+    pattern = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+    return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), text)
+
+
+def extract_range(source, entry):
+    path, first, last, signature, _, kind = entry
+    try:
+        lines = source.decode("utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError as exc:
+        raise ContentError(f"invalid UTF-8 in {path}") from exc
+    if first < 1 or last < first or len(lines) < last:
+        raise ContentError(f"missing range {path}:{first}-{last}")
+    chunk = "".join(lines[first - 1:last])
+    if lines[first - 1].strip() != signature:
+        raise ContentError(f"unexpected start of {path}:{first}-{last}")
+    if kind == "macro":
+        if first != last or not chunk.strip().startswith("#define "):
+            raise ContentError(f"invalid macro {path}:{first}-{last}")
+        return chunk
+    masked = mask_noncode(chunk)
+    code = masked.strip()
+    suffix = "};" if kind == "array" else "}"
+    if not code.endswith(suffix) or not masked.splitlines()[-1].strip().endswith(suffix):
+        raise ContentError(f"unexpected end of {path}:{first}-{last}")
+    depth = 0
+    opened = False
+    for pos, char in enumerate(code):
+        if char == "{":
+            depth += 1
+            opened = True
+        elif char == "}":
+            depth -= 1
+            if depth < 0 or (opened and depth == 0 and code[pos + 1:].strip() not in ("", ";")):
+                raise ContentError(f"outer brace ends early in {path}:{first}-{last}")
+    if not opened or depth:
+        raise ContentError(f"unbalanced braces in {path}:{first}-{last}")
+    return chunk
+
+
+def write_extractions(sources, scratch):
+    parts = collections.defaultdict(list)
+    for entry in RANGES:
+        chunk = extract_range(sources[entry[0]], entry)
+        parts[entry[4]].append(f"// {entry[0]}:{entry[1]}-{entry[2]}\n" + chunk + "\n")
+    for name, chunks in parts.items():
+        (scratch / f"{name}.inc").write_text("".join(chunks), encoding="utf-8")
+    (scratch / "aes_siv.c").write_bytes(sources[SIV_C])
+    (scratch / "aes_siv.h").write_bytes(sources[SIV_H])
+    (scratch / "shim.hpp").write_bytes((TOOL / "shim.hpp").read_bytes())
+    (scratch / "vectors.cpp").write_bytes((TOOL / "vectors.cpp").read_bytes())
+
+
+def compile_harness(scratch, cc, cxx):
+    env = os.environ.copy()
+    # Some build environments have a read-only ccache directory.
+    env["CCACHE_DISABLE"] = "1"
+    cflags = ["-std=c11", "-O2", "-Wno-deprecated-declarations"]
+    cxxflags = ["-std=c++17", "-O2", "-Wno-deprecated-declarations"]
+    versions = []
+    for compiler in (cc, cxx):
+        lines = run([compiler, "--version"], env=env).decode("utf-8", "replace").splitlines()
+        if not lines:
+            raise ToolError(f"compiler {compiler} did not report a version")
+        versions.append(lines[0])
+    cc_version, cxx_version = versions
+    run([cc, *cflags, "-c", "aes_siv.c", "-o", "aes_siv.o"], cwd=scratch, env=env)
+    run([cxx, *cxxflags, "vectors.cpp", "aes_siv.o", "-lcrypto", "-o", "vectors"], cwd=scratch, env=env)
+    return cc_version, cxx_version, cflags, cxxflags, env
+
+
+def expected_cases():
+    curves = ("p256", "p384", "p521")
+    spkis = (*curves, "p192", "p224", "uri-compressed-p256")
+    hashes = ("sha256", "sha384", "sha512")
+    return {
+        "base64": {"empty", "man", "alphabet"},
+        "base64url": {"empty", "missing-padding", "existing-padding", "url-alphabet",
+                      "standard-alphabet", "mixed-alphabets", "invalid-length", "malformed-padding",
+                      "embedded-nul", "encode-empty", "encode-man", "encode-alphabet"},
+        "bootkey": {c + suffix for c in spkis for suffix in ("-plain", "-prefixed")},
+        "cbc": {"empty", "aligned", "non-aligned", "malformed-padding"},
+        "dh": {"zero", "one", "p-minus-1", "p", "p-plus-1", "p-minus-2", "two",
+               "leading-zero-exp-8", "leading-zero-exp-17", "fixed-agreement", "public-padded-8"},
+        "ec-point": {c + suffix for c in curves for suffix in ("-multiply", "-add", "-invalid")},
+        "ec-scalar": set(curves), "ecdh": set(curves),
+        "hash": {h + suffix for h in hashes for suffix in ("-split", "-concat")},
+        "hmac": {h + suffix for h in hashes for suffix in ("-split", "-concat")},
+        "hkdf": {f"{h}-{length}" for h, block in zip(hashes, (32, 48, 64))
+                 for length in (42, block * 255, block * 255 + 1)},
+        "kdf80211": set(hashes) | {"sha256-8191", "sha256-8192"},
+        "keywrap": {f"{action}-{bits}" for action in ("wrap", "unwrap", "tampered", "wrap-short", "wrap-non-multiple", "unwrap-short", "unwrap-non-multiple") for bits in (128, 192, 256)},
+        "pbkdf2": {"gen-psk"}, "signature": set(curves),
+        "siv": {f"{action}-{bits}" for action in ("encrypt", "decrypt", "tampered") for bits in (256, 384, 512)},
+        "spki": set(spkis), "wps": {"prefix-80"}, "wsc": {"dh-secret", "dh-hash", "kdk", "keys"},
+    }
+
+
+def _hex_bytes(value):
+    if value == "-":
+        return b""
+    if not re.fullmatch(r"(?:[0-9a-f]{2})+", value):
+        raise ContentError("invalid hex bytes in harness output")
+    return bytes.fromhex(value)
+
+
+def _fields(value, input_fields):
+    result = {}
+    numbers = {"length", "iterations", "width"}
+    text = {"curve", "hash", "source"}
+    for pair in value.split(";"):
+        key, separator, val = pair.partition("=")
+        if not separator or not re.fullmatch(r"[a-z_]+", key) or key in result or not val:
+            raise ContentError("invalid or duplicate named field")
+        if input_fields and key in numbers:
+            if not re.fullmatch(r"[0-9]+", val):
+                raise ContentError("invalid numeric input")
+        elif input_fields and key in text:
+            if not re.fullmatch(r"[A-Za-z0-9_.:-]+", val):
+                raise ContentError("invalid text input")
+        elif not input_fields and key == "encrypt":
+            if val not in ("0", "1"):
+                raise ContentError("invalid encryption return")
+        elif not input_fields and key == "rust":
+            if val not in ("accept", "reject", "unsupported-curve"):
+                raise ContentError("invalid Rust outcome")
+        else:
+            pieces = val.split(",") if input_fields and key in ("pieces", "ad") else [val]
+            for piece in pieces:
+                _hex_bytes(piece)
+        result[key] = val
+    return result
+
+
+def _signature_shape(data, width):
+    """Check canonical ECDSA DER SEQUENCE of two positive, bounded INTEGERs."""
+    def length_at(pos):
+        if pos >= len(data):
+            raise ValueError("missing DER length")
+        length = data[pos]
+        pos += 1
+        if length & 0x80:
+            n = length & 0x7f
+            if n != 1 or pos >= len(data) or data[pos] < 128:
+                raise ValueError("non-canonical DER length")
+            length = data[pos]
+            pos += 1
+        return length, pos
+
+    try:
+        if not data or data[0] != 0x30:
+            return False
+        length, pos = length_at(1)
+        if pos + length != len(data):
+            return False
+        for _ in range(2):
+            if pos >= len(data) or data[pos] != 2:
+                return False
+            length, pos = length_at(pos + 1)
+            value = data[pos:pos + length]
+            if (len(value) != length or not value or len(value) > width + 1 or
+                    (len(value) == width + 1 and value[0] != 0) or
+                    value[0] & 0x80 or (len(value) > 1 and value[0] == 0 and not value[1] & 0x80) or
+                    not any(value)):
+                return False
+            pos += length
+        return pos == len(data)
+    except ValueError:
+        return False
+
+
+def validate_body(data):
+    """Reject incomplete or inconsistent oracle results before any fixture write."""
+    try:
+        lines = data.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ContentError("harness output is not ASCII") from exc
+    if (not data.endswith(b"\n") or len(lines) < 3 or
+            not lines[0].startswith("# OpenSSL: OpenSSL 3.") or lines[1] != "# Provider: default"):
+        raise ContentError("missing or unexpected OpenSSL/provider provenance")
+
+    def require(condition, message):
+        if not condition:
+            raise ContentError(message)
+
+    def keys(fields, *names):
+        require(fields is not None and set(fields) == set(names),
+                "expected fields " + ", ".join(names))
+
+    def binary(fields, name):
+        return _hex_bytes(fields[name])
+
+    def raw(value):
+        require(value is not None, "expected byte output")
+        return value
+
+    rows, parsed = [], {}
+    expected = expected_cases()
+    widths = {"p256": 32, "p384": 48, "p521": 66}
+    digest_widths = {"sha256": 32, "sha384": 48, "sha512": 64}
+    for line in lines[2:]:
+        fields = line.split("\t")
+        if len(fields) != 5 or any(not field for field in fields):
+            raise ContentError("invalid TSV row")
+        category, case, inputs, result, output = fields
+        if category not in expected or case not in expected[category]:
+            raise ContentError(f"unexpected row {category}/{case}")
+        if (category, case) in parsed:
+            raise ContentError(f"duplicate row {category}/{case}")
+        try:
+            require(re.fullmatch(r"-?[0-9]+", result), "invalid upstream return value")
+            ret = int(result)
+            ins = _fields(inputs, True)
+            outs = _fields(output, False) if "=" in output else None
+            value = None if outs is not None else _hex_bytes(output)
+
+            if category in ("kdf80211", "wps", "hkdf", "pbkdf2"):
+                names = {"kdf80211": ("key", "label", "context", "length"),
+                         "wps": ("key", "prefix", "label", "length"),
+                         "hkdf": ("ikm", "salt", "info", "length"),
+                         "pbkdf2": ("pass", "ssid", "iterations", "length")}[category]
+                keys(ins, *names)
+                length = int(ins["length"])
+                if category in ("kdf80211", "hkdf"):
+                    expected_length = int(case.split("-")[-1]) if "-" in case else 73
+                    require(length == expected_length, "length does not match case")
+                elif category == "wps":
+                    require(length == 80, "wrong WPS length")
+                if category == "kdf80211" and case in ("sha256-8191", "sha256-8192"):
+                    keys(outs, "upstream", "rust")
+                    require(outs["rust"] == ("reject" if length > 8191 else "accept"), "wrong Rust KDF outcome")
+                    value = binary(outs, "upstream")
+                else:
+                    raw(value)
+                if category == "hkdf":
+                    block = digest_widths[case.split("-")[0]]
+                    require(ret == (0 if length > block * 255 else length), "wrong HKDF return")
+                    require(len(value) == ret, "wrong HKDF output length")
+                else:
+                    require(ret == 1 and len(value) == length, "wrong KDF return or output length")
+                if category == "pbkdf2":
+                    require(length == 32 and ins["iterations"] == "4096", "wrong PBKDF2 parameters")
+            elif category in ("hash", "hmac"):
+                keys(ins, *(('key', 'pieces') if category == 'hmac' else ('pieces',)))
+                width = digest_widths[case.split("-")[0]]
+                require(ret == 1 and len(raw(value)) == width, "wrong digest return or width")
+                pieces = [_hex_bytes(piece) for piece in ins["pieces"].split(",")]
+                require(len(pieces) == (3 if case.endswith("-split") else 1), "wrong piece count")
+                algorithm = case.split("-")[0]
+                digest = (hmac.new(binary(ins, "key"), b"".join(pieces), algorithm).digest()
+                          if category == "hmac" else hashlib.new(algorithm, b"".join(pieces)).digest())
+                require(value == digest, "digest does not match inputs")
+            elif category == "cbc":
+                malformed = case == "malformed-padding"
+                keys(ins, *(('key', 'iv', 'cipher') if malformed else ('key', 'iv', 'plain')))
+                keys(outs, *(('span', 'rust', 'rust_plain') if malformed else
+                             ('encrypt', 'cipher', 'span', 'rust', 'rust_plain')))
+                require(len(binary(ins, "key")) == 16 and len(binary(ins, "iv")) == 16, "wrong CBC key or IV width")
+                span, rust_plain = binary(outs, "span"), binary(outs, "rust_plain")
+                require(ret >= 0 and len(span) == ret, "wrong returned CBC span")
+                if malformed:
+                    require(ret == 0 and outs["rust"] == "reject" and not rust_plain and
+                            len(binary(ins, "cipher")) > 0 and len(binary(ins, "cipher")) % 16 == 0,
+                            "wrong malformed CBC outcome")
+                else:
+                    plain, cipher = binary(ins, "plain"), binary(outs, "cipher")
+                    shape = {"empty": len(plain) == 0,
+                             "aligned": len(plain) > 0 and len(plain) % 16 == 0,
+                             "non-aligned": len(plain) % 16 != 0}[case]
+                    require(shape, f"wrong CBC plaintext shape for {case}")
+                    require(outs["encrypt"] == "1" and outs["rust"] == "accept" and rust_plain == plain and
+                            ret == len(plain) and len(cipher) == (len(plain) // 16 + 1) * 16,
+                            "wrong valid CBC outcome")
+                    require((span != plain) if case == "non-aligned" else (span == plain), "wrong CBC defect span")
+            elif category == "dh":
+                if case == "public-padded-8":
+                    keys(ins, "generator", "private", "width")
+                    require(ret == 192 and ins["width"] == "192" and binary(ins, "generator") == b"\x02" and
+                            binary(ins, "private") == b"\x03" and raw(value) == bytes(191) + b"\x08",
+                            "wrong padded DH public value")
+                else:
+                    keys(ins, "private", "peer")
+                    keys(outs, "upstream", "rust", "rust_secret")
+                    upstream = binary(outs, "upstream")
+                    require((ret == 0 and not upstream) or (ret == 1 and 1 <= len(upstream) <= 192),
+                            "wrong upstream DH result or secret width")
+            elif category == "keywrap":
+                action, bits = case.rsplit("-", 1)
+                wrapping = action.startswith("wrap")
+                keys(ins, "kek", "plain" if wrapping else "wrapped")
+                require(len(binary(ins, "kek")) * 8 == int(bits), "wrong KEK width")
+                source = binary(ins, "plain" if wrapping else "wrapped")
+                success = action in ("wrap", "unwrap")
+                require(ret == int(success) and len(raw(value)) == (len(source) + (8 if wrapping else -8) if success else 0),
+                        "wrong key-wrap outcome or width")
+            elif category == "siv":
+                action, bits = case.split("-")
+                keys(ins, *(('key', 'ad', 'plain') if action == 'encrypt' else ('key', 'ad', 'tag', 'cipher')))
+                require(len(binary(ins, "key")) * 8 == int(bits) and len(ins["ad"].split(",")) == 2,
+                        "wrong SIV key or AD pieces")
+                if action == "encrypt":
+                    keys(outs, "tag", "cipher")
+                    require(ret == 1 and len(binary(outs, "tag")) == 16 and
+                            len(binary(outs, "cipher")) == len(binary(ins, "plain")), "wrong SIV encryption")
+                else:
+                    require(ret == (-1 if action == "tampered" else 1) and len(binary(ins, "tag")) == 16 and
+                            len(raw(value)) == len(binary(ins, "cipher")), "wrong SIV decryption")
+            elif category == "base64" or (category == "base64url" and case.startswith("encode-")):
+                keys(ins, "input")
+                keys(outs, "encoded", "decoded")
+                require(ret == 1 and binary(outs, "decoded") == binary(ins, "input"), "wrong base64 round trip")
+            elif category == "base64url":
+                keys(ins, "input", "length")
+                require(len(binary(ins, "input")) == int(ins["length"]) and ret in (0, 1) and
+                        (ret == 1 or not raw(value)), "wrong base64url result")
+                raw(value)
+            elif category == "spki":
+                keys(ins, *(('curve', 'source', 'der') if case == 'uri-compressed-p256' else ('curve', 'private', 'der')))
+                keys(outs, "upstream", "rust")
+                require(ret == 1 and binary(outs, "upstream") == binary(ins, "der") and binary(ins, "der") and
+                        outs["rust"] == ("unsupported-curve" if case in ("p192", "p224") else "accept"),
+                        "wrong SPKI outcome")
+            elif category == "bootkey":
+                keys(ins, "der", "prefix")
+                require(ret == 1 and raw(value) == hashlib.sha256(binary(ins, "prefix") + binary(ins, "der")).digest(),
+                        "wrong boot-key hash")
+            elif category in ("ec-point", "ec-scalar", "ecdh"):
+                curve = case.split("-")[0]
+                width = widths[curve]
+                if category == "ec-point":
+                    action = case.split("-")[1]
+                    keys(ins, *(('scalar', 'point_xy') if action == 'multiply' else
+                                ('left_xy', 'right_xy') if action == 'add' else ('point_xy',)))
+                    for name in (name for name in ins if name.endswith("_xy")):
+                        require(len(binary(ins, name)) == 2 * width, "wrong point input width")
+                    require(ret == (0 if action == 'invalid' else 1) and
+                            len(raw(value)) == (0 if action == 'invalid' else 2 * width), "wrong point outcome")
+                elif category == "ec-scalar":
+                    keys(ins, "left", "right", "order")
+                    require(ret == 1 and len(raw(value)) == width, "wrong scalar outcome")
+                else:
+                    keys(ins, "private", "peer_xy")
+                    require(ret == 1 and len(binary(ins, "peer_xy")) == 2 * width and len(raw(value)) == width,
+                            "wrong ECDH outcome")
+            elif category == "signature":
+                keys(ins, "message", "spki", "hash")
+                require(ret == 1 and ins["hash"] == "sha256" and binary(ins, "message") and binary(ins, "spki") and
+                        _signature_shape(raw(value), widths[case]), "invalid DER signature result")
+            elif category == "wsc":
+                names = {"dh-secret": ("private", "peer"), "dh-hash": ("secret",),
+                         "kdk": ("dhkey", "enrollee_nonce", "mac", "registrar_nonce"),
+                         "keys": ("kdk", "prefix", "label", "length")}[case]
+                keys(ins, *names)
+                require(ret == 1, "wrong WSC return")
+                if case == "keys":
+                    keys(outs, "all", "auth", "wrap", "emsk")
+                    all_keys = binary(outs, "all")
+                    auth, wrap, emsk = (binary(outs, name) for name in ("auth", "wrap", "emsk"))
+                    require(ins["length"] == "80" and len(all_keys) == 80 and
+                            (len(auth), len(wrap), len(emsk)) == (32, 16, 32) and
+                            all_keys == auth + wrap + emsk, "wrong WSC key split")
+                elif case == "dh-secret":
+                    require(1 <= len(raw(value)) <= 192, "wrong WSC DH secret width")
+                else:
+                    require(len(raw(value)) == 32, "wrong WSC hash width")
+            parsed[category, case] = (ins, ret, outs, value)
+            rows.append(fields)
+        except (ContentError, KeyError, ValueError) as exc:
+            raise ContentError(f"{category}/{case}: {exc}") from exc
+
+    required = {(category, case) for category, cases in expected.items() for case in cases}
+    missing = sorted(required - parsed.keys())
+    if missing:
+        raise ContentError(f"missing required row {missing[0][0]}/{missing[0][1]}")
+
+    prime = int.from_bytes(binary(parsed["dh", "p"][0], "peer"), "big")
+    require(prime.bit_length() == 1536, "dh/p: wrong prime width")
+    boundaries = {"zero": 0, "one": 1, "p-minus-1": prime - 1, "p": prime,
+                  "p-plus-1": prime + 1, "p-minus-2": prime - 2, "two": 2}
+    for (category, case), (ins, ret, outs, _) in parsed.items():
+        if category != "dh" or case == "public-padded-8":
+            continue
+        peer = int.from_bytes(binary(ins, "peer"), "big")
+        exponent = int.from_bytes(binary(ins, "private"), "big")
+        if case in boundaries:
+            require(peer == boundaries[case] and exponent == 3, f"dh/{case}: wrong boundary input")
+        leading_zero = {"leading-zero-exp-8": 8, "leading-zero-exp-17": 17}
+        if case in leading_zero:
+            require(peer == 2 and exponent == leading_zero[case], f"dh/{case}: wrong leading-zero input")
+        accepted = 2 <= peer <= prime - 2
+        secret = pow(peer, exponent, prime) if accepted else 0
+        expected_secret = secret.to_bytes((secret.bit_length() + 7) // 8, "big") if accepted else b""
+        require(outs["rust"] == ("accept" if accepted else "reject") and
+                binary(outs, "rust_secret") == expected_secret, f"dh/{case}: wrong independent Rust outcome")
+        if accepted and ret == 1:
+            require(binary(outs, "upstream") == expected_secret, f"dh/{case}: upstream and Rust secrets differ")
+
+    secret = parsed["wsc", "dh-secret"][3]
+    hash_ins, _, _, dh_hash = parsed["wsc", "dh-hash"]
+    kdk_ins, _, _, kdk = parsed["wsc", "kdk"]
+    keys_ins = parsed["wsc", "keys"][0]
+    require(binary(hash_ins, "secret") == secret and dh_hash == hashlib.sha256(secret).digest(), "wsc/dh-hash: broken chain")
+    require(binary(kdk_ins, "dhkey") == dh_hash and
+            kdk == hmac.new(dh_hash, b"".join(binary(kdk_ins, name) for name in
+                            ("enrollee_nonce", "mac", "registrar_nonce")), "sha256").digest(), "wsc/kdk: broken chain")
+    require(binary(keys_ins, "kdk") == kdk, "wsc/keys: broken chain")
+    return rows
+
+
+def build_fixture(body, cc, cxx, cc_version, cxx_version, cflags, cxxflags):
+    header = ["# Generated by tools/upstream-crypto-vectors/regen; do not edit.\n",
+              f"# Upstream: rdkcentral/unified-wifi-mesh @ {PIN}\n",
+              "# Extraction command: git --no-replace-objects -C <upstream> show <pin>:<path>\n"]
+    for path, first, last, _, _, _ in RANGES:
+        header.append(f"# Extract: git show {PIN}:{path} lines {first}-{last}\n")
+    for path in (SIV_C, SIV_H):
+        header.append(f"# Whole file: git show {PIN}:{path}\n")
+    header.extend([f"# C compiler: {cc_version}\n", f"# C++ compiler: {cxx_version}\n",
+                   f"# Compile: {cc} {' '.join(cflags)} -c aes_siv.c -o aes_siv.o\n",
+                   f"# Compile: {cxx} {' '.join(cxxflags)} vectors.cpp aes_siv.o -lcrypto -o vectors\n",
+                   "# Run: ./vectors <output>\n",
+                   "# Regenerate: python3 tools/upstream-crypto-vectors/regen\n",
+                   "# Check: python3 tools/upstream-crypto-vectors/regen --check\n",
+                   "# Fields: category, case, inputs, upstream return, output (binary values are lowercase hex; '-' is empty).\n"])
+    return "".join(header).encode("utf-8") + body
+
+
+def write_atomically(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+        os.chmod(name, 0o644)
+        os.replace(name, path)
+    except BaseException as original:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup:
+            raise ToolError(f"atomic write failed: {original}; cannot remove temporary file {name}: {cleanup}") from original
+        raise
+
+
+def generate(args):
+    sources = read_sources(args.upstream)
+    with tempfile.TemporaryDirectory(prefix="upstream-crypto-") as tmp:
+        scratch = Path(tmp)
+        write_extractions(sources, scratch)
+        cc_version, cxx_version, cflags, cxxflags, env = compile_harness(scratch, args.cc, args.cxx)
+        if args.generated_form:
+            output = run([str(scratch / "vectors"), "--generated-form"], cwd=scratch, env=env)
+            sys.stdout.buffer.write(output)
+            return None, None
+        if args.verify_signature:
+            output = run([str(scratch / "vectors"), "--verify-signature", *args.verify_signature], cwd=scratch, env=env)
+            if output == b"verified=0\n":
+                print("verified=0")
+                raise ContentError("signature verification failed")
+            if output != b"verified=1\n":
+                raise ToolError("unexpected verifier output")
+            print("verified=1")
+            return None, None
+        output_path = scratch / "body.tsv"
+        run([str(scratch / "vectors"), str(output_path)], cwd=scratch, env=env)
+        body = output_path.read_bytes()
+        rows = validate_body(body)
+        return build_fixture(body, args.cc, args.cxx, cc_version, cxx_version, cflags, cxxflags), rows
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--upstream", type=Path, default=ROOT.parent / "unified-wifi-mesh")
+    parser.add_argument("--out", type=Path, default=FIXTURE)
+    parser.add_argument("--cc", default="cc")
+    parser.add_argument("--cxx", default="c++")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check", action="store_true")
+    modes.add_argument("--generated-form", action="store_true")
+    modes.add_argument("--verify-signature", nargs=3, metavar=("MESSAGE_HEX", "SPKI_DER_HEX", "SIGNATURE_DER_HEX"))
+    args = parser.parse_args(argv)
+    if args.verify_signature and any(not re.fullmatch(r"(?:[0-9a-f]{2})+", value) for value in args.verify_signature):
+        parser.error("--verify-signature arguments must be nonempty lowercase even-length hex")
+    # The pinned SPKI importer decodes into a fixed 1024-byte stack buffer;
+    # EVP_DecodeBlock may also produce up to two padding bytes.
+    if args.verify_signature and len(args.verify_signature[1]) // 2 > 1023:
+        parser.error("SPKI DER exceeds the pinned importer's 1024-byte buffer")
+    try:
+        data, rows = generate(args)
+        if args.generated_form or args.verify_signature:
+            return 0
+        if args.check:
+            old = args.out.read_bytes()
+            if old != data:
+                raise ContentError(f"fixture differs: {args.out}")
+        else:
+            write_atomically(args.out, data)
+        counts = collections.Counter(row[0] for row in rows)
+        print(f"ok: {len(rows)} rows (" + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + ")")
+        return 0
+    except (ContentError, KeyError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (ToolError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+if __name__ == "__main__":
+    sys.exit(main())

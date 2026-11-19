@@ -255,7 +255,8 @@ a newer compiler, an older compatible release is pinned, or the case is brought 
      (`em_crypto.cpp:706-773`), `platform_compute_shared_secret` (`em_crypto.cpp:776-819`),
      `cleanup_bignums` (`em_crypto.cpp:1048-1053`) and `compute_secret_internal`
      (`em_crypto.cpp:1056-1145`).
-   - `base64_encode` (`em_crypto.cpp:828-872`), `base64url_decode` (`em_crypto.cpp:907-925`),
+   - `base64_encode` (`em_crypto.cpp:828-872`), `base64url_encode` (`em_crypto.cpp:883-904`, added in
+     Step 1 for the encoder rows), `base64url_decode` (`em_crypto.cpp:907-925`),
      `base64_decode` (`em_crypto.cpp:1005-1046`), both SPKI import/export definitions
      (`em_crypto.cpp:1190-1254`), `generate_ec_key(int)` (`em_crypto.cpp:1353-1405`),
      the ECDSA signer (`em_crypto.cpp:927-1003`) and verifier (`em_crypto.cpp:1767-1811`).
