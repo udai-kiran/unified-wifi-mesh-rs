@@ -108,6 +108,29 @@ class RangeTests(unittest.TestCase):
                 with self.assertRaisesRegex(regen.ContentError, f"{category}/{case}"):
                     regen.validate_body(("\n".join(lines) + "\n").encode("ascii"))
 
+    def test_validation_rejects_siv_shape_rows_with_the_wrong_shape(self):
+        fixture = regen.FIXTURE.read_bytes()
+        body = fixture[fixture.index(b"# OpenSSL: ") :].decode("ascii")
+        lines = body.splitlines()
+        # Case name -> (text to find in the inputs, replacement).
+        changes = {
+            "encrypt-256-ad0-p15": ("ad=none", "ad=-"),
+            "encrypt-256-adempty-p16": ("ad=-", "ad=none"),
+            "encrypt-256-ad1-p32": ("ad=", "ad=00,"),
+            "encrypt-256-ad1-p16": (";plain=", ";plain=00"),
+        }
+        for case, (old, new) in changes.items():
+            with self.subTest(case=case):
+                changed = []
+                for line in lines:
+                    cols = line.split("\t")
+                    if cols[:2] == ["siv", case]:
+                        self.assertIn(old, cols[2])
+                        cols[2] = cols[2].replace(old, new, 1)
+                    changed.append("\t".join(cols))
+                with self.assertRaisesRegex(regen.ContentError, "siv/" + case):
+                    regen.validate_body(("\n".join(changed) + "\n").encode("ascii"))
+
     def test_validation_rejects_rows_carrying_another_case(self):
         fixture = regen.FIXTURE.read_bytes()
         body = fixture[fixture.index(b"# OpenSSL: ") :].decode("ascii")
@@ -225,6 +248,12 @@ class HarnessTests(unittest.TestCase):
             "unsigned-char AD compiled through the typed adapter",
         )
 
+    def test_siv_shape_rows_use_the_typed_adapters(self):
+        cast = "reinterpret_cast<char *>(piece.data())"
+        self.assertEqual(self.source.count(cast), 1)
+        _, compiled = self.compile_variant(self.source.replace(cast, "piece.data()"))
+        self.assertNotEqual(compiled.returncode, 0, "unsigned-char piece compiled")
+
     def test_harness_checks_verifier_arity_and_spki_limit(self):
         executable = str(self.scratch / "vectors")
         missing = subprocess.run(
@@ -246,6 +275,21 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(at_limit.returncode, 2, at_limit.stderr)
         self.assertIn("cannot import verification key", at_limit.stderr)
+
+    def test_harness_checks_records_arity_and_file(self):
+        executable = str(self.scratch / "vectors")
+        missing_argument = subprocess.run(
+            [executable, "--verify-records"], capture_output=True, text=True
+        )
+        self.assertEqual(missing_argument.returncode, 2, missing_argument.stderr)
+        self.assertIn("invalid arguments", missing_argument.stderr)
+        missing_file = subprocess.run(
+            [executable, "--verify-records", "/nonexistent/records.tsv"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(missing_file.returncode, 2, missing_file.stderr)
+        self.assertIn("cannot open records file", missing_file.stderr)
 
     def test_harness_frees_owned_keys_on_exception(self):
         # Instrument only a temporary harness; force errors after EC_KEY and
@@ -537,6 +581,106 @@ class DriverTests(unittest.TestCase):
             rejected = self.invoke("--verify-signature", changed_msg, spki, changed_sig)
             self.assertEqual(rejected.returncode, 1, rejected.stderr)
             self.assertEqual(rejected.stdout.strip(), "verified=0")
+
+    def fixture_records(self):
+        """`curve, spki, message, signature` for each fixed connector signature row."""
+        records = []
+        for line in regen.FIXTURE.read_text().splitlines():
+            if line.startswith("signature\t"):
+                _, curve, inputs, _, signature = line.split("\t")
+                fields = dict(pair.split("=", 1) for pair in inputs.split(";"))
+                records.append([curve, fields["spki"], fields["message"], signature])
+        self.assertEqual([record[0] for record in records], ["p256", "p384", "p521"])
+        return records
+
+    def verify_records(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "records.tsv"
+            path.write_text(text)
+            return self.invoke("--verify-records", path)
+
+    @staticmethod
+    def records_text(records):
+        return "".join("\t".join(record) + "\n" for record in records)
+
+    def test_verify_records_accepts_valid_signatures_on_all_curves(self):
+        result = self.verify_records(self.records_text(self.fixture_records()))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-1], "records=3 failures=0")
+        for curve, line in zip(("p256", "p384", "p521"), lines):
+            self.assertIn(
+                f"curve={curve} accepted=1 rejects-changed-message=1 "
+                "rejects-changed-signature=1",
+                line,
+            )
+
+    def test_verify_records_reports_changed_message_and_signature(self):
+        valid = self.fixture_records()[0]
+        wrong_message = [valid[0], valid[1], "00" + valid[2][2:], valid[3]]
+        wrong_signature = [valid[0], valid[1], valid[2], valid[3][:-2] + "00"]
+        result = self.verify_records(
+            self.records_text([valid, wrong_message, wrong_signature])
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-1], "records=3 failures=2")
+        self.assertIn("accepted=1", lines[0])
+        self.assertIn("accepted=0", lines[1])
+        self.assertIn("accepted=0", lines[2])
+        self.assertIn("signature record verification failed", result.stderr)
+
+    def test_verify_records_rejects_malformed_files(self):
+        valid = self.fixture_records()[0]
+        malformed = {
+            "empty file": "",
+            "too few fields": "\t".join(valid[:3]) + "\n",
+            "too many fields": "\t".join(valid + ["00"]) + "\n",
+            "unknown curve": "\t".join(["p192"] + valid[1:]) + "\n",
+            "upper-case hex": "\t".join(valid[:3] + [valid[3].upper()]) + "\n",
+            "odd-length hex": "\t".join(valid[:3] + [valid[3][:-1]]) + "\n",
+            "empty field": "\t".join(valid[:3] + [""]) + "\n",
+            "blank line": self.records_text([valid]) + "\n",
+            "oversized SPKI": "\t".join([valid[0], "00" * 1024, *valid[2:]]) + "\n",
+        }
+        for name, text in malformed.items():
+            with self.subTest(name):
+                result = self.verify_records(text)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("verified", result.stdout)
+                self.assertIn("error:", result.stderr)
+
+    def test_verify_records_rejects_non_ascii_files_without_a_traceback(self):
+        valid = self.records_text(self.fixture_records()[:1])
+        undecodable = {
+            "utf-8 text": valid.replace("p256", "p256\u00e9").encode("utf-8"),
+            "invalid utf-8": b"p256\t\xff\xfe\n",
+        }
+        for name, data in undecodable.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "records.tsv"
+                path.write_bytes(data)
+                result = self.invoke("--verify-records", path)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertIn("error:", result.stderr)
+                self.assertIn("not ASCII text", result.stderr)
+
+    def test_verify_records_errors_from_the_harness_are_exit_2(self):
+        valid = self.fixture_records()
+        # A P-384 key labelled P-256, and an SPKI that is not a key at all.
+        mislabelled = [valid[0][0], *valid[1][1:]]
+        not_a_key = [valid[0][0], "00", *valid[0][2:]]
+        for name, record in (("mislabelled curve", mislabelled), ("not a key", not_a_key)):
+            with self.subTest(name):
+                result = self.verify_records(self.records_text([record]))
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("oracle error", result.stderr)
+
+    def test_verify_records_missing_file_is_exit_2(self):
+        result = self.invoke("--verify-records", ROOT / "does-not-exist.tsv")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("error:", result.stderr)
 
 
 if __name__ == "__main__":

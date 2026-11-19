@@ -1,0 +1,15 @@
+[package]
+name = "em-dm"
+version = "0.1.0"
+description = "EasyMesh data model records and enums for the unified-wifi-mesh Rust port."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+em-types = { path = "../em-types" }

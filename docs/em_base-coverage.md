@@ -31,8 +31,8 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | Line | Kind | Upstream type | Owner | Note | Status |
 |---|---|---|---|---|---|
 | 410 | alias | `em_interface_name_t` | em-types | `InterfaceName` | ported |
-| 411 | alias | `em_nonce_t` | em-crypto | key material | planned |
-| 412 | alias | `em_dh5_key_t` | em-crypto | key material | planned |
+| 411 | alias | `em_nonce_t` | em-crypto | `rand::Nonce` | ported |
+| 412 | alias | `em_dh5_key_t` | em-crypto | `dh::DhPublic` / `dh::DhPrivate` | ported |
 | 413 | alias | `em_short_string_t` | do not port | fixed-size C char buffer; replaced by `String`/bounded types | n/a |
 | 414 | alias | `em_long_string_t` | do not port | fixed-size C char buffer; replaced by `String`/bounded types | n/a |
 | 415 | alias | `em_2xlong_string_t` | do not port | fixed-size C char buffer; replaced by `String`/bounded types | n/a |
@@ -267,43 +267,43 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2412 | enum | `em_cmd_type_t` | em-cmd | command / request parameters | planned |
 | 2470 | struct | `em_queue_t` | do not port | C queue; replaced by std collections | n/a |
 | 2477 | enum | `em_event_type_t` | em-core | events; redefined natively, see D7 | planned |
-| 2488 | enum | `em_haul_type_t` | em-dm | data-model record | planned |
-| 2497 | enum | `em_vap_mode_t` | em-dm | data-model record | planned |
+| 2488 | enum | `em_haul_type_t` | em-dm | data-model record | ported |
+| 2497 | enum | `em_vap_mode_t` | em-dm | data-model record | ported |
 | 2502 | struct | `em_frame_info_t` | em-transport | link-layer header / raw frame | planned |
-| 2507 | struct | `em_interface_preference_t` | em-dm | data-model record | planned |
+| 2507 | struct | `em_interface_preference_t` | em-dm | data-model record | ported |
 | 2512 | struct | `em_interface_t` | em-types | `Interface` | ported |
 | 2518 | alias | `em_frame_event_t` | em-transport | link-layer header / raw frame | planned |
-| 2520 | struct | `em_network_info_t` | em-dm | data-model record | planned |
-| 2533 | struct | `ieee_1905_security_t` | em-dm | data-model record | planned |
-| 2540 | struct | `em_device_id_t` | em-dm | data-model record | planned |
-| 2546 | enum | `emex_product_class_t` | em-dm | data-model record | planned |
-| 2550 | enum | `emex_device_role_t` | em-dm | data-model record | planned |
-| 2559 | struct | `em_ext_device_info_t` | em-dm | data-model record | planned |
-| 2570 | struct | `em_device_info_t` | em-dm | data-model record | planned |
-| 2629 | struct | `em_ieee_1905_security_cap_t` | em-dm | data-model record | planned |
-| 2635 | struct | `em_ieee_1905_security_info_t` | em-dm | data-model record | planned |
-| 2640 | struct | `em_ssid_2_vid_map_info_t` | em-dm | data-model record | planned |
-| 2646 | struct | `em_network_ssid_info_t` | em-dm | data-model record | planned |
-| 2665 | enum | `em_op_class_type_t` | em-dm | data-model record | planned |
-| 2678 | struct | `em_op_class_id_t` | em-dm | data-model record | planned |
-| 2684 | struct | `em_op_class_info_t` | em-dm | data-model record | planned |
-| 2699 | struct | `em_cac_comp_info_t` | em-dm | data-model record | planned |
-| 2708 | struct | `em_sta_info_t` | em-dm | data-model record | planned |
+| 2520 | struct | `em_network_info_t` | em-dm | data-model record | ported |
+| 2533 | struct | `ieee_1905_security_t` | em-dm | data-model record | ported |
+| 2540 | struct | `em_device_id_t` | em-dm | data-model record | ported |
+| 2546 | enum | `emex_product_class_t` | em-dm | data-model record | ported |
+| 2550 | enum | `emex_device_role_t` | em-dm | data-model record | ported |
+| 2559 | struct | `em_ext_device_info_t` | em-dm | data-model record | ported |
+| 2570 | struct | `em_device_info_t` | em-dm | data-model record | ported |
+| 2629 | struct | `em_ieee_1905_security_cap_t` | em-dm | data-model record | ported |
+| 2635 | struct | `em_ieee_1905_security_info_t` | em-dm | data-model record | ported |
+| 2640 | struct | `em_ssid_2_vid_map_info_t` | em-dm | data-model record | ported |
+| 2646 | struct | `em_network_ssid_info_t` | em-dm | data-model record | ported |
+| 2665 | enum | `em_op_class_type_t` | em-dm | data-model record | ported |
+| 2678 | struct | `em_op_class_id_t` | em-dm | data-model record | ported |
+| 2684 | struct | `em_op_class_info_t` | em-dm | data-model record | ported |
+| 2699 | struct | `em_cac_comp_info_t` | em-dm | data-model record | ported |
+| 2708 | struct | `em_sta_info_t` | em-dm | data-model record | ported |
 | 2769 | enum | `em_target_sta_map_t` | em-dm | data-model record | planned |
-| 2775 | struct | `em_bss_id_t` | em-dm | data-model record | planned |
-| 2783 | struct | `em_bss_info_t` | em-dm | data-model record | planned |
+| 2775 | struct | `em_bss_id_t` | em-dm | data-model record | ported |
+| 2783 | struct | `em_bss_info_t` | em-dm | data-model record | ported |
 | 2839 | struct | `em_neighbor_info_t` | em-dm | data-model record | planned |
-| 2849 | struct | `em_affiliated_ap_info_t` | em-dm | data-model record | planned |
-| 2857 | struct | `em_ap_mld_info_t` | em-dm | data-model record | planned |
-| 2870 | struct | `em_affiliated_bsta_info_t` | em-dm | data-model record | planned |
-| 2876 | struct | `em_bsta_mld_info_t` | em-dm | data-model record | planned |
-| 2889 | struct | `em_affiliated_sta_info_t` | em-dm | data-model record | planned |
-| 2894 | struct | `em_assoc_sta_mld_info_t` | em-dm | data-model record | planned |
-| 2905 | struct | `em_tid_to_link_map_info_t` | em-dm | data-model record | planned |
-| 2918 | struct | `em_tid_to_link_info_t` | em-dm | data-model record | planned |
-| 2926 | struct | `em_radio_id_t` | em-dm | data-model record | planned |
-| 2932 | struct | `em_radio_info_t` | em-dm | data-model record | planned |
-| 2977 | struct | `em_radio_cap_info_t` | em-dm | data-model record | planned |
+| 2849 | struct | `em_affiliated_ap_info_t` | em-dm | data-model record | ported |
+| 2857 | struct | `em_ap_mld_info_t` | em-dm | data-model record | ported |
+| 2870 | struct | `em_affiliated_bsta_info_t` | em-dm | data-model record | ported |
+| 2876 | struct | `em_bsta_mld_info_t` | em-dm | data-model record | ported |
+| 2889 | struct | `em_affiliated_sta_info_t` | em-dm | data-model record | ported |
+| 2894 | struct | `em_assoc_sta_mld_info_t` | em-dm | data-model record | ported |
+| 2905 | struct | `em_tid_to_link_map_info_t` | em-dm | data-model record | ported |
+| 2918 | struct | `em_tid_to_link_info_t` | em-dm | data-model record | ported |
+| 2926 | struct | `em_radio_id_t` | em-dm | data-model record | ported |
+| 2932 | struct | `em_radio_info_t` | em-dm | data-model record | ported |
+| 2977 | struct | `em_radio_cap_info_t` | em-dm | data-model record | ported |
 | 2994 | struct | `em_bss_rprt_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
 | 3002 | struct | `em_radio_rprt_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
 | 3008 | struct | `em_bss_config_rprt_t` | em-msg | report / MLD TLV body; confirm at em-msg port | planned |
@@ -378,15 +378,15 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 3737 | enum | `em_get_sta_list_reason_t` | em-cmd | command / request parameters | planned |
 | 3747 | enum | `em_get_radio_list_reason_t` | em-cmd | command / request parameters | planned |
 | 3754 | enum | `em_get_channel_list_reason_t` | em-cmd | command / request parameters | planned |
-| 3760 | enum | `em_policy_id_type_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3778 | struct | `em_policy_id_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3785 | enum | `em_steering_policy_type_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3792 | struct | `em_8021q_settings_policy_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3797 | struct | `em_ssid_info_traffic_separ_pol_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3803 | struct | `em_traffic_separation_policy_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3808 | struct | `em_qos_mgt_policy_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3815 | struct | `em_backhaul_bss_config_policy_t` | em-dm | policy record (`dm_policy`) | planned |
-| 3821 | struct | `em_policy_t` | em-dm | policy record (`dm_policy`) | planned |
+| 3760 | enum | `em_policy_id_type_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3778 | struct | `em_policy_id_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3785 | enum | `em_steering_policy_type_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3792 | struct | `em_8021q_settings_policy_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3797 | struct | `em_ssid_info_traffic_separ_pol_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3803 | struct | `em_traffic_separation_policy_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3808 | struct | `em_qos_mgt_policy_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3815 | struct | `em_backhaul_bss_config_policy_t` | em-dm | policy record (`dm_policy`) | ported |
+| 3821 | struct | `em_policy_t` | em-dm | policy record (`dm_policy`) | ported |
 | 3850 | alias | `em_editor_callback_t` | em-core | network-node tree editor callback (function pointer); verify at port | planned |
 | 3852 | enum | `em_cli_type_t` | em-cli | CLI parameters | planned |
 | 3858 | struct | `user_data_t` | em-cli | CLI parameters | planned |

@@ -4,8 +4,9 @@
  * Fixed-input oracle for rdkcentral/unified-wifi-mesh @
  * ba4180ba36748629f10c20babc4320dd69c9db4f.
  *
- * regen extracts every upstream definition at build time into definitions.inc
- * and the inline includes in shim.hpp. Those bodies are not transcribed here.
+ * regen extracts every upstream definition at build time into definitions.inc (included here)
+ * and into constants.inc, endian.inc, em_inline.inc and ec_inline.inc (included by shim.hpp).
+ * Those bodies are not transcribed here.
  * The point/scalar operations follow ec_crypto.cpp:122-135 and
  * ec_ctrl_configurator.cpp:869-871 and point decoding follows
  * ec_crypto.cpp:670-685; public DH export follows
@@ -276,6 +277,59 @@ static void siv_vectors(std::ostream &out) {
     }
 }
 
+// Typed adapters for the shapes of upstream's DPP wrapper (ec_util.cpp:157-185): no associated
+// data, and one piece. Like `siv_with_ad`, they take `char *` so a wrong pointer type fails to compile.
+static int siv_with_no_ad(int (*operation)(siv_ctx *, const unsigned char *, unsigned char *, int, unsigned char *, int, ...),
+                          siv_ctx *ctx, const uint8_t *input, uint8_t *output, int len, uint8_t *tag) {
+    return operation(ctx, input, output, len, tag, 0);
+}
+static int siv_with_one_ad(int (*operation)(siv_ctx *, const unsigned char *, unsigned char *, int, unsigned char *, int, ...),
+                           siv_ctx *ctx, const uint8_t *input, uint8_t *output, int len, uint8_t *tag,
+                           char *piece, int piece_len) {
+    return operation(ctx, input, output, len, tag, 1, piece, piece_len);
+}
+
+// Rows for the associated-data shapes and plaintext lengths the DPP wrapper uses. The `ad` input
+// is `none` for zero pieces, `-` for one empty piece, and hex for one non-empty piece.
+static void siv_shape_vectors(std::ostream &out) {
+    enum class Ad { None, One, Empty };
+    struct Shape { const char *ad_name; Ad ad; };
+    const Shape shapes[] = {{"ad0", Ad::None}, {"ad1", Ad::One}, {"adempty", Ad::Empty}};
+    Bytes key = seq(32);
+    Bytes piece_bytes = bytes("dpp frame header");
+    uint8_t empty_backing = 0;  // a valid pointer for the empty piece
+    for (const Shape &shape : shapes) {
+        for (size_t plain_len : {size_t(15), size_t(16), size_t(32)}) {
+            Bytes piece = shape.ad == Ad::One ? piece_bytes : Bytes();
+            Bytes plain = seq(plain_len, 0x30), cipher(plain_len), decoded(plain_len), tag(16);
+            siv_ctx ctx;
+            require(siv_init(&ctx, key.data(), 256) == 1, "SIV init failed");
+            std::unique_ptr<siv_ctx, SivFree> ctx_guard(&ctx);
+            char *piece_ptr = piece.empty() ? reinterpret_cast<char *>(&empty_backing) : reinterpret_cast<char *>(piece.data());
+            int piece_len = static_cast<int>(piece.size());
+            auto encrypt = [&]() {
+                return shape.ad == Ad::None ? siv_with_no_ad(siv_encrypt, &ctx, plain.data(), cipher.data(), plain_len, tag.data())
+                                            : siv_with_one_ad(siv_encrypt, &ctx, plain.data(), cipher.data(), plain_len, tag.data(), piece_ptr, piece_len);
+            };
+            auto decrypt = [&]() {
+                return shape.ad == Ad::None ? siv_with_no_ad(siv_decrypt, &ctx, cipher.data(), decoded.data(), plain_len, tag.data())
+                                            : siv_with_one_ad(siv_decrypt, &ctx, cipher.data(), decoded.data(), plain_len, tag.data(), piece_ptr, piece_len);
+            };
+            int enc = encrypt();
+            int dec = decrypt();
+            require(enc == 1 && dec == 1 && decoded == plain, "SIV shape round trip failed");
+            std::string suffix = "-256-" + std::string(shape.ad_name) + "-p" + std::to_string(plain_len);
+            std::string common = "key=" + hex(key) + ";ad=" + (shape.ad == Ad::None ? std::string("none") : hex(piece));
+            row(out, "siv", "encrypt" + suffix, common + ";plain=" + hex(plain), enc, "tag=" + hex(tag) + ";cipher=" + hex(cipher));
+            row(out, "siv", "decrypt" + suffix, common + ";tag=" + hex(tag) + ";cipher=" + hex(cipher), dec, hex(decoded));
+            tag[0] ^= 1;
+            dec = decrypt();
+            require(dec == -1, "SIV shape accepted altered tag");
+            row(out, "siv", "tampered" + suffix, common + ";tag=" + hex(tag) + ";cipher=" + hex(cipher), dec, hex(decoded));
+        }
+    }
+}
+
 static std::pair<int, Bytes> dh(Bytes peer, Bytes priv) {
     uint8_t *secret = nullptr;
     uint16_t len = 0;
@@ -519,6 +573,8 @@ static void ec_vectors(std::ostream &out) {
     const std::string uri_key = "MDkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDIgADM2206avxHJaHXgLMkq/24e0rsrfMP9K1Tm8gx+ovP0I=";
     spki_row(out, "uri-compressed-p256", uri_key, "curve=p256;source=ec_util.cpp:760", 32, true);
 }
+// Prints fixed-key SHA-256 signatures for the three supported curves, from the same extracted
+// signer. regen does not run this mode; the table above keeps the checked-in results.
 static void make_signatures() {
     Bytes message = bytes(connector);
     for (size_t i = 0; i < 3; ++i) {
@@ -569,6 +625,8 @@ static void wsc_vectors(std::ostream &out) {
         "all=" + hex(keys) + ";auth=" + hex(keys.data(), 32) + ";wrap=" + hex(keys.data() + 32, 16) + ";emsk=" + hex(keys.data() + 48, 32));
 }
 
+// Verifies one DER signature over SHA-256 of the message and prints verified=1 or verified=0.
+// It does not check changed inputs; the batch form does.
 static void verify_external(const char *message_hex, const char *spki_hex, const char *signature_hex) {
     Bytes message = unhex(message_hex), der = unhex(spki_hex), signature = unhex(signature_hex);
     require(der.size() <= 1023, "SPKI DER exceeds the pinned importer's 1024-byte buffer");
@@ -579,21 +637,79 @@ static void verify_external(const char *message_hex, const char *spki_hex, const
     std::cout << "verified=" << (result ? 1 : 0) << '\n';
 }
 
+static std::vector<std::string> split_tabs(const std::string &line) {
+    std::vector<std::string> fields(1);
+    for (char c : line) {
+        if (c == '\t') fields.emplace_back();
+        else fields.back() += c;
+    }
+    return fields;
+}
+static const Curve &record_curve(const std::string &name) {
+    for (size_t i = 0; i < 3; ++i)
+        if (name == curves[i].name) return curves[i];
+    throw std::runtime_error("unsupported curve in record: " + name);
+}
+// Batch form of verify_external for signatures made by another implementation. Each line of the
+// file is `curve<TAB>spki_der_hex<TAB>message_hex<TAB>signature_der_hex` (lowercase hex, curve is
+// p256, p384 or p521). For every record the extracted verifier with SHA-256 must accept it,
+// reject a changed message and reject a changed signature. Failed checks are counted and reported
+// on the last line. Errors found here, such as a key on another curve, stop the run with exit 2;
+// regen checks the file format before compiling and exits 1 for format errors.
+static void verify_records(const char *path) {
+    std::ifstream in(path, std::ios::binary);
+    require(static_cast<bool>(in), "cannot open records file");
+    std::string line;
+    size_t records = 0, failures = 0;
+    while (std::getline(in, line)) {
+        std::vector<std::string> fields = split_tabs(line);
+        require(fields.size() == 4, "record must have 4 tab-separated fields");
+        const Curve &curve = record_curve(fields[0]);
+        Bytes der = unhex(fields[1]), message = unhex(fields[2]), signature = unhex(fields[3]);
+        require(!der.empty() && !message.empty() && !signature.empty(), "empty record field");
+        require(der.size() <= 1023, "SPKI DER exceeds the pinned importer's 1024-byte buffer");
+        std::string encoded = em_crypto_t::base64_encode(der.data(), der.size());
+        Pkey key(em_crypto_t::ec_key_from_base64_der(encoded), EVP_PKEY_free);
+        require(key != nullptr, "cannot import verification key");
+        char group[64] = {0};
+        size_t group_len = 0;
+        require(EVP_PKEY_get_group_name(key.get(), group, sizeof(group), &group_len) == 1 &&
+                std::string(group, group_len) == OBJ_nid2sn(curve.nid), "key is not on the record's curve");
+
+        bool accepted = em_crypto_t::verify_signature(message, signature, key.get(), EVP_sha256());
+        Bytes changed_message = message;
+        changed_message[0] ^= 1;
+        bool rejects_message = !em_crypto_t::verify_signature(changed_message, signature, key.get(), EVP_sha256());
+        Bytes changed_signature = signature;
+        changed_signature.back() ^= 1;
+        bool rejects_signature = !em_crypto_t::verify_signature(message, changed_signature, key.get(), EVP_sha256());
+        ++records;
+        if (!(accepted && rejects_message && rejects_signature)) ++failures;
+        std::cout << "record=" << records << " curve=" << curve.name << " accepted=" << accepted
+                  << " rejects-changed-message=" << rejects_message
+                  << " rejects-changed-signature=" << rejects_signature << '\n';
+    }
+    require(records > 0, "no records");
+    std::cout << "records=" << records << " failures=" << failures << '\n';
+}
+
 int main(int argc, char **argv) {
     try {
         require(argc >= 2, "invalid arguments");
         const std::string mode(argv[1]);
-        require(mode == "--verify-signature" ? argc == 5 : argc == 2, "invalid arguments");
+        const int expected_argc = mode == "--verify-signature" ? 5 : mode == "--verify-records" ? 3 : 2;
+        require(argc == expected_argc, "invalid arguments");
         Provider provider(OSSL_PROVIDER_load(nullptr, "default"), OSSL_PROVIDER_unload);
         require(provider != nullptr, "cannot load default provider");
         if (std::string(argv[1]) == "--verify-signature") verify_external(argv[2], argv[3], argv[4]);
+        else if (mode == "--verify-records") verify_records(argv[2]);
         else if (std::string(argv[1]) == "--generated-form") generated_form();
         else if (std::string(argv[1]) == "--make-signatures") make_signatures();
         else {
             std::ofstream out(argv[1], std::ios::binary);
             require(static_cast<bool>(out), "cannot open output");
             provenance(out);
-            kdf_vectors(out); digest_vectors(out); cbc_vectors(out); wrap_vectors(out); siv_vectors(out);
+            kdf_vectors(out); digest_vectors(out); cbc_vectors(out); wrap_vectors(out); siv_vectors(out); siv_shape_vectors(out);
             dh_vectors(out); encoding_vectors(out); ec_vectors(out); wsc_vectors(out);
             out.flush();
             require(static_cast<bool>(out), "cannot flush output");

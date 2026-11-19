@@ -12,6 +12,7 @@ whole for the temporary build; they are not stored in this repository.
 python3 tools/upstream-crypto-vectors/regen
 python3 tools/upstream-crypto-vectors/regen --check
 python3 tools/upstream-crypto-vectors/regen --generated-form
+python3 tools/upstream-crypto-vectors/regen --verify-records FILE
 python3 -m unittest tools/test_upstream_crypto_vectors.py
 ```
 
@@ -37,6 +38,21 @@ source access, compilation, or execution exit 2. The checked-in connector
 signatures were created once with the extracted signer and are verified with
 an imported public key by the extracted verifier on each regeneration.
 
+To check signatures made by `em-crypto` (note 0006, D4 item 2), `--verify-records` compiles
+the harness once and verifies a whole file. Each line is
+`curve<TAB>SPKI_DER_HEX<TAB>MESSAGE_HEX<TAB>SIGNATURE_DER_HEX` with `curve` one of `p256`, `p384`,
+`p521` and lowercase hex. For every record the extracted upstream verifier with SHA-256 must
+accept the signature, reject a message with one bit changed, and reject a signature with one bit
+changed. It prints one line per record and `records=N failures=F`; it exits 0 only for `F=0`,
+1 for a failed check or a malformed file, and 2 for invocation, I/O, harness, key import, or
+curve-label mismatch errors.
+The Rust crate writes such a file:
+
+```sh
+cargo run -p em-crypto --example sig_records -- /tmp/records.tsv
+python3 tools/upstream-crypto-vectors/regen --verify-records /tmp/records.tsv
+```
+
 The TSV columns are category, case, inputs, upstream return value, and output.
 Input/output byte strings are lowercase hexadecimal; `-` means an empty byte
 string. Named fields use `key=value` separated by semicolons, and comma
@@ -60,6 +76,11 @@ record `encrypt` and `cipher`. The 8191- and 8192-byte 802.11 KDF rows use
 `upstream=<DER>;rust=accept|unsupported-curve`; the two unsupported curves are
 P-192 and P-224. The other byte outputs remain plain hex unless the row has
 named fields for multiple values.
+
+The AES-SIV rows named `<operation>-256-<ad>-p<length>` cover the shapes upstream's DPP wrapper
+uses (`ec_util.cpp:157-185`): `ad` is `ad0` (no associated data, input `ad=none`), `ad1` (one
+piece) or `adempty` (one empty piece, `ad=-`), and the plaintext is 15, 16 or 32 bytes. The
+other AES-SIV rows use two associated-data pieces and are named `<operation>-<bits>`.
 
 Two defects are retained in the verbatim pinned upstream code: the AES-SIV
 variadic functions do not call `va_end`, and `compute_ec_ss_x` leaks its

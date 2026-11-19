@@ -7,11 +7,13 @@ the pinned AES-SIV source and header are compiled whole. No upstream working
 files are consulted. The fixture includes compiler and provider provenance, so
 regeneration on a different toolchain may legitimately differ and needs review.
 
-Exit 0: success; 1: invalid extraction/content or fixture mismatch;
-2: usage, I/O, git, compiler or harness failure. --generated-form runs the
-separate randomized SEC1 point-form check and never writes the fixture;
---verify-signature checks external SHA-256/DER signatures with the upstream
-verifier without modifying the fixture.
+Exit 0: success; 1: invalid extraction/content, a rejected signature or record, or
+fixture mismatch; 2: usage, I/O, git, compiler or harness failure. --generated-form
+runs the separate randomized SEC1 point-form check and never writes the fixture;
+--verify-signature checks one external SHA-256/DER signature with the upstream verifier,
+and --verify-records checks a file of them (one compile). For each record it also
+requires rejection of a changed message and of a changed signature. Neither mode
+modifies the fixture.
 """
 # SPDX-License-Identifier: Apache-2.0
 
@@ -37,10 +39,13 @@ CH = "inc/ec_crypto.h"
 UTIL = "inc/util.h"
 SIV_C = "src/util_crypto/aes_siv.c"
 SIV_H = "src/util_crypto/aes_siv.h"
+# Associated-data shapes of the DPP wrapper rows: none, one piece, one empty piece.
+SIV_AD_SHAPES = ("ad0", "ad1", "adempty")
 
 # All verbatim ranges in D4 item 2; each entry is (path, inclusive start/end,
-# exact first line, destination, kind). The last token is also checked and
-# brace-bearing definitions must end at their outermost closing brace.
+# exact first line, destination, kind). The first line must match exactly, the
+# last line must end with the definition's closing token, and brace-bearing
+# definitions must end at their outermost closing brace.
 RANGES = [
     (EH, 45, 45, "#define SHA256_MAC_LEN 32", "constants", "macro"),
     (EH, 46, 46, "#define AES_BLOCK_SIZE 16", "constants", "macro"),
@@ -199,7 +204,9 @@ def expected_cases():
         "kdf80211": set(hashes) | {"sha256-8191", "sha256-8192"},
         "keywrap": {f"{action}-{bits}" for action in ("wrap", "unwrap", "tampered", "wrap-short", "wrap-non-multiple", "unwrap-short", "unwrap-non-multiple") for bits in (128, 192, 256)},
         "pbkdf2": {"gen-psk"}, "signature": set(curves),
-        "siv": {f"{action}-{bits}" for action in ("encrypt", "decrypt", "tampered") for bits in (256, 384, 512)},
+        "siv": {f"{action}-{bits}" for action in ("encrypt", "decrypt", "tampered") for bits in (256, 384, 512)}
+        | {f"{action}-256-{ad}-p{length}" for action in ("encrypt", "decrypt", "tampered")
+           for ad in SIV_AD_SHAPES for length in (15, 16, 32)},
         "spki": set(spkis), "wps": {"prefix-80"}, "wsc": {"dh-secret", "dh-hash", "kdk", "keys"},
     }
 
@@ -234,6 +241,8 @@ def _fields(value, input_fields):
                 raise ContentError("invalid Rust outcome")
         else:
             pieces = val.split(",") if input_fields and key in ("pieces", "ad") else [val]
+            if input_fields and key == "ad" and val == "none":
+                pieces = []  # zero associated-data pieces
             for piece in pieces:
                 _hex_bytes(piece)
         result[key] = val
@@ -402,10 +411,19 @@ def validate_body(data):
                 require(ret == int(success) and len(raw(value)) == (len(source) + (8 if wrapping else -8) if success else 0),
                         "wrong key-wrap outcome or width")
             elif category == "siv":
-                action, bits = case.split("-")
+                action, bits, *shape = case.split("-")
                 keys(ins, *(('key', 'ad', 'plain') if action == 'encrypt' else ('key', 'ad', 'tag', 'cipher')))
-                require(len(binary(ins, "key")) * 8 == int(bits) and len(ins["ad"].split(",")) == 2,
-                        "wrong SIV key or AD pieces")
+                if shape:
+                    ad_shape, plain_length = shape[0], int(shape[1][1:])
+                    expected_ad = {"ad0": "none", "adempty": "-"}.get(ad_shape)
+                    require(ins["ad"] == expected_ad if expected_ad else
+                            len(ins["ad"].split(",")) == 1 and ins["ad"] != "-" and ins["ad"] != "none",
+                            "wrong SIV associated-data shape")
+                    plain_size = len(binary(ins, "plain" if action == "encrypt" else "cipher"))
+                    require(plain_size == plain_length, "wrong SIV plaintext length")
+                else:
+                    require(len(ins["ad"].split(",")) == 2, "wrong SIV AD pieces")
+                require(len(binary(ins, "key")) * 8 == int(bits), "wrong SIV key width")
                 if action == "encrypt":
                     keys(outs, "tag", "cipher")
                     require(ret == 1 and len(binary(outs, "tag")) == 16 and
@@ -551,7 +569,33 @@ def write_atomically(path, data):
         raise
 
 
+RECORD_CURVES = ("p256", "p384", "p521")
+
+
+def read_records(path):
+    """Parse `curve<TAB>spki<TAB>message<TAB>signature` lines (nonempty lowercase even-length hex)."""
+    records = []
+    try:
+        text = path.read_text(encoding="ascii")
+    except UnicodeDecodeError as exc:
+        raise ContentError(f"{path}: records file is not ASCII text (byte {exc.start})") from exc
+    for number, line in enumerate(text.splitlines(), 1):
+        fields = line.split("\t")
+        if len(fields) != 4 or fields[0] not in RECORD_CURVES:
+            raise ContentError(f"{path}:{number}: expected curve (p256, p384 or p521) and 3 hex fields")
+        if any(not re.fullmatch(r"(?:[0-9a-f]{2})+", value) for value in fields[1:]):
+            raise ContentError(f"{path}:{number}: fields must be nonempty lowercase even-length hex")
+        if len(fields[1]) // 2 > 1023:
+            raise ContentError(f"{path}:{number}: SPKI DER exceeds the pinned importer's 1024-byte buffer")
+        records.append(fields)
+    if not records:
+        raise ContentError(f"{path}: no records")
+    return records
+
+
 def generate(args):
+    # Reject a malformed records file before the (slow) compile.
+    records = read_records(args.verify_records) if args.verify_records else []
     sources = read_sources(args.upstream)
     with tempfile.TemporaryDirectory(prefix="upstream-crypto-") as tmp:
         scratch = Path(tmp)
@@ -570,6 +614,13 @@ def generate(args):
                 raise ToolError("unexpected verifier output")
             print("verified=1")
             return None, None
+        if args.verify_records:
+            output = run([str(scratch / "vectors"), "--verify-records", str(args.verify_records.resolve())],
+                         cwd=scratch, env=env).decode("ascii")
+            sys.stdout.write(output)
+            if output.splitlines()[-1] != f"records={len(records)} failures=0":
+                raise ContentError("signature record verification failed")
+            return None, None
         output_path = scratch / "body.tsv"
         run([str(scratch / "vectors"), str(output_path)], cwd=scratch, env=env)
         body = output_path.read_bytes()
@@ -587,6 +638,8 @@ def main(argv=None):
     modes.add_argument("--check", action="store_true")
     modes.add_argument("--generated-form", action="store_true")
     modes.add_argument("--verify-signature", nargs=3, metavar=("MESSAGE_HEX", "SPKI_DER_HEX", "SIGNATURE_DER_HEX"))
+    modes.add_argument("--verify-records", type=Path, metavar="FILE",
+                       help="verify every `curve SPKI MESSAGE SIGNATURE` record (tab-separated lowercase hex)")
     args = parser.parse_args(argv)
     if args.verify_signature and any(not re.fullmatch(r"(?:[0-9a-f]{2})+", value) for value in args.verify_signature):
         parser.error("--verify-signature arguments must be nonempty lowercase even-length hex")
@@ -596,7 +649,7 @@ def main(argv=None):
         parser.error("SPKI DER exceeds the pinned importer's 1024-byte buffer")
     try:
         data, rows = generate(args)
-        if args.generated_form or args.verify_signature:
+        if args.generated_form or args.verify_signature or args.verify_records:
             return 0
         if args.check:
             old = args.out.read_bytes()
