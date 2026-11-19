@@ -7,8 +7,8 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 
 | Owner | Types |
 |---|---|
-| em-msg | 216 |
-| em-dm | 47 |
+| em-msg | 219 |
+| em-dm | 44 |
 | do not port | 17 |
 | em-cmd | 16 |
 | em-core | 16 |
@@ -260,9 +260,9 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2230 | enum | `em_media_type_t` | em-types | `MediaType`; `max` excluded | ported |
 | 2243 | struct | `em_dpp_chirp_value_t` | em-msg | DPP-related TLV body (consumed by em-easyconnect) | planned |
 | 2250 | struct | `em_ctrl_cap_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2256 | struct | `data_elem_attr_t` | em-dm | Data Elements / vendor attribute IDs; verify at port | planned |
-| 2262 | enum | `data_elem_attr_id_t` | em-dm | Data Elements / vendor attribute IDs; verify at port | planned |
-| 2332 | enum | `vendor_ext_attr_id_t` | em-dm | Data Elements / vendor attribute IDs; verify at port | planned |
+| 2256 | struct | `data_elem_attr_t` | em-msg | WSC / vendor attribute IDs, wire-only (em-dm type table, approved 2026-11-19) | planned |
+| 2262 | enum | `data_elem_attr_id_t` | em-msg | WSC / vendor attribute IDs, wire-only (em-dm type table, approved 2026-11-19) | planned |
+| 2332 | enum | `vendor_ext_attr_id_t` | em-msg | WSC / vendor attribute IDs, wire-only (em-dm type table, approved 2026-11-19) | planned |
 | 2344 | enum | `em_state_t` | em-core | events; redefined natively, see D7 | planned |
 | 2412 | enum | `em_cmd_type_t` | em-cmd | command / request parameters | planned |
 | 2470 | struct | `em_queue_t` | do not port | C queue; replaced by std collections | n/a |

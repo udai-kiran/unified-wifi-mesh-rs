@@ -718,7 +718,12 @@ class Walker:
             fail(f"{source}: unsupported reached declaration kind {decl.kind}")
 
 
-def coverage_rows(text):
+def coverage_rows(text, moved=None):
+    """Return {name: line} for em-dm rows.
+
+    If `moved` is a dict, it is filled with {name: (line, owner)} for every other row, so that a
+    type reassigned away from em-dm by the approved type table can still be checked.
+    """
     result, seen = {}, set()
     header = ("Line", "Kind", "Upstream type", "Owner", "Note", "Status")
     lines = text.splitlines()
@@ -760,14 +765,23 @@ def coverage_rows(text):
         seen.add(name)
         if owner == "em-dm":
             result[name] = int(line_number)
+        elif moved is not None:
+            moved[name] = (int(line_number), owner)
     if not result:
         fail("coverage: no em-dm rows found")
     return result
 
 
-def validate_classification(rows, walker, coverage):
+def validate_classification(rows, walker, coverage, moved=None):
     seen, counts = set(), {category: 0 for category in sorted(CATEGORIES)}
     required = set(walker.reached) | set(coverage)
+    moved = moved or {}
+    # A row for a type the approved table moved away from em-dm is allowed only if the coverage
+    # table already records the same destination and line.
+    allowed = {row["type"] for row in rows
+               if row["type"] in moved and row["type"] not in walker.reached
+               and moved[row["type"]][1] == row["proposed_owner"].strip()
+               and row["em_base.h_line"] == str(moved[row["type"]][0])}
     for row in rows:
         name = row["type"]
         if name in seen:
@@ -786,7 +800,7 @@ def validate_classification(rows, walker, coverage):
             fail(f"classification: wrong em_base.h line for {name}: expected {expected_line}")
         if name in coverage and expected_line != str(coverage[name]):
             fail(f"classification: coverage line mismatch for {name}")
-    missing, extra = required - seen, seen - required
+    missing, extra = required - seen, seen - required - allowed
     if missing or extra:
         fail(f"classification: missing {sorted(missing)}; extra {sorted(extra)}")
     return counts
@@ -848,12 +862,13 @@ def run(args):
     if unused:
         fail(f"manifest: unused external dependencies: {sorted(unused)}")
     try:
-        coverage = coverage_rows(args.coverage.read_text(encoding="utf-8"))
+        moved = {}
+        coverage = coverage_rows(args.coverage.read_text(encoding="utf-8"), moved)
     except UnicodeDecodeError as exc:
         raise ContentError("coverage: not UTF-8") from exc
     except OSError as exc:
         raise InputError(f"cannot read coverage: {exc}") from exc
-    counts = validate_classification(cls_rows, walker, coverage)
+    counts = validate_classification(cls_rows, walker, coverage, moved)
     generated = format_inventory(walker)
     if args.check:
         try:

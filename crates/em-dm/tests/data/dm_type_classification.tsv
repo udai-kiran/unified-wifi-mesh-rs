@@ -1,4 +1,4 @@
-# DRAFT, pending user approval. Categories, owners and reasons are proposed, not decisions.
+# Approved by the user on 2026-11-19 (note 0007 D7 item 2). Categories, owners and reasons are decisions.
 # em_base.h line is - for external and C scalar types; evidence paths are at the pinned upstream commit unless they refer to external headers or docs.
 # stored-native includes native values serialized field by field; dual-use identifies an actual wire-layout component or wire code also stored.
 # A dash means no evidence was identified for that use; absence is not proof of no other caller. Coverage-only rows remain in scope.
