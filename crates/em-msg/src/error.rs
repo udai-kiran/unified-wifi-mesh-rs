@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Error types for framing and building.
+//! Error types for framing, building and TLV body decoding and encoding.
 
 use core::fmt;
 
@@ -62,3 +62,84 @@ impl fmt::Display for BuildError {
 }
 
 impl std::error::Error for BuildError {}
+
+/// A TLV value could not be decoded.
+///
+/// Kinds are added per body when a body needs one (for example an invalid
+/// enumerated value); callers match on the kind, never on message text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeError {
+    /// A read needed more bytes than were left.
+    Truncated {
+        /// Number of bytes the read asked for.
+        needed: usize,
+        /// Number of bytes that were left.
+        remaining: usize,
+    },
+    /// The body was decoded completely but bytes were left over.
+    TrailingBytes {
+        /// Number of bytes left over.
+        remaining: usize,
+    },
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Truncated { needed, remaining } => {
+                write!(
+                    f,
+                    "the TLV value is truncated: {needed} bytes needed, {remaining} left"
+                )
+            }
+            Self::TrailingBytes { remaining } => {
+                write!(f, "the TLV value has {remaining} unexpected trailing bytes")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+/// A TLV value could not be encoded.
+///
+/// Kinds are added per body when a body needs one; callers match on the
+/// kind, never on message text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeError {
+    /// A collection is longer than its count field can hold.
+    CountTooLarge {
+        /// Length of the collection.
+        len: usize,
+        /// Largest count the field can hold.
+        max: usize,
+    },
+    /// A value does not fit in its field.
+    ValueTooLarge {
+        /// The value that was given.
+        value: u32,
+        /// Largest value the field can hold.
+        max: u32,
+    },
+}
+
+impl fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CountTooLarge { len, max } => {
+                write!(
+                    f,
+                    "a collection of {len} items does not fit in its count field (largest count {max})"
+                )
+            }
+            Self::ValueTooLarge { value, max } => {
+                write!(
+                    f,
+                    "the value {value} does not fit in its field (largest value {max})"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for EncodeError {}

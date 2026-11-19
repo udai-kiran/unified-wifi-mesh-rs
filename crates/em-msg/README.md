@@ -1,6 +1,6 @@
 # em-msg
 
-IEEE 1905 CMDU header, TLV framing, message builder and message validation (spec §17).
+IEEE 1905 CMDU header, TLV framing, message builder, message validation (spec §17) and the TLV body reader and writer.
 Synchronous, depends only on `em-types`, no `unsafe`, no clones.
 
 ## What is here
@@ -13,7 +13,8 @@ Synchronous, depends only on `em-types`, no `unsafe`, no clones.
 | `wsc` | WSC Message Type selector (M1 = 4, M2 = 5) | `em_configuration_t::get_wsc_msg_type` (`em_configuration.cpp`) |
 | `tables` | The 70 validation tables as static data | the table functions `autoconfig_search` .. `i1905_ack` (`em_msg.cpp`) |
 | `validate` | `validate(cmdu, profile)` | `em_msg_t::validate` (`em_msg.cpp`) |
-| `error` | `FramingError`, `BuildError` | - |
+| `body` | `Reader`, `Writer` for TLV bodies | hand-written readers and writers replace upstream's packed C structs copied into the frame (note 0008) |
+| `error` | `FramingError`, `BuildError`, `DecodeError`, `EncodeError` | - |
 
 Design: [note 0005](../../docs/0005-em-msg-scope.md). The tables equal the golden fixture
 `tests/data/upstream_msg_tables.tsv`, which is generated from upstream by `tools/gen-upstream-msg-tables`.
@@ -27,9 +28,31 @@ Upstream source: `src/em/em_msg.cpp`, `inc/em_msg.h`, and `get_wsc_msg_type` in
   `CmduHeader::parse` and `validate` take the whole CMDU (from the 8-byte header); `TlvIter::new`
   and `wsc_msg_type` take the TLV area after the header; `MsgBuilder` produces the whole CMDU.
 - TLV bodies and the field readers (`get_radio_id`, `get_profile`, ...): ported later, each with
-  the `em-core` area that uses it.
+  the `em-core` area that uses it. Only the `Reader` and `Writer` they are built on are here.
 - The policy for a received Profile TLV: `em-core`.
 - SDU fragmentation and CMDU reassembly.
+
+## Reader and Writer (TLV bodies)
+
+Design: [note 0008](../../docs/0008-tlv-body-codec.md), D1 and D3.
+
+- `Reader<'a>` borrows one TLV value (`Tlv::value`). Reads: `u8`, `be_u16`, `be_u24` (returns `u32`),
+  `be_u32`, `le_u16`, `le_u32` (only for fields upstream writes in host order), `bytes(n)`,
+  `array::<N>()`, `mac()`, `skip(n)`, `rest()` (a tail bounded by the TLV length), `remaining()`.
+  A read of `n > 0` bytes past the end is `DecodeError::Truncated { needed, remaining }`; a zero-byte
+  read at the end succeeds; a failed read leaves the reader where it was. `finish()` fails with
+  `DecodeError::TrailingBytes` if input remains.
+- `Writer` owns the bytes: the same scalars, `bytes`, `mac`, `zeros(n)`, and `count_u8(len)` /
+  `count_u16(len)` (the latter writes 2 bytes, big-endian), which return `EncodeError::CountTooLarge`
+  instead of truncating.
+  `be_u24` returns `EncodeError::ValueTooLarge` above `0xFF_FFFF`. A call that fails appends nothing.
+- Each body has two entry points: `decode_value(&'a [u8]) -> Result<Body<'a>, DecodeError>`
+  (reader over `Tlv::value`, decode, `finish`) and `encode_value(&self) -> Result<Vec<u8>, EncodeError>`
+  (bytes only on success; the caller passes them to `MsgBuilder::tlv`). The pattern is in the `body`
+  module docs.
+- The D3 test helpers (golden round trip, strict prefixes, trailing byte, count too large, reserved
+  bits, alternate and empty values) live in the test-only module `body_testkit`, together with two
+  sample bodies. Each helper is shown to fail on a wrong body or fixture.
 
 ## Intentional differences from upstream
 
