@@ -1,0 +1,160 @@
+# Triage of the 155 tests of tests/test_l1_dm_easy_mesh_list.cpp at unified-wifi-mesh ba4180b (plan A10, brief 3b): one class per test.
+# class: PORT (value assertions), PORT-REWRITE (smoke, empty-key, not-found-expects-throw, malformed or special-character key, vacuous upstream test:
+# ported with state assertions or as None/error with the model unchanged), SKIP-UB (null pointer or null key, ANY_THROW or null result), SKIP-STALE-API.
+# line is the TEST_F line; method is the list method (group) the test exercises.
+test	line	method	class	basis
+network_ssid_update_without_database_reaches_all_models	196	put_network_ssid	PORT	value assertions
+network_ssid_propagation_requires_exact_ids	232	put_network_ssid	PORT	value assertions
+create_data_model_valid_data_model_creation	305	create_data_model	PORT	value assertions
+create_data_model_negative_null_net_id	354	create_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+create_data_model_negative_null_al_intf	392	create_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+create_data_model_loop_profile_types	428	create_data_model	PORT	value assertions
+create_data_model_default_unsuccess_assoc_policy	462	create_data_model	PORT	value assertions
+debug_probe_valid_invocation	501	debug_probe	SKIP-STALE-API	debug_probe has no effect and is not ported (dm_easy_mesh_list.cpp:894-906)
+delete_data_model_existent	530	delete_data_model	PORT-REWRITE	smoke test: state assertions added
+delete_data_model_non_existent	572	delete_data_model	PORT-REWRITE	not found, expects throw: None, model unchanged
+delete_data_model_null_netid	606	delete_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+delete_data_model_null_al_mac	640	delete_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+delete_data_model_empty_netid	669	delete_data_model	PORT-REWRITE	empty key smoke test: state assertions added
+dm_easy_mesh_list_t_defaultConstructor_singleInstance	702	ctor/dtor	PORT-REWRITE	smoke test: state assertions added
+get_bss_key_not_exists	728	get_bss	PORT	value assertions
+get_bss_null_key	759	get_bss	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_bss_empty_key	788	get_bss	PORT-REWRITE	empty key: an empty network id is valid input that finds nothing
+get_data_model_ExistentNetworkID	823	get_data_model	PORT	value assertions
+get_data_model_NonExistentNetworkID	875	get_data_model	PORT	value assertions
+get_data_model_NullNetworkID	912	get_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_data_model_NullALMAC	939	get_data_model	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_device_valid_existing_device	970	get_device	PORT	value assertions
+get_device_valid_non_existing_device	1003	get_device	PORT	value assertions
+get_device_null_key	1033	get_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_device_empty_key	1062	get_device	PORT-REWRITE	empty key: an empty network id is valid input that finds nothing
+get_device_improper_formatted_key	1091	get_device	PORT-REWRITE	malformed string key: a typed NodeId cannot be malformed; the nearest case is an unknown node
+get_device_extra_whitespace	1123	get_device	PORT-REWRITE	malformed string key: whitespace is part of a typed network id
+get_first_bss_returns_NULL_when_empty	1155	get_first_bss	PORT	value assertions
+get_first_device_returns_valid_pointer	1191	get_first_device	PORT	value assertions
+get_first_dm_valid	1226	get_first_dm	PORT	value assertions
+get_first_network_returns_NULL_when_no_networks_present	1256	get_first_network	PORT	value assertions
+get_first_network_ssid_returns_null	1285	get_first_network_ssid	PORT	value assertions
+get_first_op_class_valid	1315	get_first_op_class	PORT	value assertions
+get_first_policy_empty_policy_list	1350	get_first_policy	PORT	value assertions
+get_first_pre_set_op_class_by_type_NoPreConfiguredOperationClassPresent	1383	get_first_pre_set_op_class_by_type	PORT	value assertions
+get_first_radio_returns_valid_pointer_when_multiple_radios_exist	1411	get_first_radio	PORT	value assertions
+get_first_radio_returns_NULL_when_net_id_does_not_match	1439	get_first_radio	PORT	value assertions
+get_first_radio_handles_null_mac	1468	get_first_radio	PORT	value assertions
+get_first_radio_NULL_netid_returns_NULL	1497	get_first_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_first_radio_empty_netid_returns_NULL	1533	get_first_radio	PORT-REWRITE	empty key: an empty network id is valid input that finds nothing
+get_first_scan_result_ReturnNullWhenNoScanResultsExist	1566	get_first_scan_result	PORT	value assertions
+get_first_sta_empty_network_list	1594	get_first_sta	PORT	value assertions
+get_network_nonExistentKey	1622	get_network	PORT	value assertions
+get_network_emptyKey	1650	get_network	PORT-REWRITE	empty key: valid input; upstream's prefix match returns a network, the port matches exactly
+get_network_NULLKey	1679	get_network	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_network_ssid_Negative_nonexistent_key	1707	get_network_ssid	PORT	value assertions
+get_network_ssid_Negative_null_key	1738	get_network_ssid	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_network_ssid_Negative_empty_string_key	1765	get_network_ssid	PORT-REWRITE	empty key: an empty SSID id is valid input that finds nothing
+get_network_ssid_Positive_special_character_key_notexists	1799	get_network_ssid	PORT	value assertions
+get_next_bss_valid	1831	get_next_bss	PORT	value assertions
+get_next_bss_returnNull_when_currentBSSNULL	1872	get_next_bss	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+GetNextDevice_Positive	1902	get_next_device	PORT	value assertions
+get_next_device_EmptyDeviceListWithNULLInput	1935	get_next_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_dm_Positive	1964	get_next_dm	PORT	value assertions
+get_next_dm_NullptrInput	1996	get_next_dm	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_network_null_current_network	2022	get_next_network	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_network_ssid_null_input	2050	get_next_network_ssid	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_op_class_valid	2078	get_next_op_class	PORT	value assertions
+get_next_op_class_Retrieve_next_operating_class_from_empty_list_using_NULL_pointer	2108	get_next_op_class	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_policy_positive	2135	get_next_policy	PORT	value assertions
+get_next_policy_passing_null_current_policy	2167	get_next_policy	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_pre_set_op_class_by_type_null_op_class_exists	2197	get_next_pre_set_op_class_by_type	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_pre_set_op_class_by_type_invalid_opclasstype	2225	get_next_pre_set_op_class_by_type	PORT	value assertions
+get_next_radio_valid_next_radio_available	2258	get_next_radio	PORT-REWRITE	vacuous upstream test: its zeroed radios are stored nowhere, so the assertions never run; rewritten with real radios
+get_next_radio_no_next_radio_available	2294	get_next_radio	PORT	value assertions
+get_next_radio_null_net_id_provided	2338	get_next_radio	PORT-REWRITE	vacuous upstream test: its zeroed radios are stored nowhere, so the assertion never runs; rewritten with a real radio
+get_next_radio_null_radio_pointer_provided	2376	get_next_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_radio_null_input	2405	get_next_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_scan_result_positive	2438	get_next_scan_result	PORT	value assertions
+get_next_scan_result_NULL_input	2490	get_next_scan_result	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_sta_NULL_pointer_returns_NULL	2517	get_next_sta	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_op_class_non_existent_key	2546	get_op_class	PORT	value assertions
+get_op_class_null_key	2578	get_op_class	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_policy_non_existent_key	2606	get_policy	PORT	value assertions
+get_policy_null_key	2636	get_policy	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_radio_non_existent_radio_key_returns_null	2667	get_radio	PORT	value assertions
+get_radio_null_radio_key_returns_null	2700	get_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_scan_result_validKey_returnsCorrespondingScanResult	2730	get_scan_result	PORT	value assertions
+get_scan_result_nonexistentKey_returnsNull	2773	get_scan_result	PORT	value assertions
+get_scan_result_nullKey_returnsNull	2803	get_scan_result	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_sta_valid_non_existing_sta	2830	get_sta	PORT	value assertions
+get_sta_null_key	2865	get_sta	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+init_valid_non_null_mgr	2893	init	PORT-REWRITE	smoke test: state assertions added
+init_null_mgr	2923	init	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_valid_insertion	2952	put_bss	PORT-REWRITE	smoke test: state assertions added
+put_bss_null_key	2984	put_bss	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_empty_key	3012	put_bss	PORT-REWRITE	empty key, expects throw: the port reports NotFound and changes nothing
+put_bss_null_dm_bss	3042	put_bss	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_special_char_key	3071	put_bss	PORT-REWRITE	special-character key: a typed key is not parsed (plan A10)
+put_device_valid_insertion	3102	put_device	PORT-REWRITE	smoke test: state assertions added
+put_device_null_key	3133	put_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_device_null_device	3164	put_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_valid_network_insertion	3192	put_network	PORT-REWRITE	smoke test: state assertions added
+put_network_null_key	3223	put_network	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_null_network	3253	put_network	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_valid_new_ssid_insertion	3281	put_network_ssid	PORT-REWRITE	smoke test: state assertions added
+put_network_ssid_negative_null_key	3311	put_network_ssid	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_negative_null_network_ssid	3339	put_network_ssid	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_negative_empty_key	3369	put_network_ssid	PORT-REWRITE	empty key, expects throw: the port reports NotFound and changes nothing
+put_op_class_valid_input	3398	put_op_class	PORT-REWRITE	smoke test: state assertions added
+put_op_class_null_key	3442	put_op_class	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_op_class_null_op_class	3480	put_op_class	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_op_class_empty_key	3509	put_op_class	PORT-REWRITE	empty key, expects throw: an empty ruid is valid input
+put_policy_valid_policy_insertion	3550	put_policy	PORT-REWRITE	smoke test: state assertions added
+put_policy_null_key	3581	put_policy	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_policy_null_policy	3614	put_policy	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_policy_empty_key	3644	put_policy	PORT-REWRITE	empty key, expects throw: the port reports NotFound and changes nothing
+put_radio_valid_radio_valid_key	3674	put_radio	PORT-REWRITE	smoke test: state assertions added
+put_radio_NULL_key_valid_radio	3709	put_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_radio_valid_key_NULL_radio	3739	put_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_radio_empty_key_valid_radio	3770	put_radio	PORT-REWRITE	empty key, expects throw: the port reports NotFound and changes nothing
+put_scan_result_valid_insertion_standard	3801	put_scan_result	PORT-REWRITE	smoke test: state assertions added
+put_scan_result_valid_insertion_non_zero_index	3834	put_scan_result	PORT-REWRITE	smoke test: state assertions added
+put_scan_result_null_key	3868	put_scan_result	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_scan_result_null_scan_result	3901	put_scan_result	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_scan_result_empty_key	3935	put_scan_result	PORT-REWRITE	empty key, expects throw: the port reports NotFound and changes nothing
+put_sta_validKey_added	3971	put_sta	PORT-REWRITE	smoke test: state assertions added
+put_sta_nullKey	4004	put_sta	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_sta_nullSta	4032	put_sta	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_bss_valid_key_existing	4062	remove_bss	PORT-REWRITE	smoke test: state assertions added
+remove_bss_null_key_handles_gracefully	4095	remove_bss	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_bss_non_existent_key_no_change	4125	remove_bss	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_device_existing_valid_key	4158	remove_device	PORT-REWRITE	smoke test: state assertions added
+remove_device_non_existent_key	4194	remove_device	PORT-REWRITE	empty key smoke test: state assertions added
+remove_device_null_key	4223	remove_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_network_existing_valid_key	4252	remove_network	PORT-REWRITE	smoke test: state assertions added
+remove_network_non_existent_key	4284	remove_network	PORT-REWRITE	not found, expects throw: error, model unchanged
+remove_network_null_key	4316	remove_network	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_network_ssid_valid_existing_key	4347	remove_network_ssid	PORT-REWRITE	smoke test: state assertions added
+remove_network_ssid_nonexistent_key	4379	remove_network_ssid	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_network_ssid_null_key	4409	remove_network_ssid	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_op_class_valid_key_present	4439	remove_op_class	PORT-REWRITE	smoke test: state assertions added
+remove_op_class_valid_key_not_present	4470	remove_op_class	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_op_class_null_key	4495	remove_op_class	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_policy_existing_policy_key	4524	remove_policy	PORT-REWRITE	smoke test: state assertions added
+remove_policy_non_existent_policy_key	4555	remove_policy	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_policy_null_key	4583	remove_policy	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_radio_existingRadio_validKey	4611	remove_radio	PORT-REWRITE	smoke test: state assertions added
+remove_radio_nonExistentKey	4641	remove_radio	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_radio_nullPointerKey	4669	remove_radio	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_scan_result_existing_valid_key	4698	remove_scan_result	PORT-REWRITE	smoke test: state assertions added
+remove_scan_result_non_existent_key	4735	remove_scan_result	PORT-REWRITE	smoke test: state assertions added
+remove_scan_result_null_key	4770	remove_scan_result	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_sta_existing_sta_valid	4802	remove_sta	PORT-REWRITE	smoke test: state assertions added
+remove_sta_non_existing_sta	4839	remove_sta	PORT-REWRITE	not found, expects throw: None, model unchanged
+remove_sta_null_key	4871	remove_sta	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+dm_easy_mesh_list_t_valid_destruction	4901	ctor/dtor	PORT-REWRITE	smoke test: state assertions added
+delete_all_data_models_DeleteNonEmptyDataModels	4941	delete_all_data_models	PORT-REWRITE	smoke test: state assertions added
+get_next_pre_set_op_class_by_type_positive	4982	get_next_pre_set_op_class_by_type	PORT	value assertions
+get_bss_returns_valid_bss	5016	get_bss	PORT	value assertions
+get_next_network_ssid_positive	5061	get_next_network_ssid	PORT	value assertions
+update_device_existing_device_updated	5117	update_device	PORT	value assertions
+update_device_non_existing_device_should_throw	5170	update_device	PORT-REWRITE	not found, expects throw: error, model unchanged
+update_device_null_key	5200	update_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)
+update_device_null_device	5231	update_device	SKIP-UB	null pointer, null key or null argument: not representable in Rust (plan A10)

@@ -128,3 +128,16 @@ record! {
         pub connect_status: bool = Map::field("connect_status"),
     }
 }
+
+impl BssInfo {
+    /// Port of `dm_bss_t::match_criteria` (`src/dm/dm_bss.cpp:375-392`) for the one criterion
+    /// upstream callers pass, `"radio=<mac>"` (`src/orch/em_orch_ctrl.cpp:544-545`): true if the
+    /// BSS is on `radio`. `None` is the empty criterion and matches every BSS (`:391`).
+    #[must_use]
+    pub fn matches_radio_filter(&self, radio: Option<MacAddr>) -> bool {
+        match radio {
+            Some(radio_mac) => self.id.ruid == radio_mac,
+            None => true,
+        }
+    }
+}

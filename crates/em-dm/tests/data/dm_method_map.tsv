@@ -1,0 +1,332 @@
+# Method map: one row per upstream definition (A3). Columns: upstream, scope, disposition, notes.
+# scope node: dm_easy_mesh_t members (every row of dm_upstream_methods.tsv) and the helpers the port uses:
+# dm_sta_t decode_sta_capability, copy_sta_info, set_frame_body and dm_bss_t::match_criteria. scope list (brief 3b): the rows of dm_list_methods.tsv, keyed Class::name@cpp:LINE.
+# disposition: rust:<file>::<Type>::<fn> (the file and fn exist, checked by a unit test) or not-ported:<reason>.
+upstream	scope	disposition	notes
+analyze_ap_cap_query@cpp:412	node	not-ported:JSON codec stays outside em-dm (0007 D1)	builds em_cmd_ap_cap_report_t from a decoded subdoc
+analyze_client_cap_query@h:359	node	not-ported:UNDEFINED member, declared at h:359 with no member definition (cpp:432 is a free function returning 0)	
+analyze_dev_init@cpp:442	node	not-ported:stub body returns 0 (cpp:442-444)	
+analyze_radio_config@cpp:395	node	not-ported:stub body prints and returns 0 (cpp:395-402)	
+analyze_sta_list@cpp:437	node	not-ported:stub body returns 0 (cpp:437-439)	
+analyze_vap_config@cpp:404	node	not-ported:stub body prints and returns 0 (cpp:404-410)	
+apply_sta_cap_to_maps@cpp:4104	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::apply_sta_cap_to_maps	C2 two halves, F1: the frame goes through copy_frame_f1 into each entry; called by ModelDelta::StaCapUpdate
+apply_sta_disassociation@cpp:4054	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::apply_sta_disassociation	the caller marks sta_list_update (C5)
+apply_sta_mld_association@cpp:3991	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::apply_sta_mld_association	the caller marks sta_list_update (C5); the cached frame is a copy through copy_frame_f1; D1b intentional-difference:d1-storage-route: the associated rows are staged under the keys they are stored with, not keys rebuilt from the rows (upstream formats them from the row, cpp:3967-3975, 4007-4016)
+clone_hash_maps@cpp:3244	node	not-ported:whole-map duplication needs Clone, which the models do not have (0004 R2); readers borrow the rows (sta_rows)	the cloned maps were an upstream snapshot for the agent worker; a delta (StaAggregate, StaLinkMetrics) carries what changes
+commit_bss_config@cpp:328	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::commit_bss_config	replaces the BSS with the same ruid and bssid, never adds; the source is the argument instead of an index into another model
+commit_config@cpp:207	node	rust:crates/em-dm/src/model/delta.rs::ModelDelta::apply	al target: AlInsert (network record and device, with is_emplus_agent and extended_info kept, cpp:216-222) via NodeModel::commit_device; radio target: EmInsertRadio via NodeModel::commit_radio (replace at cpp:227-233, radio-full return at :235-238, new radio with its capability or a zeroed default at the same index :239-247, op classes :252-283 via NodeModel::commit_op_class); bss target: EmInsertBss via NodeModel::commit_bss and update_ap_mld_info (:285-319). The sta_hash_map target is empty (:215). Row rule: skipped rows are reported. BSS append is bounded (C6, 0007 defect 1).; D3: commit_radio returns RadioCommit {radio, cap}; a new radio with a cap whose ruid is not the radio MAC gets the zeroed default and the cap is reported as SkippedRow{RadioCap, WrongRadio}; an existing radio with a cap supplied reports NotAttempted; a full radio table also reports the cap as NotAttempted; AlInsert counts the network write when present; remove_radio removes the cap slot at the radio index if that slot exists
+commit_config@cpp:323	node	not-ported:stub body returns 0 (cpp:323-325)	
+commit_config@cpp:346	node	not-ported:stub body returns 0 (cpp:346-349)	
+commit_config@cpp:351	node	rust:crates/em-dm/src/model/delta.rs::ModelDelta::apply	al_insert on dev_init: AlInsert{network: None} (cpp:364-373); em_insert: EmInsertRadio (cpp:374-382, upstream appends radio[0] without replace, capability or op classes; the port applies the radio-target rule, a documented difference); set_ssid and start_dpp are empty (cpp:357-363); dev_test has no branch (plan C1)
+copy_assoc_sta_mld_info@cpp:3956	node	not-ported:whole-map duplication needs Clone, which the models do not have (0004 R2); readers borrow assoc_sta_mlds()	read access: crates/em-dm/src/model/node/mld.rs::NodeModel::assoc_sta_mlds
+copy_sta_snapshot@cpp:4229	node	not-ported:whole-map duplication needs Clone, which the models do not have (0004 R2); readers borrow sta_rows(Consolidated)	read access: crates/em-dm/src/model/node/sta.rs::NodeModel::sta_rows
+create_ap_cap_query_json_cmd@cpp:2790	node	not-ported:JSON codec stays outside em-dm (0007 D1)	builds a JSON command
+create_autoconfig_renew_json_cmd@cpp:2743	node	not-ported:JSON codec stays outside em-dm (0007 D1)	builds a JSON command
+create_client_cap_query_json_cmd@cpp:2815	node	not-ported:JSON codec stays outside em-dm (0007 D1)	builds a JSON command
+create_new_scan_result@cpp:3537	node	rust:crates/em-dm/src/model/node/scan.rs::NodeModel::create_new_scan_result	
+db_cfg_type_get_criteria@cpp:4160	node	rust:crates/em-dm/src/model/dirty.rs::DirtySet::bss_delete_filter	C5: the only criterion upstream callers pass is radio= on bss_list_delete; the typed filter is Option<MacAddr>. Upstream's index loop never ends for type 0 (cpp:4165-4168); a DbCfgType cannot be 0.
+db_cfg_type_is_set@h:2552	node	rust:crates/em-dm/src/model/dirty.rs::DirtySet::is_set	C5, bit test of one type
+db_cfg_type_is_set@h:2574	node	rust:crates/em-dm/src/model/dirty.rs::DirtySet::any	C5, any bit set
+decode_ap_cap_config@cpp:1883	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON into a record
+decode_client_cap_config@cpp:1933	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON into a record
+decode_config@cpp:853	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON into a model
+decode_config_op_class_array@cpp:1647	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON op classes; the model write is set_channels_list
+decode_config_reset@cpp:894	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON
+decode_config_set_channel@cpp:1352	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON; the model write is the CsaChannel delta
+decode_config_set_policy@cpp:1084	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON; the model write is set_policy / ModelDelta::Policies
+decode_config_set_radio@cpp:981	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON; set_radio has no live write (plan C1)
+decode_config_set_ssid@cpp:1573	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON; the SSID put is a MeshModel operation (plan C1)
+decode_config_test@cpp:1703	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON
+decode_num_devices@cpp:820	node	not-ported:JSON codec stays outside em-dm (0007 D1)	decodes JSON
+decode_sta_config@h:598	node	not-ported:UNDEFINED member, declared only at h:598	
+deinit@cpp:3285	node	not-ported:LIFECYCLE frees owned members; Rust Drop does it	
+encode_config@cpp:447	node	not-ported:JSON codec stays outside em-dm (0007 D1)	encodes JSON
+encode_config_op_class_array@cpp:559	node	not-ported:JSON codec stays outside em-dm (0007 D1)	encodes JSON
+encode_config_reset@cpp:471	node	not-ported:JSON codec stays outside em-dm (0007 D1)	encodes JSON
+encode_config_test@cpp:587	node	not-ported:JSON codec stays outside em-dm (0007 D1)	encodes JSON
+find_matching_bss@cpp:3517	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::find_matching_bss	typed BssKey, exact match (C4)
+find_matching_device@cpp:2420	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::find_matching_device	
+find_matching_radio@cpp:2401	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::find_matching_radio	
+find_matching_scan_result@cpp:3579	node	rust:crates/em-dm/src/model/node/scan.rs::NodeModel::find_matching_scan_result	typed ScanKey; the network id compares exactly where upstream compares a prefix (C4)
+find_sta@cpp:3082	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::find_sta	first row in key order (C3)
+find_sta@cpp:3098	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::find_sta_on_any_bss	
+get_agent_al_interface@h:846	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::agent_al_interface	
+get_agent_al_interface_mac@h:857	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::agent_al_interface_mac	
+get_agent_al_interface_name@h:868	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::agent_al_interface_name	
+get_ap_mld@h:1635	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::ap_mld	
+get_ap_mld_by_ref@h:1649	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::ap_mld_mut	
+get_ap_mld_frm_haul_type@cpp:3629	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::ap_mld_by_haul_type	
+get_ap_mld_frm_haul_type@h:1714	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::ap_mld_by_haul_type	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_associated_bsta_bss_info@cpp:2942	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::associated_bsta_bss_info	
+get_backhaul_bss_info@cpp:2962	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::backhaul_bss_info	
+get_beaconchannel_by_bandwidth@cpp:2626	node	rust:crates/em-dm/src/model/e4.rs::beacon_channel_by_bandwidth	static helper over em_e4_table_t; a free function
+get_beaconchannel_by_opclass@cpp:2682	node	rust:crates/em-dm/src/model/e4.rs::beacon_channel_by_op_class	static helper over em_e4_table_t; a free function
+get_bss@h:1429	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss	
+get_bss@cpp:2896	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss_by_radio	D2: NodeModel::bss_index_by_radio is the positional form (for the in-place identity write of em_configuration.cpp:1625-1638 through bss_mut); BssKey keeps haul_type as find_matching_bss does (cpp:3517-3535)
+get_bss_by_ref@h:1456	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss_mut	
+get_bss_info@h:1337	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss	
+get_bss_info@h:1351	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_bss_info_with_mac@cpp:2731	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss_info_with_mac	
+get_bss_info_with_mac@h:259	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bss_info_with_mac	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_bsta_bss_info@cpp:2912	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::bsta_bss_info	
+get_bsta_mld_info@h:1679	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::bsta_mld_info	
+get_bsta_mld_info@h:1690	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::bsta_mld_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_centerchannel_by_bandwidth@cpp:2644	node	rust:crates/em-dm/src/model/e4.rs::center_channel_by_bandwidth	static helper over em_e4_table_t; a free function
+get_centerchannel_by_opclass@cpp:2662	node	rust:crates/em-dm/src/model/e4.rs::center_channel_by_op_class	static helper over em_e4_table_t; a free function
+get_channel_list_by_op_class@cpp:2716	node	rust:crates/em-dm/src/model/e4.rs::channel_list_by_op_class	static helper over em_e4_table_t; a free function
+get_cmd_ctx@h:2059	node	not-ported:m_cmd_ctx belongs to em-cmd (0002)	
+get_colocated@h:2616	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::is_colocated	
+get_controller_interface@h:917	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface	research class OTHER is a substring artefact; this is the real inline member
+get_controller_interface_mac@h:926	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface_mac	
+get_ctl_mac@h:1052	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface_mac	
+get_ctrl_al_interface@h:782	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface	
+get_ctrl_al_interface_mac@h:792	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface_mac	
+get_ctrl_al_interface_name@h:803	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::controller_interface_name	
+get_curr_op_class@cpp:2412	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class	None at and beyond the count (upstream: null from 64)
+get_device@h:1103	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::device	
+get_device_by_ref@h:1110	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::device_mut	
+get_device_info@h:976	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::device	
+get_device_info@h:990	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::device	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_dpp@h:1751	node	not-ported:m_dpp belongs to em-easyconnect (0007 D1)	
+get_em@h:2649	node	not-ported:m_em back pointer (0004 R3)	
+get_first_sta@cpp:3114	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::first_sta	first row in key order (C3); D1a: yields StaEntry {key, row}, the key the row is stored under
+get_first_sta_info@cpp:3006	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::first_sta_info	C3 key order; em_target_sta_map_t is StaMapTarget; D1a: yields StaEntry {key, row}, the key the row is stored under
+get_first_sta_info@h:2160	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::first_sta_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_freq_band_by_op_class@cpp:2704	node	rust:crates/em-dm/src/model/e4.rs::freq_band_by_op_class	static helper over em_e4_table_t; a free function
+get_haul_type_from_ssid@cpp:2876	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::haul_type_from_ssid	
+get_id@h:108	node	not-ported:process-global instance counter; a node is identified by its NodeId (plan A1)	
+get_ieee_1905_security_cap@h:965	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::ieee_1905_security	read .sec_cap
+get_ieee_1905_security_info@h:943	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::ieee_1905_security	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_ieee_1905_security_info@h:954	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::ieee_1905_security	
+get_interface_by_index@h:1067	node	rust:crates/em-dm/src/model/node/interfaces.rs::NodeModel::interface	
+get_interfaces_list@cpp:2219	node	not-ported:HOST getifaddrs enumeration stays outside em-dm (0007 D1); the adapter calls push_interface	crates/em-dm/src/model/node/interfaces.rs::NodeModel::push_interface checks the capacity before the write (0007 defect 1)
+get_last_topo_query_sent_time@h:112	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::last_topo_query_sent_time	
+get_manufacturer@h:1934	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::manufacturer	
+get_manufacturer_model@h:1943	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::manufacturer_model	
+get_mlo_policy@cpp:3620	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::mlo_policy	fronthaul and backhaul only (cpp:3620-3627)
+get_msg_id@h:1976	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::msg_id	
+get_network@h:1004	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::info	U1: the record is stored once per network
+get_network_by_ref@h:1015	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::info_mut	U1
+get_network_info@h:1026	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::info	U1
+get_network_info@h:1040	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::info	U1; static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_network_ssid@h:1172	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::network_ssid	U1: SSID table stored once per network
+get_network_ssid_by_ref@h:1185	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::network_ssid_mut	mutable access is by SsidKey, not by index; indexed reads use network_ssid(index)
+get_network_ssid_info_by_haul_type@cpp:2853	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::network_ssid_by_haul_type	
+get_next_sta@cpp:3129	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::next_sta	takes the key of the previous row instead of a pointer; D1a: the cursor is the stored key an earlier first/next returned (StaEntry::key), not a key rebuilt from the row
+get_next_sta_info@cpp:3027	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::next_sta_info	takes the key of the previous row instead of a pointer; D1a: the cursor is the stored key an earlier first/next returned (StaEntry::key), not a key rebuilt from the row
+get_next_sta_info@h:2176	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::next_sta_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_ap_mld@h:1589	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is ap_mlds().len()
+get_num_ap_mld@h:1601	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is ap_mlds().len(); static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_assoc_sta_mld@h:1699	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is assoc_sta_mlds().len()
+get_num_assoc_sta_mld@h:1711	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is assoc_sta_mlds().len(); static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_bss@h:1385	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is bss_list().len()
+get_num_bss@h:1394	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is bss_list().len(); static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_bss_for_associated_sta@cpp:3216	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::num_bss_for_associated_sta	
+get_num_network_ssid@h:1145	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::num_network_ssids	C6 count rule: the count is the collection's length, there is no set_num_*. 
+get_num_op_class@h:1252	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is op_classes().len()
+get_num_op_class@h:1264	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is op_classes().len(); static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_policy@h:1488	node	rust:crates/em-dm/src/model/node/policy.rs::NodeModel::num_policies	C6 count rule: the count is the collection's length, there is no set_num_*. 
+get_num_radios@h:1859	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is radios().len()
+get_num_radios@h:1871	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	count is radios().len(); static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_num_scan_results@h:1541	node	rust:crates/em-dm/src/model/node/scan.rs::NodeModel::num_scan_results	C6 count rule: the count is the collection's length, there is no set_num_*. The off-by-one of research 7.13 cannot occur.
+get_op_class@h:1298	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class	
+get_op_class_by_ref@h:1311	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class_mut	
+get_op_class_info@h:1229	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class	
+get_op_class_info@h:1245	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_opclass_info_for_bss@cpp:2984	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::op_class_info_for_bss	the bssid argument is compared with the radio MAC, as upstream does (cpp:2986)
+get_platform@cpp:2152	node	not-ported:HOST reads /sys/firmware/devicetree (0007 D1)	
+get_policy_key@cpp:167	node	rust:crates/em-dm/src/model/keys.rs::PolicyKey::of	typed key, never formatted (C4)
+get_primary_device_type@h:1968	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::primary_device_type	
+get_prioritized_interface@cpp:2177	node	rust:crates/em-dm/src/model/node/interfaces.rs::NodeModel::prioritized_interface	
+get_radio@cpp:2354	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio	None at and beyond the count (upstream: a zeroed slot below 3)
+get_radio@cpp:2363	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_by_mac	C4: the global find by radio MAC across nodes is the mesh's (3b)
+get_radio_by_ref@h:1777	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_mut	
+get_radio_cap@cpp:2374	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_cap	
+get_radio_cap@cpp:2386	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_cap_at	
+get_radio_cap_info@cpp:2395	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_cap_at	
+get_radio_cap_info@h:1744	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio_cap_at	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_radio_data@cpp:2331	node	not-ported:webconfig m_wifi_data (OneWifi) stays outside em-dm (0007 D1)	
+get_radio_info@h:1820	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio	
+get_radio_info@h:1835	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_radio_interface@h:1805	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::radio	read .intf of the radio
+get_scan_result@cpp:3562	node	rust:crates/em-dm/src/model/node/scan.rs::NodeModel::scan_result	index is the position in key order (C3)
+get_serial_number@h:1957	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::serial_number	
+get_software_version@h:1950	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::software_version	
+get_ssid_mismatch_check_time@h:110	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::ssid_mismatch_check_time	
+get_sta_info@cpp:3148	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::sta_info	
+get_sta_info@h:2193	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::sta_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+get_subdoc_radio_type_for_freq@h:2695	node	not-ported:webconfig subdoc type stays outside em-dm (0007 D1)	
+get_subdoc_vap_type_for_freq@h:2677	node	not-ported:webconfig subdoc type stays outside em-dm (0007 D1)	
+get_topo_state@h:105	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::topo_state	
+handle_dirty_dm@h:2584	node	not-ported:UNDEFINED member, declared at h:2584; em_ctrl_t::handle_dirty_dm (src/ctrl/em_ctrl.cpp:779) is another class and the flush is em-db's	
+has_at_least_one_associated_sta@cpp:3061	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::has_at_least_one_associated_sta	
+has_policy_type@cpp:186	node	rust:crates/em-dm/src/model/node/policy.rs::NodeModel::has_policy_type	
+hex@cpp:1994	node	not-ported:text codec for JSON and webconfig stays outside em-dm (0007 D1); decode_sta_capability keeps its own bounded hex step	see dm_sta_t::decode_sta_capability
+init@cpp:4241	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::new	init() is the state a new node starts in (NodeModel::empty then the A5 defaults); the MLO policy defaults of cpp:4266-4271 are set there
+is_ap_mld_mac@cpp:3646	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::is_ap_mld_mac	
+is_bsta_mld_present@h:1658	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::is_bsta_mld_present	
+is_bsta_mld_present@h:1670	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::is_bsta_mld_present	static void* shim of the C callback table, forwards to the same member; no separate port. 
+is_controller@h:2619	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::is_controller	
+is_ssid_match@cpp:2841	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::is_ssid_match	
+is_sta_associated@cpp:3076	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::is_sta_associated	
+is_sta_mld@cpp:3233	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::is_sta_mld	
+mac_address_from_name@cpp:2275	node	not-ported:HOST ioctl SIOCGIFHWADDR (0007 D1)	
+macbytes_to_string@cpp:2056	node	not-ported:replaced by em-types MacAddr Display (crates/em-types/src/mac.rs:117); keys are typed and never formatted (C4)	
+maclist_to_string@cpp:2084	node	not-ported:replaced by em-types MacAddr Display applied per element; the consumer joins the list (C4)	
+merge_assoc_sta_updates@cpp:4173	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::merge_assoc_sta_updates	assoc rows move in; disassoc carries keys (C1); ModelDelta::StaAggregate decides each disassoc entry (applied or skipped) from its own removal
+merge_sta_link_metrics@cpp:4215	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::merge_sta_link_metrics	existing entries only, whole-record replace; ModelDelta::StaLinkMetrics
+name_from_mac_address@cpp:2301	node	not-ported:HOST getifaddrs search (0007 D1)	
+print_config@cpp:2429	node	not-ported:debug printing; the models derive Debug	
+print_op_class_list@cpp:3485	node	not-ported:debug printing; the models derive Debug	
+put_sta_info@cpp:3183	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::put_sta_info	a row with the key is kept (cpp:3195-3198)
+put_sta_info@h:2206	node	rust:crates/em-dm/src/model/node/sta.rs::NodeModel::put_sta_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+remove_ap_mld_info_by_haul_type@cpp:3897	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::remove_ap_mld_info_by_haul_type	
+remove_bss_by_index@cpp:3501	node	rust:crates/em-dm/src/model/node/bss.rs::NodeModel::remove_bss_by_index	the stale last slot upstream leaves (cpp:3501-3515) does not exist. intentional-difference:a4-remove-bss-stale-slot
+replace_assoc_sta_mld_info@cpp:3927	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::replace_assoc_sta_mld_info	a num_affiliated_sta above the cap rejects the row instead of clamping it (cpp:3930-3934, C1); ModelDelta::AssocStaMldRefresh
+reset@cpp:4279	node	not-ported:LIFECYCLE partial reset (counts, policies, network and device records, MLO defaults; sta maps, scan results, radio caps and op class contents are left) has no caller in the port: the owner drops the node and creates a new one, and the cmd path is the mesh's delete_all_data_models (plan C1)	confirmed by the coordinator: its only callers reset scratch models used while decoding JSON (src/ctrl/dm_easy_mesh_ctrl.cpp:4213, 4684), which is outside em-dm
+reset_cmd_ctx@h:2080	node	not-ported:m_cmd_ctx belongs to em-cmd (0002)	
+reset_db_cfg_type@cpp:4125	node	rust:crates/em-dm/src/model/dirty.rs::DirtySet::clear	C5: clearing a bit also clears its criterion; upstream resets criteria[num] with the bit value instead of its index (cpp:4138). intentional-difference:c5-clear-clears-criterion
+resolve_ap_mld_to_fallback_ruid@cpp:3668	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::resolve_ap_mld_to_fallback_ruid	
+securitymode_to_str@cpp:2104	node	not-ported:security-mode label helper belongs to the consumer (0007 D4)	
+set_agent_al_interface_mac@h:879	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_agent_al_interface_mac	
+set_agent_al_interface_name@h:890	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_agent_al_interface_name	
+set_channels_list@cpp:3428	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::set_channels_list	
+set_cmd_ctx@h:2070	node	not-ported:m_cmd_ctx belongs to em-cmd (0002)	
+set_colocated@h:2606	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_colocated	
+set_controller@h:2618	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_controller	
+set_controller_intf_media@h:836	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::set_controller_intf_media	
+set_ctrl_al_interface_mac@cpp:2165	node	rust:crates/em-dm/src/model/ctx.rs::NodeCtx::set_ctrl_al_interface_mac	touches the node and its network, so it is a NodeCtx method
+set_ctrl_al_interface_name@cpp:2171	node	rust:crates/em-dm/src/model/ctx.rs::NodeCtx::set_ctrl_al_interface_name	rejects a name that is not a valid interface name where upstream truncates
+set_db_cfg_param@cpp:4142	node	rust:crates/em-dm/src/model/dirty.rs::DirtySet::mark	C5: mark_bss_delete(Option<MacAddr>) carries the radio criterion. The unterminated strncpy (cpp:4157) cannot occur. Operations do not mark; callers do.
+set_em@h:2595	node	not-ported:m_em back pointer (0004 R3)	
+set_id@h:107	node	not-ported:LIFECYCLE process-global instance counter; a node is identified by its NodeId (plan A1)	
+set_last_topo_query_sent_time@h:111	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_last_topo_query_sent_time	
+set_manufacturer@h:1997	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_manufacturer	
+set_manufacturer_model@h:2008	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_manufacturer_model	
+set_msg_id@h:1985	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_msg_id	
+set_network@h:770	node	rust:crates/em-dm/src/model/network.rs::NetworkModel::set_info	U1
+set_num_ap_mld@h:1610	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_num_ap_mld@h:1622	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_num_bss@h:1403	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_num_bss@h:1415	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_num_network_ssid@h:1158	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_num_op_class@cpp:53	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	upstream refuses a count above EM_MAX_OPCLASS (cpp:53-60); the cap is the collection's
+set_num_op_class@h:1287	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	static void* shim of the C callback table, forwards to the same member; no separate port. 
+set_num_radios@h:1881	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	upstream clamps to EM_MAX_BANDS; the port rejects at insert (C6)
+set_num_radios@h:1893	node	not-ported:C6 count rule: the count is the collection's length, there is no set_num_*.	
+set_policy@cpp:3393	node	rust:crates/em-dm/src/model/node/policy.rs::NodeModel::set_policy	stamps the device MAC (cpp:3405); at 32 the row is skipped (cpp:3411-3414)
+set_primary_device_type@h:2043	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_primary_device_type	
+set_serial_number@h:2032	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_serial_number	
+set_software_version@h:2019	node	rust:crates/em-dm/src/model/node/radio.rs::NodeModel::set_software_version	
+set_ssid_mismatch_check_time@h:109	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_ssid_mismatch_check_time	
+set_topo_state@h:106	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::set_topo_state	
+string_to_macbytes@cpp:2070	node	not-ported:replaced by em-types MacAddr FromStr (crates/em-types/src/mac.rs:152); keys are typed and never parsed (C4)	
+str_to_securitymode@cpp:2128	node	not-ported:security-mode label helper belongs to the consumer (0007 D4)	
+unhex@cpp:2024	node	not-ported:text codec for JSON and webconfig stays outside em-dm (0007 D1)	
+update_ap_mld_info@cpp:3700	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::update_ap_mld_info	returns the positions of the affiliated APs skipped at 64 (:3791-3795); EmInsertBss reports each as a SkippedRow
+update_ap_mld_info@h:1719	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::update_ap_mld_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+update_assoc_sta_mld_info@cpp:3828	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::update_assoc_sta_mld_info	
+update_assoc_sta_mld_info@h:1725	node	rust:crates/em-dm/src/model/node/mld.rs::NodeModel::update_assoc_sta_mld_info	static void* shim of the C callback table, forwards to the same member; no separate port. 
+update_bsta_mld_info@cpp:3822	node	not-ported:stub body is an empty TODO that only logs (cpp:3822-3826); the evident intent is not implemented, the engine writes the record through bsta_mld_info_mut as upstream's only writers do	decision (A4): record not-ported with a reason; test the_bsta_mld_record_is_written_through_direct_access
+update_bsta_mld_info@h:1722	node	not-ported:static shim of the stub update_bsta_mld_info (empty TODO, cpp:3822-3826)	
+update_cac_status_id@cpp:1682	node	rust:crates/em-dm/src/model/node/op_class.rs::NodeModel::update_cac_status_id	
+update_scan_results@cpp:3599	node	rust:crates/em-dm/src/model/ctx.rs::NodeCtx::update_scan_results	net id is the agent network's id (C1); dev_mac and scanner_type overrides kept; the null dereference cannot occur
+update_scan_results@h:1580	node	rust:crates/em-dm/src/model/ctx.rs::NodeCtx::update_scan_results	static void* shim of the C callback table, forwards to the same member; no separate port. 
+~dm_easy_mesh_t@cpp:4346	node	not-ported:LIFECYCLE destructor; Rust Drop	
+dm_easy_mesh_t()@cpp:4330	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::new	default ctor: zeroed counts, no dirty bits; the role, profile and colocated flag are inputs (A5)
+dm_easy_mesh_t(const dm_network_t&)@cpp:4318	node	rust:crates/em-dm/src/model/node/mod.rs::NodeModel::from_controller_identity	0007 defect 3: the memcpy of ctrl_id over id (cpp:4320) is not reproduced; net_id, dev_mac, media, backhaul_alid and backhaul_mac come explicitly. intentional-difference:defect3-ctor-identity. The name lookup (getifaddrs) is the host adapter's.
+dm_sta_t::decode_sta_capability@cpp:464	node	rust:crates/em-dm/src/records/sta.rs::StaInfo::decode_sta_capability	C2: moved into em-dm as a StaInfo method
+dm_sta_t::copy_sta_info@cpp:704	node	rust:crates/em-dm/src/records/sta.rs::StaInfo::copy_sta_info	whole-row replace used by put_sta, update_sta and the pending-map writes
+dm_sta_t::set_frame_body@cpp:671	node	rust:crates/em-dm/src/records/sta.rs::StaInfo::set_frame_body	rejects a frame above 11 426 bytes and keeps the old one; upstream clamps (0007 D4). intentional-difference:frame-limit-reject
+dm_bss_t::match_criteria@cpp:375	node	rust:crates/em-dm/src/records/bss.rs::BssInfo::matches_radio_filter	C5: the one criterion upstream callers pass is radio=<mac>; None matches every BSS (cpp:391)
+dm_easy_mesh_list_t::get_data_model@cpp:1806	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::get_data_model	exact NodeId lookup; the empty network id is valid input
+dm_easy_mesh_list_t::create_data_model@cpp:1656	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::create_data_model	default network on a new NetId and cap 5 (C7); no network or SSID copy (U1); host lookup and JSON write stay outside em-dm; colocated write on the one network record (C5); D4(b) intentional-difference:d4-controller-by-role: the co-located write marks the controller node stored under the network record controller MAC, else the first controller node of the network in key order, else none (upstream looks up GLOBAL_NET_ID and the MAC and asserts, cpp:1738-1739)
+dm_easy_mesh_list_t::delete_data_model@cpp:1639	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::delete_data_model	None for a missing node (upstream dereferences null); the network stays
+dm_easy_mesh_list_t::delete_all_data_models@cpp:1613	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::delete_all_data_models	hands the removed nodes back
+dm_easy_mesh_list_t::debug_probe@cpp:894	list	not-ported:debug aid with no effect, it only iterates (dm_easy_mesh_list.cpp:894-906)	iterates and has no effect (dm_easy_mesh_list.cpp:894-906)
+dm_easy_mesh_list_t::init@cpp:1819	list	rust:crates/em-dm/src/model/mesh/mod.rs::MeshModel::new	MeshModel::new(controller_al_mac); the manager is not stored (NodeNeeded replaces create_node, A6)
+dm_easy_mesh_list_t::get_first_dm@h:128	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_dm	first node in key order (C3)
+dm_easy_mesh_list_t::get_next_dm@h:144	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_dm	next node in key order; an unknown cursor is None
+dm_easy_mesh_list_t::get_first_network@cpp:48	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::first_network	first network in key order (C3)
+dm_easy_mesh_list_t::get_next_network@cpp:71	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::next_network	next network in key order (C3)
+dm_easy_mesh_list_t::get_network@cpp:105	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::get_network	exact match (C4)
+dm_easy_mesh_list_t::remove_network@cpp:124	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::remove_network	implemented (U2); refused while nodes exist (C7)
+dm_easy_mesh_list_t::put_network@cpp:129	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::put_network	one record per network (U1); cap 5 (C7); mismatch mark on the controller node (C5)
+dm_easy_mesh_list_t::get_first_device@cpp:178	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_device	key order (C3)
+dm_easy_mesh_list_t::get_next_device@cpp:190	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_device	cursor is the NodeId
+dm_easy_mesh_list_t::get_device@cpp:210	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::get_device	NodeId key; the media is not part of it
+dm_easy_mesh_list_t::remove_device@cpp:226	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::remove_device	removes the node (U2)
+dm_easy_mesh_list_t::put_device@cpp:235	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::put_device	counts distinct devices (A4); cap 5 on node creation in a new network (C7)
+dm_easy_mesh_list_t::update_device@cpp:267	list	rust:crates/em-dm/src/model/mesh/nodes.rs::MeshModel::update_device	NotFound for a missing node
+dm_easy_mesh_list_t::get_first_radio@cpp:306	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_radio	key order (C3)
+dm_easy_mesh_list_t::get_next_radio@cpp:324	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_radio	cursor is the position (NodeId, index): array-backed rows can share a key
+dm_easy_mesh_list_t::get_radio@cpp:365	list	rust:crates/em-dm/src/model/mesh/radios.rs::MeshModel::get_radio	global find by radio MAC, first match in key order (C4)
+dm_easy_mesh_list_t::remove_radio@cpp:394	list	rust:crates/em-dm/src/model/mesh/radios.rs::MeshModel::remove_radio	implemented (U2), global find (C4); D3: also removes the capability slot at the radio index if that slot exists
+dm_easy_mesh_list_t::put_radio@cpp:399	list	rust:crates/em-dm/src/model/mesh/radios.rs::MeshModel::put_radio	replaces within the target node only; returns NodeNeeded and creates no node (A6)
+dm_easy_mesh_list_t::get_first_radio@cpp:476	list	rust:crates/em-dm/src/model/mesh/radios.rs::MeshModel::first_radio_of	None when the node has no radio
+dm_easy_mesh_list_t::get_next_radio@cpp:488	list	rust:crates/em-dm/src/model/mesh/radios.rs::MeshModel::next_radio_of	cursor is the position (index) in the node's radio array
+dm_easy_mesh_list_t::get_first_bss@cpp:514	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_bss	key order (C3)
+dm_easy_mesh_list_t::get_next_bss@cpp:533	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_bss	cursor is the position (NodeId, index): commit_bss matches the BSSID alone, so two rows can share a BssKey
+dm_easy_mesh_list_t::get_bss@cpp:571	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::get_bss	(NodeId, BssKey) lookup
+dm_easy_mesh_list_t::get_first_bss@cpp:588	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::first_bss_of_agent	the hard-coded global network is kept
+dm_easy_mesh_list_t::get_next_bss@cpp:600	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::next_bss_of_agent	the hard-coded global network is kept; cursor is the position (index), not the key
+dm_easy_mesh_list_t::remove_bss@cpp:625	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::remove_bss	matches the whole BssKey (C4)
+dm_easy_mesh_list_t::put_bss@cpp:648	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::put_bss	cap 24 (C6); key derived from the record
+dm_easy_mesh_list_t::get_first_sta@cpp:673	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_sta	key order (C3); D1a: Located::key is the stored key
+dm_easy_mesh_list_t::get_next_sta@cpp:690	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_sta	cursor is (NodeId, StaKey); D1a: the cursor is (Located::at, Located::key) of the previous row, the stored key
+dm_easy_mesh_list_t::get_sta@cpp:714	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::get_sta	global find by radio MAC (C4)
+dm_easy_mesh_list_t::remove_sta@cpp:758	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::remove_sta	implemented (U2), global find (C4)
+dm_easy_mesh_list_t::put_sta@cpp:763	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::put_sta	global find by radio MAC (C4); NotFound without an owner
+dm_easy_mesh_list_t::get_first_network_ssid@cpp:812	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::first_network_ssid	first network in key order, SSIDs in id order (C3); D1a (C3 amended): slot 0 of the first network in key order that has an SSID; within a network the SSIDs are in array (insertion) order, as upstream; upstream returns the last populated node because the loop has no break
+dm_easy_mesh_list_t::get_next_network_ssid@cpp:829	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::next_network_ssid	stored rows only; cursor is (NetId, SsidKey); D1a: positional, the cursor is (NetId, index) of the previous row (Positioned); stored rows only
+dm_easy_mesh_list_t::get_network_ssid@cpp:869	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::get_network_ssid	the one table of each network (U1)
+dm_easy_mesh_list_t::remove_network_ssid@cpp:908	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::remove_network_ssid	exact id, one table (A4, U1)
+dm_easy_mesh_list_t::put_network_ssid@cpp:937	list	rust:crates/em-dm/src/model/mesh/networks.rs::MeshModel::put_network_ssid	stored once per network, cap 5 (U1, C6)
+dm_easy_mesh_list_t::get_first_op_class@cpp:989	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_op_class	key order (C3)
+dm_easy_mesh_list_t::get_next_op_class@cpp:1008	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_op_class	cursor is the position (NodeId, index): commit_op_class and update_cac_status_id can make two keys equal
+dm_easy_mesh_list_t::get_op_class@cpp:1047	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::get_op_class	global find, first match in key order (C4)
+dm_easy_mesh_list_t::remove_op_class@cpp:1172	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::remove_op_class	implemented (U2)
+dm_easy_mesh_list_t::put_op_class@cpp:1177	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::put_op_class	NotFound without an owner; cap 64 (C4, C6)
+dm_easy_mesh_list_t::get_first_pre_set_op_class_by_type@cpp:1115	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::first_pre_set_op_class_by_type	first node in key order (C3)
+dm_easy_mesh_list_t::get_next_pre_set_op_class_by_type@cpp:1140	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::next_pre_set_op_class_by_type	first node in key order (C3); cursor is the position (index), not the key
+dm_easy_mesh_list_t::get_first_policy@cpp:1255	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_policy	key order (C3); D1a: Located::key is the stored key
+dm_easy_mesh_list_t::get_next_policy@cpp:1277	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_policy	cursor is (NodeId, PolicyKey); D1a: the cursor is (Located::at, Located::key), the stored key
+dm_easy_mesh_list_t::get_policy@cpp:1300	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::get_policy	PolicyKey lookup
+dm_easy_mesh_list_t::remove_policy@cpp:1335	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::remove_policy	PolicyKey
+dm_easy_mesh_list_t::put_policy@cpp:1369	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::put_policy	the key is a PolicyKey; cap 32 (C6)
+dm_easy_mesh_list_t::get_first_scan_result@cpp:1385	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::first_scan_result	key order (C3); D1a: Located::key is the stored key
+dm_easy_mesh_list_t::get_next_scan_result@cpp:1403	list	rust:crates/em-dm/src/model/mesh/walk.rs::MeshModel::next_scan_result	cursor is (NodeId, ScanKey); D1a: the cursor is (Located::at, Located::key), the stored key
+dm_easy_mesh_list_t::get_scan_result@cpp:1428	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::get_scan_result	ScanKey lookup
+dm_easy_mesh_list_t::remove_scan_result@cpp:1453	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::remove_scan_result	edits the decoded beacon reports
+dm_easy_mesh_list_t::put_scan_result@cpp:1524	list	rust:crates/em-dm/src/model/mesh/records.rs::MeshModel::put_scan_result	neighbor count is the list length (7.13); capacities checked before the first write (C1 row rule)
+dm_easy_mesh_list_t::dm_easy_mesh_list_t@cpp:1827	list	not-ported:empty body (dm_easy_mesh_list.cpp:1827-1829); MeshModel::new is the construction (0004 R3)	empty body; MeshModel::new builds the empty mesh
+dm_easy_mesh_list_t::~dm_easy_mesh_list_t@cpp:1832	list	not-ported:empty body that leaks m_list (dm_easy_mesh_list.cpp:1832-1834); Drop frees the model (0004 R3)	empty body, leaks m_list
+dm_network_list_t::update_list@cpp:123	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_network_list	delete_list removes the networks without nodes
+dm_network_list_t::delete_list@cpp:148	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_network_list	delete_list removes the networks without nodes
+dm_device_list_t::update_list@cpp:146	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_device_list	delete_list removes every node
+dm_device_list_t::delete_list@cpp:174	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_device_list	delete_list removes every node
+dm_bss_list_t::update_list@cpp:149	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_bss_list	insert, update and delete dispatch to the mesh operations
+dm_bss_list_t::delete_list@cpp:187	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_bss_list	removes every row and returns the count
+dm_radio_list_t::update_list@cpp:146	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_radio_list	insert returns the RadioPutOutcome (NodeNeeded, dm_radio_list.cpp:146-155 reaches create_node); update keeps radio_temp
+dm_radio_list_t::delete_list@cpp:181	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_radio_list	update keeps radio_temp; D1b intentional-difference:d1-storage-route: removes by position from the visited node, with the capability slot at the same index
+dm_sta_list_t::update_list@cpp:148	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_sta_list	update has copy_sta_info semantics
+dm_sta_list_t::delete_list@cpp:179	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_sta_list	update has copy_sta_info semantics
+dm_op_class_list_t::update_list@cpp:214	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_op_class_list	insert, update and delete dispatch to the mesh operations
+dm_op_class_list_t::delete_list@cpp:243	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_op_class_list	removes every row and returns the count; D1b intentional-difference:d1-storage-route: removes by position from the visited node
+dm_policy_list_t::update_list@cpp:223	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_policy_list	update falls back to insert
+dm_policy_list_t::delete_list@cpp:258	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_policy_list	update falls back to insert; D1b intentional-difference:d1-storage-route: clears the visited node
+dm_scan_result_list_t::update_list@cpp:167	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_scan_result_list	upstream delete_list is broken (7.9); D5(b) intentional-difference:d5-self-report-cleanup: a delete at the self index removes the zero-BSSID report of the result's op class and channel, where upstream matches the zero BSSID alone (cpp:1493-1520)
+dm_scan_result_list_t::delete_list@cpp:207	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_scan_result_list	upstream delete_list is broken (7.9); each result is removed once, with or without neighbors; D1b intentional-difference:d1-storage-route: each result and its beacon reports leave the node and stored key that hold them, and a neighbor's report is matched by BSSID, op class and channel (upstream: BSSID only, cpp:1503-1511); D5(b) intentional-difference:d5-self-report-cleanup: also removes the station scanner zero-BSSID self report, once per removed result
+dm_network_ssid_list_t::update_list@cpp:174	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::update_network_ssid_list	exact SSID id
+dm_network_ssid_list_t::delete_list@cpp:193	list	rust:crates/em-dm/src/model/mesh/lists.rs::MeshModel::delete_network_ssid_list	exact SSID id; D1b intentional-difference:d1-storage-route: removes by position from the visited network
+dm_radio_cap_list_t::update_list@cpp:111	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::update_radio_cap_list	global side map keyed by MAC (C4)
+dm_radio_cap_list_t::delete_list@cpp:139	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::delete_radio_cap_list	global side map keyed by MAC (C4)
+dm_ieee_1905_security_list_t::update_list@cpp:127	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::update_ieee_1905_security_list	global side map keyed by MAC (C4)
+dm_ieee_1905_security_list_t::delete_list@cpp:156	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::delete_ieee_1905_security_list	global side map keyed by MAC (C4)
+dm_ssid_2_vid_map_t::update_list@cpp:94	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::update_ssid_2_vid_map	global side map keyed by (SSID, MAC) (C4); a changed record is stored
+dm_radio_cap_list_t::get_first@h:58	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::first_radio_cap_entry	key order (C3)
+dm_radio_cap_list_t::get_next@h:72	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::next_radio_cap_entry	key order (C3)
+dm_ieee_1905_security_list_t::get_first@h:67	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::first_ieee_1905_security_entry	key order (C3)
+dm_ieee_1905_security_list_t::get_next@h:82	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::next_ieee_1905_security_entry	key order (C3)
+dm_ssid_2_vid_map_t::get_first@h:69	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::first_ssid_2_vid_entry	key order (C3)
+dm_ssid_2_vid_map_t::get_next@h:83	list	rust:crates/em-dm/src/model/mesh/side_maps.rs::MeshModel::next_ssid_2_vid_entry	key order (C3)

@@ -289,7 +289,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2684 | struct | `em_op_class_info_t` | em-dm | data-model record | ported |
 | 2699 | struct | `em_cac_comp_info_t` | em-dm | data-model record | ported |
 | 2708 | struct | `em_sta_info_t` | em-dm | data-model record | ported |
-| 2769 | enum | `em_target_sta_map_t` | em-dm | data-model record | planned |
+| 2769 | enum | `em_target_sta_map_t` | em-dm | data-model record: `StaMapTarget` (`model::node::sta`) | ported |
 | 2775 | struct | `em_bss_id_t` | em-dm | data-model record | ported |
 | 2783 | struct | `em_bss_info_t` | em-dm | data-model record | ported |
 | 2839 | struct | `em_neighbor_info_t` | em-dm | data-model record | planned |
@@ -323,8 +323,8 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 3220 | struct | `em_commit_info_t` | pending (0002) | command/request/action payload; owner decided by note 0002 (em-cmd / em-core / em-orch boundary) | pending |
 | 3228 | enum | `dm_orch_type_t` | em-orch | orchestration | planned |
 | 3311 | struct | `em_orch_desc_t` | em-orch | orchestration | planned |
-| 3316 | enum | `db_cfg_type_t` | em-db | persistence | planned |
-| 3343 | struct | `em_db_cfg_param_t` | em-db | persistence | planned |
+| 3316 | enum | `db_cfg_type_t` | em-db | persistence; em-dm holds the bits as `DbCfgType` in the typed dirty set (`model::dirty`) | planned |
+| 3343 | struct | `em_db_cfg_param_t` | em-db | persistence; em-dm holds the set as `DirtySet` (`model::dirty`) | planned |
 | 3348 | struct | `m2ctrl_radioconfig` | em-core | internal configuration helper; verify at port | planned |
 | 3362 | struct | `em_e4_table_t` | em-core | internal configuration helper; verify at port | planned |
 | 3371 | struct | `op_class_channel_sel` | em-core | internal configuration helper; verify at port | planned |

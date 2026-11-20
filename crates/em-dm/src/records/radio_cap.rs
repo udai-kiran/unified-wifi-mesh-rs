@@ -469,3 +469,140 @@ record! {
         pub num_op_classes: u32 = Map::field("num_op_classes"),
     }
 }
+
+impl RadioCapInfo {
+    /// The zeroed C record: upstream's `dm_radio_cap_t::init()` (`dm_radio_cap.cpp:44`) is a
+    /// `memset` to zero. The model uses it for a new radio whose capability record is missing or
+    /// is for another radio (`dm_easy_mesh.cpp:240-247`), and for the placeholders that fill
+    /// earlier slots when a capability is stored (`store_cap_at`).
+    #[must_use]
+    pub fn zeroed() -> Box<Self> {
+        let he_maps = [ApHeMcsMaps {
+            tx_he_mcs: 0,
+            rx_he_mcs: 0,
+        }; 3];
+        Box::new(Self {
+            ruid: crate::records::zeroed_interface(),
+            mode: Ieee80211Variant(0),
+            ht_cap: ApHtCap {
+                ruid: MacAddr::ZERO,
+                reserved: false,
+                ht_sprt_40mhz: false,
+                gi_sprt_40mhz: false,
+                gi_sprt_20mhz: false,
+                max_sprt_rx_streams: UBits::default(),
+                max_sprt_tx_streams: UBits::default(),
+            },
+            vht_cap: ApVhtCap {
+                ruid: MacAddr::ZERO,
+                sprt_tx_mcs: 0,
+                sprt_rx_mcs: 0,
+                gi_sprt_160mhz: false,
+                gi_sprt_80mhz: false,
+                max_sprt_rx_streams: UBits::default(),
+                max_sprt_tx_streams: UBits::default(),
+                reserved: UBits::default(),
+                mu_beamformer_cap: false,
+                su_beamformer_cap: false,
+                sprt_160mhz: false,
+                sprt_80_80_mhz: false,
+            },
+            he_cap: ApHeCap {
+                ruid: MacAddr::ZERO,
+                sprt_mcs_len: 0,
+                sprt_tx_rx_mcs: he_maps,
+                sprt_160mhz: false,
+                sprt_80_80_mhz: false,
+                max_sprt_rx_streams: UBits::default(),
+                max_sprt_tx_streams: UBits::default(),
+                reserved: false,
+                dl_ofdma_cap: false,
+                ul_ofdma_cap: false,
+                dl_mimo_ofdma_cap: false,
+                ul_mimo_ofdma_cap: false,
+                ul_mimo_cap: false,
+                mu_beamformer_cap: false,
+                su_beamformer_cap: false,
+            },
+            wifi6_cap: RadioWifi6CapData {
+                roles: BoundedVec::new(),
+            },
+            wifi7_cap: wifi7_cap(),
+            eht_ops: EhtOperations {
+                radios: BoundedVec::new(),
+            },
+            ch_scan: ChannelScanCapRadio {
+                ruid: MacAddr::ZERO,
+                reserved: UBits::default(),
+                scan_impact: UBits::default(),
+                boot_only: false,
+                min_scan_interval: 0,
+                op_classes: BoundedVec::new(),
+            },
+            radio_ad_cap: ApRadioAdvancedCap {
+                ruid: MacAddr::ZERO,
+                reserved: false,
+                qm_scs_traffic_description: false,
+                dscp_policy: false,
+                qos_map: false,
+                scs: false,
+                mscs: false,
+                comp_prof1_prof2: false,
+                comb_front_back: false,
+            },
+            prof_2_ap_cap: Profile2ApCap {
+                max_prior_rule: 0,
+                reserved1: 0,
+                reserved2: UBits::default(),
+                traffic_separation: false,
+                dpp_onboarding: false,
+                prioritization: false,
+                byte_counter_units: UBits::default(),
+                max_vid_count: 0,
+            },
+            cac_cap: CacCapRadio {
+                ruid: MacAddr::ZERO,
+                cac_methods: BoundedVec::new(),
+            },
+            metric_interval: MetricCltnInterval {
+                metric_cltn_interval: 0,
+            },
+            num_op_classes: 0,
+        })
+    }
+}
+
+fn wifi7_cap() -> Wifi7AgentCap {
+    Wifi7AgentCap {
+        mlo_cap_support: Wifi7MloCapSupport {
+            ruid: MacAddr::ZERO,
+            reserved3: [0; 24],
+            reserved4: UBits::default(),
+            ap_emlmr_support: false,
+            ap_emlsr_support: false,
+            ap_nstr_support: false,
+            ap_str_support: false,
+            reserved5: UBits::default(),
+            bsta_emlmr_support: false,
+            bsta_emlsr_support: false,
+            bsta_nstr_support: false,
+            bsta_str_support: false,
+        },
+        mlo_cap_records: Wifi7MloCapRecords {
+            ap_str: freq_records(),
+            ap_nstr: freq_records(),
+            ap_emlsr: freq_records(),
+            ap_emlmr: freq_records(),
+            bsta_str: freq_records(),
+            bsta_nstr: freq_records(),
+            bsta_emlsr: freq_records(),
+            bsta_emlmr: freq_records(),
+        },
+    }
+}
+
+fn freq_records() -> Wifi7FreqRecords {
+    Wifi7FreqRecords {
+        records: BoundedVec::new(),
+    }
+}

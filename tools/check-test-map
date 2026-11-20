@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""List every Rust test named in crates/em-dm/tests/data/upstream_test_map.tsv that does not exist.
+
+The existing tests are read from `cargo test -p em-dm --lib -- --list`. A row whose
+disposition is `rust:<module path>` names a test by its module path inside the crate
+(for example `model::tests::sta::find_sta_valid_match`). Rows with a skip reason are not
+checked.
+
+Exit status: 0 if every named test exists, 1 if some are missing, 2 on a usage or I/O error.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+MAP = ROOT / "crates/em-dm/tests/data/upstream_test_map.tsv"
+
+
+def listed_tests():
+    result = subprocess.run(
+        ["cargo", "test", "-p", "em-dm", "--locked", "--lib", "--", "--list"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit(2)
+    return {
+        line[: -len(": test")]
+        for line in result.stdout.splitlines()
+        if line.endswith(": test")
+    }
+
+
+def named_tests():
+    rows = [line for line in MAP.read_text().splitlines() if not line.startswith("#")]
+    header, body = rows[0].split("\t"), rows[1:]
+    column = header.index("disposition")
+    named = {}
+    for line in body:
+        fields = line.split("\t")
+        disposition = fields[column]
+        if disposition.startswith("rust:"):
+            named.setdefault(disposition[len("rust:"):], []).append(fields[0])
+    return named
+
+
+def main():
+    existing = listed_tests()
+    named = named_tests()
+    missing = {name: rows for name, rows in named.items() if name not in existing}
+    for name, rows in sorted(missing.items()):
+        print(f"missing: {name} (upstream tests: {', '.join(rows)})")
+    print(f"{len(named)} distinct Rust tests named, {len(missing)} missing")
+    return 1 if missing else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

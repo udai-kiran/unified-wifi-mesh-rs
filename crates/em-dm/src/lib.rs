@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! `EasyMesh` data model records and enums (note 0007, Step 2).
+//! `EasyMesh` data model records, enums and models (note 0007, Steps 2 and 3).
 //!
 //! This crate holds the native Rust form of the `em-dm`-owned types in the approved
-//! classification table that Step 2 covers. The types deferred to later steps are listed in the
-//! crate README. It has no models, operations, JSON, database or wire codecs (those are Step 3
-//! and the consumers).
+//! classification table, and the models built on them: [`NodeModel`], [`NetworkModel`],
+//! [`AgentModel`] behind the [`ModelAccess`] trait, their operations, the typed dirty set and
+//! [`ModelDelta`] and the controller-side [`MeshModel`]. The types this crate does not implement
+//! are listed in the crate README. It has no JSON, database or wire codecs (those
+//! are the consumers').
 //!
 //! # Representation (0007 D3)
 //!
@@ -56,6 +58,7 @@ mod limit_tests;
 pub mod limits;
 #[cfg(test)]
 mod mapping;
+pub mod model;
 #[cfg(test)]
 mod record_tests;
 pub mod records;
@@ -72,9 +75,27 @@ pub use enums::{
     ProductClass, ScannerType, SteeringPolicyType, VapMode,
 };
 pub use float::Float32;
+pub use model::access::{ModelAccess, NodeCtx, NodeRef};
+pub use model::agent::AgentModel;
+pub use model::delta::{
+    CsaChannel, DeltaOutcome, ModelDelta, SkipReason, SkippedRow, StaCapUpdate,
+};
+pub use model::dirty::{DbCfgType, DirtySet};
+pub use model::error::{ModelError, Put, Table};
+pub use model::keys::{BssKey, NetId, NodeId, OpClassKey, PolicyKey, ScanKey, SsidKey, StaKey};
+pub use model::mesh::{
+    ListOp, Located, MAX_NETWORKS, MeshModel, NodeNeeded, Positioned, RadioPutOutcome,
+    SCAN_RESULT_SELF_INDEX, Ssid2VidChange, Ssid2VidKey,
+};
+pub use model::network::NetworkModel;
+pub use model::node::{
+    NodeInit, NodeModel, NodeRole, RadioCapOutcome, RadioCommit, StaEntry, StaMapTarget,
+};
 pub use records::*;
 pub use secret::Secret;
 pub use text::{CStrBytes, LenBytes, StringError, Text};
+// Re-exported so the doc examples of the models can name the MAC type.
+pub use em_types::MacAddr;
 
 /// Largest size in bytes of a `Copy` type in this crate (0007 D3, criterion 4).
 pub const COPY_SIZE_LIMIT: usize = 256;
