@@ -11,7 +11,7 @@ Synchronous, depends only on `em-types`, no `unsafe`, no clones.
 | `tlv` | `TlvIter`, a borrowing walk over the TLV area | `em_tlv_t`, `get_tlv`, `get_first_tlv`, `get_next_tlv`, `validate` walk (`em_msg.cpp`) |
 | `builder` | `MsgBuilder` with a size budget, End of Message added by `finish` | `em_msg_builder_t` (`em_msg.h`, `em_msg.cpp`), `add_tlv` |
 | `wsc` | WSC Message Type selector (M1 = 4, M2 = 5); WSC attribute walker `WscAttrIter` and writer `write_wsc_attr` | `em_configuration_t::get_wsc_msg_type` (`em_configuration.cpp`); the walker and writer are new (note 0009, D5) |
-| `bodies` | `TlvBody`, `TlvBodyLenient`: the traits every typed TLV body implements; the seven IEEE 1905.1 identity and neighbor bodies in `bodies::ieee1905`; the six link metric and push button bodies in `bodies::linkmetric`; the fifteen autoconfiguration, search, topology, profile, WSC and operational BSS bodies in `bodies::autoconfig`; the fifteen capability bodies in `bodies::capability`; the ten channel selection and scan bodies in `bodies::channel` | the typed TLV bodies, added in batches (note 0009) |
+| `bodies` | `TlvBody`, `TlvBodyLenient`: the traits every typed TLV body implements; the seven IEEE 1905.1 identity and neighbor bodies in `bodies::ieee1905`; the six link metric and push button bodies in `bodies::linkmetric`; the fifteen autoconfiguration, search, topology, profile, WSC and operational BSS bodies in `bodies::autoconfig`; the fifteen capability bodies in `bodies::capability`; the ten channel selection and scan bodies in `bodies::channel`; the eleven CAC, anticipated channel, spatial reuse and spectrum inquiry bodies in `bodies::cac`; the fourteen metrics bodies in `bodies::metrics`; the twelve steering, association control, backhaul steering and code bodies in `bodies::steering`; the ten policy and QoS bodies in `bodies::policy` | the typed TLV bodies, added in batches (note 0009) |
 | `tables` | The 70 validation tables as static data | the table functions `autoconfig_search` .. `i1905_ack` (`em_msg.cpp`) |
 | `validate` | `validate(cmdu, profile)` | `em_msg_t::validate` (`em_msg.cpp`) |
 | `spec_min` | Spec minimum lengths that replace upstream's stricter ones (26 rows) | - |
@@ -31,8 +31,8 @@ Upstream source: `src/em/em_msg.cpp`, `inc/em_msg.h`, and `get_wsc_msg_type` in
   `CmduHeader::parse` and `validate` take the whole CMDU (from the 8-byte header); `TlvIter::new`
   and `wsc_msg_type` take the TLV area after the header; `MsgBuilder` produces the whole CMDU.
 - The TLV bodies other than the IEEE 1905.1 identity, neighbor, link metric, push button,
-  autoconfiguration, capability and channel sets (see below) and the field readers (`get_radio_id`, `get_profile`, ...): ported in batches per
-  note 0009. Here are the `Reader` and `Writer` the bodies are built on, the body traits, and the
+  autoconfiguration, capability, channel, CAC, spatial reuse, metrics, steering and policy sets (see below)
+  and the field readers (`get_radio_id`, `get_profile`, ...): ported in batches per note 0009. Here are the `Reader` and `Writer` the bodies are built on, the body traits, and the
   WSC attribute walker and writer.
 - The policy for a received Profile TLV: `em-core`.
 - SDU fragmentation and CMDU reassembly.
@@ -67,8 +67,9 @@ Design: [note 0009](../../docs/0009-tlv-bodies.md), D2 and D4.
 - `TlvBody<'a>` (module `bodies`): `const TLV_TYPE`, a strict `decode_value(&'a [u8])` that follows
   the spec, and `encode_value(&self)`.
 - `TlvBodyLenient<'a>`: `decode_value_lenient` for a non-spec form that an upstream sender writes.
-  It returns `Ok(None)` only for an empty value, which the consumer treats as "TLV absent". Every
-  other lenient form is `Ok(Some(body))`.
+  It returns `Ok(None)` for an empty value, which the consumer treats as "TLV absent", and for the
+  nine zero octets of Associated Wi-Fi 6 STA Status Report (B07, note 0009 A7). Every other lenient
+  form is `Ok(Some(body))`.
 - `Tlv::decode::<B>()` and `Tlv::decode_lenient::<B>()` check the TLV type first. A different type
   is `DecodeError::WrongType { expected, found }`; otherwise the decoder runs on `Tlv::value`.
 - `MsgBuilder::body(&B)` encodes the body and appends it with `B::TLV_TYPE`. An encode failure is
@@ -332,6 +333,307 @@ upstream struct, sender and receiver lines.
   Channel Scan Capabilities (row 132), and zero channels in a Channel Scan Request class, which
   means all channels (row 137).
 
+## CAC, channel usage, spatial reuse and spectrum inquiry bodies (B06)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2, D3, D5 and D8. The bodies are in
+`bodies::cac`. Each doc comment cites the spec section and table, the audit rows, and the
+upstream struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `CacRequest`, with `CacRequestRadio` | CAC Request (0xAD) | §17.2.42, Table 64 |
+| `CacTermination`, with `CacTerminationRadio` | CAC Termination (0xAE) | §17.2.43, Table 65 |
+| `CacCompletionReport`, with `CacCompletionRadio` and `CacDetectedPair` | CAC Completion Report (0xAF) | §17.2.44, Table 66 |
+| `CacStatusReport`, with `CacAvailableChannel`, `CacNonOccupancyChannel` and `CacActiveChannel` | CAC Status Report (0xB1) | §17.2.45, Table 67 |
+| `AnticipatedChannelPreference<'a>`, with `AnticipatedOperatingClass<'a>` | Anticipated Channel Preference (0xD6) | §17.2.87, Table 109 |
+| `AnticipatedChannelUsage<'a>`, with `AnticipatedUsage<'a>` | Anticipated Channel Usage (0xD7) | §17.2.88, Table 110 |
+| `SpatialReuseRequest`, with `SpatialReuseParameters` | Spatial Reuse Request (0xD8) | §17.2.89, Table 111 |
+| `SpatialReuseReport`, with `SpatialReuseParameters` | Spatial Reuse Report (0xD9) | §17.2.90, Table 112 |
+| `SpatialReuseConfigResponse` | Spatial Reuse Config Response (0xDA) | §17.2.91, Table 113 |
+| `AvailableSpectrumInquiryRequest<'a>`, over `SpectrumInquiryObject<'a>` | Available Spectrum Inquiry Request (0xE8) | §17.2.104, Table 126 |
+| `AvailableSpectrumInquiryResponse<'a>`, over `SpectrumInquiryObject<'a>` | Available Spectrum Inquiry Response (0xE9) | §17.2.105, Table 127 |
+
+- Counts are one octet each. Zero is accepted and decodes to an empty list. Counts are derived
+  from the lists on encode (`EncodeError::CountTooLarge` above 255). The codec does not apply
+  upstream's fixed array sizes, such as the data model's four detected pairs
+  (`EM_MAX_CAC_METHODS`, `em_base.h:97`).
+- CAC Status Report: the codec returns `EncodeError::CountTooLarge` for more than 255 entries in
+  a list. This is an intentional difference (0008 D4). Upstream's sender keeps each list count
+  in an 8-bit counter, so the 256th entry wraps the count to 0 (`em_channel.cpp:1404`, `:1430`,
+  `:1458`). Minutes and non-occupancy durations are big-endian 16-bit values. The active
+  countdown is three big-endian octets. A value above `0xFF_FFFF` is
+  `EncodeError::ValueTooLarge`, an intentional difference: upstream writes only the low 24 bits, so
+  the value would wrap (`em_channel.cpp:1449-1451`).
+- CAC Request: the method is three bits (bits 7 to 5) and the completion action is two bits
+  (bits 4 and 3), both kept raw, including reserved codes. Bits 2 to 0 are reserved: they are
+  ignored on decode and written as zero. Upstream's completion-action field is three bits
+  (`em_base.h:1048-1050`), one bit wider than the spec.
+- CAC Completion Report: the status is kept raw, and each radio keeps its own detected pairs.
+  Whether the status and the pairs agree is left to the consumer.
+- Anticipated Channel Preference: the four reserved octets after each class's channel list are
+  ignored on decode and written as zero.
+- Anticipated Channel Usage: each RU bitmask is carried with its length octet, so any length
+  from 0 to 255 round-trips. The bitmask is borrowed from the value. Upstream's struct fixes it
+  at 10 octets (`em_base.h:988`). The power level is signed (`-1` is unknown), and the reason
+  and transmitter are kept raw. The four reserved octets are ignored and written as zero.
+- Spatial reuse: the BSS colour is six bits. In the request flags, bit 4 is the HESIGA value-15
+  flag, bit 3 the SRG information flag, bit 2 the non-SRG offset flag and bit 0 the PSR flag. In
+  the report, bit 6 of the colour octet is the partial BSS colour flag. Other bits are reserved,
+  ignored and written as zero. The offsets and bitmaps are present even when the matching
+  validity flag is clear. The request is 29 octets and the report 37 octets, and a shorter value
+  is `Truncated`. The two trailing reserved octets of each are ignored and written as zero.
+- Spatial Reuse Config Response: the response code is kept raw, reserved codes included.
+- Spectrum inquiry: the object is the supplied octets, borrowed from the value, and is not parsed
+  as JSON (0009 D5). An empty value is `DecodeError::Truncated` on decode and
+  `EncodeError::CountTooSmall { len: 0, min: 1 }` on encode. Upstream's sender writes the object
+  as uninitialised pointer-sized bytes, eight octets on a 64-bit build (`em_channel.cpp:1649-1663`).
+- No body in this batch has a lenient form. Those upstream octets are opaque to the codec: the
+  strict decoder reads any non-empty spectrum inquiry value (0009 D5), so no non-spec form needs a
+  lenient decoder.
+
+## Metrics bodies (B07)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2, D3, D4, D5, D6, D8 and amendment A7. The
+bodies are in `bodies::metrics`. Each doc comment cites the spec section and table, the audit
+rows, and the upstream struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `ApMetricsQuery` | AP Metrics Query (0x93) | §17.2.21, Table 43 |
+| `ApMetrics` | AP Metrics (0x94) | §17.2.22, Table 44 |
+| `StaMacAddress` | STA MAC Address Type (0x95) | §17.2.23, Table 45 |
+| `AssociatedStaLinkMetrics`, with `AssociatedStaBssMetrics` | Associated STA Link Metrics (0x96) | §17.2.24, Table 46 |
+| `UnassociatedStaLinkMetricsQuery`, with `UnassociatedQueryChannel` | Unassociated STA Link Metrics Query (0x97) | §17.2.25, Table 47 |
+| `UnassociatedStaLinkMetricsResponse`, with `UnassociatedStaMetrics` | Unassociated STA Link Metrics Response (0x98) | §17.2.26, Table 48 |
+| `BeaconMetricsQuery<'a>`, with `ApChannelReport<'a>` | Beacon Metrics Query (0x99) | §17.2.27, Table 49 |
+| `BeaconMetricsResponse<'a>`, with `MeasurementReportElement<'a>` | Beacon Metrics Response (0x9A) | §17.2.28, Table 50 |
+| `AssociatedStaTrafficStats` | Associated STA Traffic Stats (0xA2) | §17.2.35, Table 57 |
+| `MetricCollectionInterval` | Metric Collection Interval (0xC5) | §17.2.59, Table 81 |
+| `RadioMetrics` | Radio Metrics (0xC6) | §17.2.60, Table 82 |
+| `ApExtendedMetrics` | AP Extended Metrics (0xC7) | §17.2.61, Table 83 |
+| `AssociatedStaExtendedLinkMetrics`, with `ExtendedLinkMetricsBss` | Associated STA Extended Link Metrics (0xC8) | §17.2.62, Table 84 |
+| `AssociatedWifi6StaStatusReport`, with `Wifi6TidQueueSize` | Associated Wi-Fi 6 STA Status Report (0xB0) | §17.2.73, Table 95 |
+
+- Counts are one octet each, and zero is accepted where the spec allows it; a zero count decodes
+  to an empty list. Counts are derived from the lists on encode (`EncodeError::CountTooLarge`
+  above 255). The codec does not apply upstream's fixed sizes: 16 channels and 64 stations per
+  channel (`em_base.h:237-238`), and 64 unassociated entries (`em_base.h:650`).
+- Upstream's validator wants at least one entry for AP Metrics Query (`em_msg.cpp:953`), and at
+  least one BSS for Associated STA Link Metrics and Associated STA Extended Link Metrics (audit rows
+  94 and 202). The codec accepts zero in each, as the spec allows.
+- An Unassociated STA Link Metrics Query carries one operating class per TLV. Octets after the last
+  channel are `TrailingBytes`, where upstream's receiver parses further blocks (audit row 97).
+- Multi-octet counters, rates and times are big-endian, as upstream writes them with `htonl` and
+  `htons` (for example `em_metrics.cpp:1625`). The exception is Metric Collection Interval, which
+  is little-endian because upstream copies the host-order value (`em.cpp:1899`, audit row 195,
+  0009 D6).
+- Raw values: RCPI (221-255 are reserved), noise and utilization, Reporting Detail, TIDs and
+  queue sizes, and channel numbers are kept as given, reserved values included (0009 D2). Byte
+  counters are kept in the sender's units (audit rows 120 and 199).
+- Measurement Report elements are raw (0009 D5): the element ID is not checked against 39 and the
+  body is not parsed. A length above the remaining octets is `Truncated`, which upstream's receiver
+  does not check (audit row 106). The reserved octet of Beacon Metrics Response is ignored on
+  decode and written as zero.
+- AP Metrics flags: bit 7 is `IncludeBE`, bit 6 `IncludeBK`, bit 5 `IncludeVO` and bit 4
+  `IncludeVI`. Bits 3-0 are ignored on decode and written as zero. The optional estimated service
+  parameter fields follow in BK, VO, VI order, not bit order. The BE field is always on the wire,
+  so a clear `IncludeBE` sizes nothing and is kept as read (audit row 87).
+- Beacon Metrics Query: the value rules (a Channel Number other than 255 with reports, `Num_Ids`
+  with a Reporting Detail other than 1, the 802.11 detail codes, an SSID over 32 octets) are for
+  the consumer. A Report Length of zero is `InvalidLength`, as upstream's receiver also rejects it
+  (`em_metrics.cpp:389-393`).
+
+Lenient forms (0009 D4, A7):
+
+- AP Metrics (0x94): an empty value is `Ok(None)`. Upstream sends it for a BSS whose radio was not
+  requested (`em_metrics.cpp:1946`).
+- Metric Collection Interval (0xC5): an empty value is `Ok(None)`. Upstream sends no value when
+  there is no radio capability information (`em.cpp:1886-1896`).
+- Associated Wi-Fi 6 STA Status Report (0xB0): exactly nine zero octets are `Ok(None)`, meaning "no
+  report". This is the one exception to "`Ok(None)` only for an empty value". Upstream sends nine
+  zero octets for each station in a Profile-3 AP Metrics Response (`em_metrics.cpp:1547-1548` and
+  `:2299-2306`, with the caller's buffer zeroed at `em_msg.cpp:607`). They are a zero MAC, no TIDs
+  and two stray octets, so the strict decoder rejects them with `TrailingBytes { remaining: 2 }`.
+  Other values are decoded as the spec form.
+- Beacon Metrics Query (0x99): upstream's default query has no `Num_Ids` octet (audit row 101),
+  because its sender writes `Num_Ids` only with Reporting Detail 1 and at least one element ID
+  (`em_metrics.cpp:1885-1892`). The lenient decoder accepts a value that ends exactly after the AP
+  Channel Report group and returns the body with no element IDs. Any other shortfall is
+  `Truncated`, including one that ends inside a report's channel list. The encoder always writes
+  `Num_Ids` (see below).
+
+Intentional differences from upstream (B07):
+
+- Beacon Metrics Query: the encoder always writes `Num_Ids`, even with no element IDs. Upstream's
+  sender writes it only with Reporting Detail 1 and at least one element ID
+  (`em_metrics.cpp:1885-1892`), and its receiver accepts a value without it
+  (`em_metrics.cpp:416-418`, audit rows 101 and 105). The lenient decoder accepts upstream's shorter
+  form.
+- Associated Wi-Fi 6 STA Status Report: the strict decoder rejects upstream's nine-octet form. Only
+  the lenient decoder maps it to `Ok(None)` (A7, `em_metrics.cpp:2299-2306`).
+- Zero BSSID count in AP Metrics Query (0x93), Associated STA Link Metrics (0x96) and Associated STA
+  Extended Link Metrics (0xC8): a count of zero is spec-valid and these bodies accept it. Upstream's
+  message validator requires room for one BSSID (`em_msg.cpp:953`, `:975`, `:977`, and the
+  length check for mandatory TLVs at `:683-688`; audit rows 84, 94 and 202).
+- The fixed upstream limits are not applied: an Unassociated STA Link Metrics Query with more than
+  16 channels or more than 64 stations per channel, which upstream's receiver rejects whole
+  (`em_metrics.cpp:2581-2584`, `:2607-2610`, `em_base.h:237-238`, audit row 96), and more than 64
+  entries in an Unassociated STA Link Metrics Response, which it drops after the 64th
+  (`em_metrics.cpp:503-509`, `em_base.h:650`, audit row 100).
+
+## Steering, association control and code bodies (B08)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2, D4, D6, D8 and amendment A8. The bodies are
+in `bodies::steering`. Each doc comment cites the spec section and table, the audit rows, and the
+upstream struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `ClientAssociationEvent` | Client Association Event (0x92) | §17.2.20, Table 42 |
+| `SteeringRequest`, with `SteeringMode`, `SteeringTarget` and `SteeringFlags` | Steering Request (0x9B) | §17.2.29, Table 51 |
+| `SteeringBtmReport` | Steering BTM Report (0x9C) | §17.2.30, Table 52 |
+| `ClientAssociationControlRequest` | Client Association Control Request (0x9D) | §17.2.31, Table 53 |
+| `BackhaulSteeringRequest` | Backhaul Steering Request (0x9E) | §17.2.32, Table 54 |
+| `BackhaulSteeringResponse` | Backhaul Steering Response (0x9F) | §17.2.33, Table 55 |
+| `HigherLayerData<'a>` | Higher Layer Data (0xA0) | §17.2.34, Table 56 |
+| `ErrorCode` | Error Code (0xA3) | §17.2.36, Table 58 |
+| `AssociationStatusNotification`, with `AssociationStatusEntry` | Association Status Notification (0xBF) | §17.2.53, Table 75 |
+| `Profile2SteeringRequest`, with `Profile2SteeringTarget` | Profile-2 Steering Request (0xC3) | §17.2.57, Table 79 |
+| `StatusCode` | Status Code (0xC9) | §17.2.63, Table 85 |
+| `ReasonCode` | Reason Code (0xCA) | §17.2.64, Table 86 |
+
+- `SteeringFlags` holds the three BTM flags of the Steering Request and Profile-2 Steering Request
+  octet: bit 6 is BTM Disassociation Imminent, bit 5 Abridged and bit 4 Link Removal Imminent. Bit 7
+  is Request Mode (1 is a mandate, 0 an opportunity), and bits 3-0 are reserved, ignored on decode
+  and written as zero (`em_base.h:1168-1173`).
+- Steering Request: in opportunity mode the spec sets the target count to zero, so the body has no
+  targets there. A mandate may list any number of targets, zero included. The Steering Opportunity
+  Window is carried in both modes. Upstream writes it as zero in a mandate (`em_steering.cpp:480-483`).
+- Steering Request is the only body here with a lenient form (A8). In opportunity mode a non-zero
+  target count is `ValueOutOfRange` for the strict decoder. The lenient decoder accepts upstream's
+  form, which its only sender always writes with one target (`em_steering.cpp:488-493`), and drops
+  the targets. Re-encoding gives the same request with no targets.
+- Byte orders: the Steering Opportunity Window is little-endian, as upstream writes it with a plain
+  assignment (`em_steering.cpp:485`, 0009 D6). The BTM Disassociation Timer is big-endian (`htons`,
+  `em_steering.cpp:487`). Profile-2 Steering Request has no upstream sender, so both of its fields
+  are big-endian. The Validity Period of Client Association Control Request is big-endian
+  (`em_steering.cpp:79`), and so are Status Code and Reason Code (`em_configuration.cpp:631`,
+  `:645`).
+- Client Association Event: bit 7 of the last octet is the Association Type (1 joined, 0 left), and
+  bits 6-0 are reserved, ignored on decode and written as zero. The strict decoder requires exactly
+  13 octets. Upstream's receiver does not check the length (audit row 82).
+- Steering BTM Report: the Target BSSID is 0 or 6 octets. Upstream writes only the 13-octet form,
+  with the target commented out (`em_steering.cpp:500-524`, audit row 108). That form is
+  spec-valid, so there is no lenient form. One to five octets after the status are `Truncated`,
+  and more than six are `TrailingBytes`.
+- Client Association Control Request: the control code is raw (0 block, 1 unblock, 2 timed block,
+  3 indefinite block, 4-255 reserved). The count must be at least one: zero is `InvalidLength`, and
+  an empty list does not encode.
+- Backhaul Steering Request (14 octets) and Backhaul Steering Response (13 octets) have no
+  production sender or receiver upstream, only a test generator (`validation_test.cpp:1232-1262`
+  and `:1188-1230`). The response's result code is raw: 0 success, 1 failure, 2-255 reserved.
+- Higher Layer Data: the protocol octet is raw (1 is the TR-181 transport protocol; 0 and 2-255 are
+  reserved). The payload is the rest of the value and may be empty. Upstream's struct holds a
+  pointer (`em_base.h:1131-1132`) and cannot describe an inline payload (audit row 118). There is no
+  production sender or receiver.
+- Error Code: 7 octets, the reason first and then the STA MAC. The MAC is always present, but a
+  recipient uses it only for reasons 1 and 2. The reason is raw (0 and 7-255 are reserved). Upstream
+  sends reason 0 with a zero MAC (audit row 123).
+- Association Status Notification: the count may be zero, which the spec does not forbid. Each
+  entry is a BSSID and an allowance octet (0 no more associations, 1 allowed, 2-255 reserved), kept
+  raw. Upstream has no sender or receiver, and its struct has the wrong layout (audit row 187).
+- Profile-2 Steering Request: each target has a reason code octet after its channel, so a target is
+  9 octets. A non-zero target count in opportunity mode is `ValueOutOfRange` (A8), and there is no
+  lenient form. Upstream has no builder or parser (`em_base.h:1212-1215`, test generator
+  `validation_test.cpp:1366-1373`).
+- Status Code and Reason Code: two big-endian octets, kept raw (IEEE 802.11 Tables 9-50 and 9-49).
+
+Intentional differences from upstream (B08):
+
+- Steering Request (0x9B) in opportunity mode with targets: the strict decoder returns
+  `ValueOutOfRange`, where upstream's sender writes one target (`em_steering.cpp:488-493`). The
+  lenient decoder accepts the form and drops the targets (A8).
+- Client Association Control Request (0x9D): every control code and up to 255 stations are
+  accepted. Upstream refuses codes other than 0 and 1 (`em_steering.cpp:667-699`) and more than 20
+  stations (`em_steering.cpp:658`, `em_base.h:122`, audit rows 112 and 113).
+
+## Policy bodies (B09)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2 to D5, D8 and D9. The bodies are in
+`bodies::policy`. Each doc comment cites the spec section and table, the audit rows, and the
+upstream struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `SteeringPolicy`, with `RadioSteeringPolicy` | Steering Policy (0x89) | §17.2.11, Table 33 |
+| `MetricReportingPolicy`, with `RadioMetricReportingPolicy` | Metric Reporting Policy (0x8A) | §17.2.12, Table 34 |
+| `Default8021QSettings` | Default 802.1Q Settings (0xB5) | §17.2.49, Table 71 |
+| `TrafficSeparationPolicy<'a>`, with `TrafficSeparationSsid<'a>` | Traffic Separation Policy (0xB6) | §17.2.50, Table 72 |
+| `UnsuccessfulAssociationPolicy` | Unsuccessful Association Policy (0xC4) | §17.2.58, Table 80 |
+| `BackhaulBssConfiguration` | Backhaul BSS Configuration (0xD0) | §17.2.66, Table 88 |
+| `ServicePrioritizationRule` | Service Prioritization Rule (0xB9) | §17.2.70, Table 92 |
+| `DscpMappingTable` | DSCP Mapping Table (0xBA) | §17.2.71, Table 93 |
+| `QosManagementPolicy` | QoS Management Policy (0xDB) | §17.2.92, Table 114 |
+| `QosManagementDescriptor<'a>` | QoS Management Descriptor (0xDC) | §17.2.93, Table 115 |
+
+- Byte orders: every multi-octet field is big-endian. That covers the VLAN IDs (0xB5, 0xB6), the
+  4-octet maximum reporting rate (0xC4), the Rule Id (0xB9) and the QMID (0xDC). Upstream writes
+  the VLAN IDs and the rate in network order (audit rows 172, 175 and 193). Nothing upstream writes
+  the Rule Id or the QMID (audit rows 216 and 272), so their order follows the spec (§3.1.2).
+- Reserved values are kept raw (0009 D2). These are Steering Policy 3-255 (0 disallowed, 1
+  mandated and 2 allowed are the defined codes), RCPI thresholds 221-255, Precedence 0xFF, Output
+  0x0A-0xFF, the DSCP table PCP values 0x08-0xFF and the VLAN IDs 0x0000-0x0002 and 0x0FFF-0xFFFF.
+  Reserved bits of a flags octet are ignored on decode and written as zero.
+- Lenient forms (`TlvBodyLenient`): the empty value of 0x8A, 0xB5 and 0xC4 decodes to `Ok(None)`,
+  which is upstream's "no policy". Upstream's senders return 0 when there is no policy, and their
+  callers still emit the TLV header with length 0 (`em_policy_cfg.cpp:546-556`, `:561-570` and
+  `:604-616`; audit rows 57 and 173). The strict decoders reject the empty value with `Truncated`.
+  No other lenient form exists.
+- Bit-field octets: the 0x8A flags (bits 7-5), the 0xB5 PCP (bits 7-5), the 0xC4 report flag
+  (bit 7), the 0xD0 profile flags (bits 7 and 6), and the 0xB9 add and always-match flags (bit 7).
+  Each flag is tested alone in a zero value, so a fixture row that sets several flags cannot hide a
+  swap.
+- Fixed layouts: 0xB5 is exactly 3 octets, 0xC4 exactly 5, 0xD0 exactly 7 (one TLV per BSS, so a
+  second entry is `TrailingBytes`), 0xB9 exactly 8 and 0xBA exactly 64. A value that ends early is
+  `Truncated`.
+- Variable layouts: the 0xB6 SSIDs are raw bytes, from 0 to 255 octets, and their lengths above 32
+  are kept. On encode, the 0xB6 count is the list length (audit row 180, 0009 D3). The 0xDC
+  descriptor element is the rest of the value as raw octets and may be empty (0009 D5); it is not
+  parsed as an MSCS, SCS or QoS Management element here.
+- 0xB5 carries VLAN 0 as given. Autoconfiguration sends an all-zero Default 802.1Q Settings TLV as
+  a placeholder (`em_configuration.cpp:3758-3761`, audit row 174, 0009 D3).
+- 0xDB: the 20 reserved octets are ignored on decode, and encode writes zeros.
+- Encoders write only the bytes the strict decoder accepts. A PCP above 7 is
+  `EncodeError::ValueTooLarge`. A list of more than 255 entries, and an SSID of more than 255
+  octets, is `EncodeError::CountTooLarge`.
+- 0xB9, 0xBA and 0xDC have no upstream sender or receiver. Their upstream structs appear only in
+  the validator tables (`em_msg.cpp:1015-1017,1117-1119`) and in test generators
+  (`validation_test.cpp:2544-2564`; audit rows 216, 218 and 272).
+
+Intentional differences from upstream (B09):
+
+- Steering Policy (0x89): up to 255 MACs per list and up to 255 radios are accepted. Upstream's
+  receiver copies each count into a 16-entry MAC array and a 4-entry radio array
+  (`em_policy_cfg.cpp:747-768`, `em_base.h:90` and `:101`), and overflows its stack object for a
+  larger count (audit rows 53 and 54).
+- Metric Reporting Policy (0x8A): up to 255 radios are accepted. Upstream copies each record into a
+  4-entry array (`em_policy_cfg.cpp:770-784`, `em_base.h:90`), and overflows for more (audit row
+  58).
+- Traffic Separation Policy (0xB6): every SSID is parsed, up to 255. Upstream parses the entries
+  only when Num_SSID is at most 5 (`em_policy_cfg.cpp:795-796`, `em_haul_type_max` at
+  `em_base.h:2494`), so a TLV with more SSIDs is silently dropped (audit row 177). Upstream also
+  skips an SSID longer than `MAX_SSID_NAME_LEN` without advancing past it (`em_policy_cfg.cpp:804`,
+  audit row 178).
+- QoS Management Policy (0xDB): lists of up to 255 MACs are accepted. Upstream's sender caps each
+  list at 16 MACs (`em_policy_cfg.cpp:357-362`, `em_base.h:102-103`; audit row 271). Its receiver
+  also keeps at most 4 of these TLVs per message (`em_policy_cfg.cpp:864`, `em_base.h:89`), and at
+  most 16 Backhaul BSS Configuration TLVs (`em_policy_cfg.cpp:851`): message-level limits for the
+  consumer, not body differences.
+- Unsuccessful Association Policy (0xC4): the rate keeps all 32 bits. Upstream stores it in a 16-bit
+  field through `static_cast<unsigned short>` (`em_policy_cfg.cpp:840-841`, audit row 194).
+- Lenient empty forms (0x8A, 0xB5, 0xC4): upstream sends them, so they decode leniently. See the
+  lenient forms above.
+
 ## WSC attributes
 
 The `wsc` module walks and writes the attributes of a WSC TLV value (2-byte id, 2-byte length,
@@ -376,13 +678,21 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
   - `invalid` is rejected by both entry points with the error variant named in `error=`. A lenient
     body must reject the row through both lenient entry points too, unless the row is named in the
     lenient inputs (the last argument of `sweep_row_lenient`). The listed rows are non-spec forms
-    that the lenient decoder accepts on purpose: the empty values, and Device Inventory with zero
-    radios in the capability group.
+    that the lenient decoder accepts on purpose: the empty values, the nine-octet Associated Wi-Fi 6
+    STA Status Report (metrics group), and Device Inventory with zero radios in the capability group.
   - `lenient` is rejected by the strict decoders, decodes leniently through both lenient entry
     points to the same body, and re-encodes to bytes that the strict decoder reads back as that body.
-    A `lenient` row marked `decoded=absent` (the Backhaul STA empty value) decodes to `Ok(None)`
-    through both lenient entry points instead. The capability tests check it with
-    `check_lenient_absent`.
+    A `lenient` row marked `decoded=absent` (the Backhaul STA empty value, and the empty values of
+    0x8A, 0xB5 and 0xC4 in the policy group) decodes to `Ok(None)` through both lenient entry
+    points instead. Its value must be empty, so a lenient decoder cannot hide a non-empty body
+    behind `Ok(None)`. The capability tests, and the `lenient_absent:` item of `body_checks!`,
+    check it with `check_lenient_absent`.
+- Flag-alone tests: the flags of a bit-field body are tested one at a time. Each test sets one
+  flag alone in an otherwise zero value, and checks that it decodes to its own field and encodes
+  back to the same bytes. A fixture row that sets several flags together cannot show that two
+  flags are not swapped. The `assert_each_flag_alone` helper is in `bodies::capability`,
+  `bodies::cac`, `bodies::steering` and `bodies::policy`; `bodies::channel` and `bodies::metrics`
+  have per-flag tests written out.
 - Every `sweep_row` and `sweep_row_lenient` check starts with `check_tlv_column`. It fails unless
   the row's `tlv` column (`0xNN`) is the body's TLV type, so a row cannot be checked by a body of
   another TLV type that has the same layout.
@@ -403,7 +713,8 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
   `(tlv, case)` key, and decodes the hex column (`-` is the empty value). A missing or duplicate row
   panics. `assert_all_used` checks that the rows of a group and the keys its tests use are the same
   set, so every row is used. The `ieee1905` group has 48 rows, the `linkmetric` group 51, the
-  `autoconfig` group 137, the `capability` group 167 and the `channel` group 155.
+  `autoconfig` group 137, the `capability` group 167, the `channel` group 155, the `cac` group 140,
+  the `metrics` group 166, the `steering` group 159 and the `policy` group 165.
 - `upstream_tlv_vectors` (test only) loads `tests/data/upstream_tlv_vectors.tsv`, and checks its
   case list and the bytes of `create_prof_2_tlv` and `create_error_code_tlv`.
 - `tools/check-body-fixtures` compares two independent builds of a body group,
@@ -444,5 +755,9 @@ implemented and awaiting review. B01 (the seven IEEE 1905.1 identity and neighbo
 `ieee1905` fixture), B02 (the six link metric and push button bodies and the `linkmetric`
 fixture) and B03 (the fifteen autoconfiguration, search, topology, profile and operational BSS
 bodies and the `autoconfig` fixture) are implemented. B04 (the fifteen capability bodies and the
-`capability` fixture) and B05 (the ten channel selection and scan bodies and the `channel` fixture)
-are implemented and under review. See [STATUS.md](../../STATUS.md).
+`capability` fixture), B05 (the ten channel selection and scan bodies and the `channel` fixture) and
+B06 (the eleven CAC, anticipated channel, spatial reuse and spectrum inquiry bodies and the `cac`
+fixture) are implemented. B07 (the fourteen metrics bodies and the `metrics` fixture), B08 (the
+twelve steering, association control and code bodies and the `steering` fixture) and B09 (the ten
+policy and QoS bodies and the `policy` fixture) are implemented and under review. B10 to B13 are
+pending. See [STATUS.md](../../STATUS.md).

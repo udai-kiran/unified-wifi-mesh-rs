@@ -478,6 +478,12 @@ tlvLength. The existing framing reads all 16 bits, as upstream does.
   octets in every Profile-3 AP Metrics Response (`em_metrics.cpp:2299-2306`). They carry no
   information and are not spec-valid (2 stray octets), so the lenient decoder returns `Ok(None)` for
   exactly that 9-zero-octet value. The strict decoder rejects all three forms.
+- **A8 (2026-11-20, B08 plan; user decision):** Steering Request (0x9B) and Profile-2 Steering
+  Request (0xC3) with Request Mode 0 (steering opportunity) and a non-zero target count are invalid
+  for the strict decoder (`ValueOutOfRange`): the spec says the count shall be 0, as for the 0xA6
+  Fresh rule. Upstream's only 0x9B sender always writes one target (`em_steering.cpp:488-493`). A
+  lenient 0x9B decoder accepts that form and drops the target list, which the spec leaves unused
+  in opportunity mode. 0xC3 has no production sender, so it has no lenient form.
 
 ### Errata
 

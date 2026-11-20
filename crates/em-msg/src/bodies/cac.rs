@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! CAC, anticipated channel usage, spatial reuse and spectrum inquiry bodies.
+//! CAC, anticipated channel preference and usage, spatial reuse and spectrum inquiry bodies.
 
 use em_types::{MacAddr, TlvType};
 
@@ -86,7 +86,7 @@ impl TlvBody<'_> for CacRequest {
 }
 
 /// A radio in CAC Termination, `EasyMesh` §17.2.43 Table 65; audit rows 156–157.
-/// Upstream `em_cac_term_t` (`em_base.h:1035-1041`) has a different field order
+/// Upstream `em_cac_term_t` (`em_base.h:1035-1040`) has a different field order
 /// and no repeated group; no production sender or field parser exists
 /// (`em_msg.cpp:1104-1107` checks only presence and length).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +100,7 @@ pub struct CacTerminationRadio {
 }
 
 /// CAC Termination, `EasyMesh` §17.2.43 Table 65; audit rows 156–157.
-/// Upstream `em_cac_term_t` (`em_base.h:1035-1041`) is not used by a production
+/// Upstream `em_cac_term_t` (`em_base.h:1035-1040`) is not used by a production
 /// sender or field parser; `em_msg.cpp:1104-1107` checks only presence and length.
 /// This codec follows the spec's count-first, repeating layout.
 #[derive(Debug, PartialEq, Eq)]
@@ -257,7 +257,10 @@ pub struct CacNonOccupancyChannel {
 /// Active CAC entry in CAC Status Report, `EasyMesh` §17.2.45 Table 67;
 /// audit rows 160–162. Upstream `em_cac_active_t` (`em_base.h:1540-1544`),
 /// sender `em_channel.cpp:1434-1460`; no receiver. Countdown is three
-/// big-endian octets (0008 D4).
+/// big-endian octets (0008 D4). Intentional difference from the sender: it
+/// writes only the low 24 bits of its countdown (`em_channel.cpp:1449-1451`),
+/// so `0x0100_0000` goes out as `00 00 00`; this encoder returns
+/// `ValueTooLarge` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacActiveChannel {
     /// Global operating class.
@@ -422,7 +425,10 @@ pub struct AnticipatedUsage<'a> {
     pub ru_bitmask: &'a [u8],
     /// Transmitter identifier as six raw EUI-48 octets.
     pub transmitter: MacAddr,
-    /// Signed power in dBm; -1 denotes unknown.
+    /// Transmit power as a 2s-complement signed integer in dBm (§17.2.88
+    /// Table 110). Octet 0xFF, read as -1, means unknown or several
+    /// transmitters with different powers, so a real -1 dBm reading cannot
+    /// be expressed.
     pub power_level: i8,
     /// Usage reason, including reserved values.
     pub reason: u8,
@@ -508,7 +514,7 @@ impl<'a> TlvBody<'a> for AnticipatedChannelUsage<'a> {
 }
 
 /// Common spatial-reuse fields, `EasyMesh` §17.2.89 Table 111 and §17.2.90
-/// Table 112; audit rows 265–268. Upstream structs `em_base.h:1384-1405,1472-1490`,
+/// Table 112; audit rows 265–268. Upstream structs `em_base.h:1384-1402,1472-1488`,
 /// senders `em_channel.cpp:944-968,1166-1194`, report receiver `:1752-1774`;
 /// these functions have no callers. Offsets and bitmaps remain present even
 /// when the corresponding validity flag is clear.
@@ -569,8 +575,8 @@ impl SpatialReuseParameters {
 
 /// Spatial Reuse Request, `EasyMesh` §17.2.89 Table 111; audit rows 265–266.
 /// Upstream `em_spatial_reuse_req_t` (`em_base.h:1472-1488`), sender
-/// `em_channel.cpp:944-968` has no caller; the request handler skips this TLV
-/// (`em_channel.cpp:2007-2052`). The codec reads all 29 required octets.
+/// `em_channel.cpp:944-968` has no caller; the channel selection request handler skips this TLV
+/// (`em_channel.cpp:2018-2053`). The codec reads all 29 required octets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpatialReuseRequest {
     /// Radio unique identifier.
@@ -603,7 +609,7 @@ impl TlvBody<'_> for SpatialReuseRequest {
 }
 
 /// Spatial Reuse Report, `EasyMesh` §17.2.90 Table 112; audit rows 267–268.
-/// Upstream `em_spatial_reuse_rprt_t` (`em_base.h:1384-1405`), sender
+/// Upstream `em_spatial_reuse_rprt_t` (`em_base.h:1384-1402`), sender
 /// `em_channel.cpp:1166-1194` and receiver `:1752-1774` have no callers.
 /// The codec requires all 37 octets instead of trusting the receiver's cast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1119,8 +1125,12 @@ mod tests {
         prefixes: |len| len > 0, truncated_in(&[field(0,1)]);
     }
 
+    /// A wire flag: octet offset in the value, bit mask, and a setter for the matching field.
     type Flag<B> = (usize, u8, fn(&mut B));
 
+    /// Checks that each flag, set alone in an otherwise zero value, decodes to its own field and
+    /// encodes back to the same bytes. Fixture rows that set several flags at once cannot tell
+    /// two flags apart when the pair is always set or clear together.
     fn assert_each_flag_alone<B>(zero_bytes: &[u8], zero_body: fn() -> B, flags: &[Flag<B>])
     where
         B: for<'a> TlvBody<'a> + core::fmt::Debug + PartialEq,
@@ -1362,7 +1372,7 @@ mod tests {
     }
 
     #[test]
-    fn bit_fields_and_countdown_reject_values_that_do_not_fit() {
+    fn bit_fields_reject_values_that_do_not_fit() {
         let mut body = request();
         body.radios[0].method = 8;
         assert_eq!(
@@ -1387,6 +1397,12 @@ mod tests {
             body.encode_value(),
             Err(EncodeError::ValueTooLarge { value: 64, max: 63 })
         );
+    }
+
+    #[test]
+    fn countdown_above_24_bits_is_an_error_where_upstream_truncates() {
+        // intentional-difference: upstream em_channel.cpp:1449-1451 writes
+        // only the low 24 bits, so 0x0100_0000 would go out as 00 00 00.
         let mut body = status();
         body.active[0].countdown = 0x0100_0000;
         assert_eq!(

@@ -361,7 +361,9 @@ where
 /// whole `golden` included, is checked through `decode_value_lenient` and through
 /// `Tlv::decode_lenient`.
 ///
-/// - `Ok(None)` is only for an empty value, so no prefix may give it.
+/// - No non-empty prefix may give `Ok(None)` through either lenient entry point. The
+///   nine zero octets of the 0xB0 absent form (note 0009, A7) are not a prefix checked
+///   here; that form has its own test.
 /// - Where the strict decoder accepts a prefix, the lenient result must be exactly
 ///   `Ok(Some(the strict body))`.
 ///
@@ -634,8 +636,8 @@ where
                 return Err(format!("Tlv::decode accepted a lenient row: {body:?}"));
             }
             if row.field("decoded") == Some("absent") {
-                // Only the empty value means "absent"; a lenient decoder that swallows other
-                // bytes would hide a real body behind Ok(None).
+                // A decoded=absent row is the empty value only; a lenient decoder that
+                // swallows other bytes would hide a real body behind Ok(None).
                 if !bytes.is_empty() {
                     return Err(format!(
                         "a decoded=absent row must have an empty value, got {bytes:02X?}"

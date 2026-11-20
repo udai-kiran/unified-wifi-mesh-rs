@@ -6,8 +6,11 @@
 //! the autoconfiguration, search, topology, profile, WSC and operational BSS bodies, in the
 //! `autoconfig` submodule, the IEEE 1905.1 identity and neighbor bodies, in the `ieee1905`
 //! submodule, the link metric and push button bodies, in the `linkmetric` submodule, the
-//! capability bodies, in the `capability` submodule, and the channel selection and channel scan
-//! bodies, in the `channel` submodule.
+//! capability bodies, in the `capability` submodule, the channel selection and channel scan
+//! bodies, in the `channel` submodule, the CAC, anticipated channel, spatial reuse and
+//! spectrum inquiry bodies, in the `cac` submodule, the metrics bodies, in the `metrics`
+//! submodule, the steering, client association control, backhaul steering and code bodies,
+//! in the `steering` submodule, and the policy and `QoS` bodies, in the `policy` submodule.
 //! Other bodies come in later batches.
 //!
 //! A body decodes from [`Tlv::value`](crate::Tlv::value) and encodes to the bytes that
@@ -26,6 +29,9 @@ mod capability;
 mod channel;
 mod ieee1905;
 mod linkmetric;
+mod metrics;
+mod policy;
+mod steering;
 
 pub use autoconfig::{
     Agent, AgentList, AgentSecurity, ApOperationalBss, ApRadioIdentifier, AssociatedBss,
@@ -53,6 +59,26 @@ pub use linkmetric::{
     LinkMetricQuery, LinkMetricResultCode, PushButtonEventNotification, PushButtonJoinNotification,
     PushButtonMedia, ReceiverLinkMetric, ReceiverLinkMetricPair, TransmitterLinkMetric,
     TransmitterLinkMetricPair,
+};
+pub use metrics::{
+    ApChannelReport, ApExtendedMetrics, ApMetrics, ApMetricsQuery, AssociatedStaBssMetrics,
+    AssociatedStaExtendedLinkMetrics, AssociatedStaLinkMetrics, AssociatedStaTrafficStats,
+    AssociatedWifi6StaStatusReport, BeaconMetricsQuery, BeaconMetricsResponse,
+    ExtendedLinkMetricsBss, MeasurementReportElement, MetricCollectionInterval, RadioMetrics,
+    StaMacAddress, UnassociatedQueryChannel, UnassociatedStaLinkMetricsQuery,
+    UnassociatedStaLinkMetricsResponse, UnassociatedStaMetrics, Wifi6TidQueueSize,
+};
+pub use policy::{
+    BackhaulBssConfiguration, Default8021QSettings, DscpMappingTable, MetricReportingPolicy,
+    QosManagementDescriptor, QosManagementPolicy, RadioMetricReportingPolicy, RadioSteeringPolicy,
+    ServicePrioritizationRule, SteeringPolicy, TrafficSeparationPolicy, TrafficSeparationSsid,
+    UnsuccessfulAssociationPolicy,
+};
+pub use steering::{
+    AssociationStatusEntry, AssociationStatusNotification, BackhaulSteeringRequest,
+    BackhaulSteeringResponse, ClientAssociationControlRequest, ClientAssociationEvent, ErrorCode,
+    HigherLayerData, Profile2SteeringRequest, Profile2SteeringTarget, ReasonCode, StatusCode,
+    SteeringBtmReport, SteeringFlags, SteeringMode, SteeringRequest, SteeringTarget,
 };
 
 /// Returns an empty `Vec` with room for at most `count` records of `T`, and for no more records
@@ -107,9 +133,11 @@ pub trait TlvBody<'a>: Sized {
 pub trait TlvBodyLenient<'a>: TlvBody<'a> {
     /// Decodes the value, accepting the listed non-spec sender forms as well as the spec form.
     ///
-    /// `Ok(None)` is upstream's empty value for a TLV whose spec fields are
+    /// `Ok(None)` is upstream's absent form for a TLV whose spec fields are
     /// mandatory: the consumer treats it as "TLV absent". It is returned only
-    /// for an empty value. Every other lenient form decodes to `Ok(Some(body))`.
+    /// for the listed absent forms: an empty value, and for the Associated
+    /// Wi-Fi 6 STA Status Report (0xB0) the nine zero octets upstream sends
+    /// (note 0009, A7). Every other lenient form decodes to `Ok(Some(body))`.
     ///
     /// # Errors
     ///

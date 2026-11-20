@@ -1,0 +1,244 @@
+# steering group, build A (note 0009 D7.1, B08). Builder A, 2026-11-20.
+# Sources: EasyMesh through the usp-spec MCP server (doc easymesh): §3.1.2 Conventions (bit/byte order per [2] = IEEE
+#   1905.1, multi-octet integers big-endian unless otherwise stated; reserved objects set to zero by the sender,
+#   ignored by the recipient), §17.2.20 Table 42, §17.2.29 Table 51, §17.2.30 Table 52, §17.2.31 Table 53, §17.2.32
+#   Table 54, §17.2.33 Table 55, §17.2.34 Table 56 (+ Appendix A.1 Table 130), §17.2.36 Table 58, §17.2.53 Table 75,
+#   §17.2.57 Table 79, §17.2.63 Table 85, §17.2.64 Table 86. TLV codes from the tables match em-types codes.rs:279
+#   (0x92), 288-293 (0x9b-0xa0), 296 (0xa3), 324 (0xbf), 328 (0xc3), 334-335 (0xc9, 0xca).
+#   Upstream (pinned ba4180b, read from an extracted copy): em_steering.cpp:469-498 (0x9b sender: window by plain
+#   assignment = host order, timer htons, always one STA and one target even for Request_Mode 0, reserved nibble never
+#   written), :500-524 (0x9c sender: 13 octets, Target_BSSID commented out), :527-541 (0xa3 sender), em_base.h:1140-1183
+#   (0x9f, 0x9e, 0x9d, 0x9c, 0x9b packed structs), em_configuration.cpp:405-436 (0x92 sender: 0x80 / 0x00).
+#   No production sender for 0x9e, 0x9f, 0xa0, 0xbf, 0xc3 (validation_test.cpp only).
+# Audit rows (docs/data/tlv-spec-audit.tsv lines): 81-82 (0x92), 12-17 (0x9b), 108-110 (0x9c), 111-114 (0x9d), 115
+#   (0x9e), 116 (0x9f), 117-118 (0xa0), 122-126 (0xa3), 186-187 (0xbf), 191-192 (0xc3), 204-205 (0xc9), 206 (0xca).
+#   port_rule: lines 12 and 15 UPSTREAM (0x9b window little-endian per 0008 D6; 0x9b timer big-endian = upstream
+#   htons); every other row SPEC or "-". Note 0009 D2 (raw reserved values, zero counts), D4 (no lenient row in this
+#   batch; the 13-octet 0x9c is named a spec form), D5, D8 (zero where the spec says one or more is invalid).
+#   Only Table 53 (0x9d Num_STA "Indicates one or more STA(s)") says one or more.
+# Byte order of every multi-octet integer (hex = tlvValue only):
+#   0x9b Steering_Opportunity_Window: LITTLE-endian (audit 12 UPSTREAM, D6; em_steering.cpp:485 plain assignment).
+#   0x9b BTM_Disassociation_Timer: big-endian (audit 15 UPSTREAM, htons at :487; also §3.1.2).
+#   0xc3 Steering_Opportunity_Window and BTM_Disassociation_Timer: big-endian (§3.1.2; audit 191 SPEC, no upstream
+#     sender, so D6 does not apply). Deliberately different from 0x9b's window.
+#   0x9d Validity Period: big-endian (§3.1.2; audit 111, htons/ntohs at em_steering.cpp:79, em_agent.cpp:811).
+#   0xc9 Status Code, 0xca Reason_Code: big-endian (§3.1.2; audit 204, 206: htons/ntohs).
+# Wire layouts:
+#   0x92: STA_MAC(6), AP_MAC(6), octet {AssociationType b7, Reserved b6-0}. Exactly 13.
+#   0x9b: BSSID(6), octet {Request_Mode b7, BTM_Disassociation_Imminent b6, BTM_Abridged b5, BTM_Link_Removal_Imminent
+#         b4, Reserved b3-0}, Steering_Opportunity_Window(2, LE), BTM_Disassociation_Timer(2, BE), STA_List_Count(1),
+#         STA_List_Count x STA_MAC(6), Target_BSSID_List_Count(1), Target_BSSID_List_Count x { Target_BSSID(6),
+#         Target_BSS_Operating_Class(1), Target_BSS_Channel_Number(1) }. Both counts may be 0.
+#   0xc3: as 0x9b with window and timer big-endian and each target entry { Target_BSSID(6), OpClass(1), Channel(1),
+#         Reason_Code(1; raw) }.
+#   0x9c: BSSID(6), STA_MAC(6), BTM_Status_Code(1; raw), Target_BSSID(0 or 6). Value is 13 or 19 octets.
+#   0x9d: BSSID(6), Association Control(1; 0x04-0xff reserved, raw), Validity Period(2, BE), Num_STA(1; >= 1), Num_STA x
+#         STA_MAC(6). No cap of 20 (audit 113).
+#   0x9e: MAC_Address(6), Target_BSSID(6), Target_BSS_Operating_Class(1), Target_BSS_Channel(1). Exactly 14.
+#   0x9f: MAC_Address(6), Target_BSSID(6), Result_Code(1; 0x02-0xff reserved, raw). Exactly 13.
+#   0xa0: Protocol(1; raw, Table 130), Payload(rest of the value, raw, may be empty). At least 1 octet.
+#   0xa3: Reason_Code(1; 0x00 and 0x07-0xff reserved, raw), STA_MAC(6, always present). Exactly 7.
+#   0xbf: Num_BSSID(1; may be 0), Num_BSSID x { BSSID(6), Status(1; 0x02-0xff reserved, raw) }.
+#   0xc9: Status Code(2, BE). Exactly 2.   0xca: Reason_Code(2, BE). Exactly 2.
+# Field-reading rules (this group):
+#   (1) Items are written in the listed order, each at its own position, except the bit-group items of rule (4).
+#   (2) Widths: bssid, sta_mac, ap_mac, mac, target_bssid, sK_mac, tK_bssid, bK_bssid are 6-octet MACs (12 hex digits).
+#       window and timer (0x9b, 0xc3), validity (0x9d), status_code (0xc9), reason_code (0xca) are 2 octets in the
+#       byte order listed above (0x9b window little-endian; all the others big-endian). Every other integer item is
+#       1 octet (status, control, op_class, channel, result, protocol, reason, stas, targets, bssids, tK_class,
+#       tK_ch, tK_reason, bK_status). Values are decimal or 0x-hex.
+#   (3) Count items (stas, targets, bssids) are written as given; only the entries listed follow (a count above the
+#       listed entries = overstated). Entries: 0x9b/0xc3/0x9d sK_mac; 0x9b/0xc3 tK_bssid, tK_class, tK_ch (+ tK_reason
+#       in 0xc3); 0xbf bK_bssid, bK_status.
+#   (4) Bit-field octets: each group is ONE octet, written at the position of the group's first listed item; flag
+#       values are 0/1, unshifted; a reserved mask is given in octet position and ORed in (absent = 0):
+#       0x92 {assoc b7, event_reserved b6-0}; 0x9b and 0xc3 {req_mode b7, dissoc_imminent b6, abridged b5,
+#       link_removal b4, mode_reserved b3-0}. A case that sets a reserved mask: the decoder ignores it, the encoder
+#       writes zero (canonical bytes = the *-clear sibling, or the same fields with the mask 0).
+#   (5) Byte-string items (0xa0 payload) are hex: raw octets, written exactly as given with no length octet
+#       (hex: alone = no octets).
+#   (6) An item given as hex: where it normally takes a MAC or integer is a cut field: exactly those raw octets are
+#       written (0x9c target_bssid=hex:.. writes only those octets). An item not listed is absent from the bytes
+#       (0x9c without target_bssid = 13-octet form).
+#   (7) trailing=hex: raw octets appended after the listed fields.
+# Choices (for the coordinator): (a) every cut field, partial entry or overstated count is error=Truncated (as
+#   B01-B07); extra octets after a complete layout are TrailingBytes. 0x9c Target_BSSID of 1-5 octets is Truncated
+#   (cut field); InvalidLength is the alternative reading of "0 or 6 octets". 0x9c of 20+ octets is TrailingBytes.
+#   0xa0 has no trailing case (Payload takes the rest). 0xc9/0xca tlvLength is "Variable" but the table has one
+#   2-octet field: a third octet is TrailingBytes. (b) 0x9d zero-stas is invalid, error=InvalidLength (Table 53 "one or
+#   more", D8; precedent linkmetric zero-links, capability 0xd4 zero-radios). (c) 0x9b/0xc3 opportunity-with-target
+#   (Request_Mode 0, Target_BSSID_List_Count 1; "If Request_Mode bit is set to zero, then this field is set to zero")
+#   is kind=spec: the counts size the bytes, so it parses as spec bytes (D4: no lenient decoder; meaning is the
+#   consumer's). It is upstream's production form for 0x9b (em_steering.cpp:488-493, audit 13). Conflicting
+#   precedent: channel group, 0xa6 Fresh=0 with op classes = ValueOutOfRange. If the coordinator picks
+#   ValueOutOfRange here, 0x9b opportunity-with-target becomes a lenient candidate with that sender line.
+#   (d) targets-not-one-or-stas (STA_List_Count 3, Target_BSSID_List_Count 2; spec "= 1 or STA_List_Count") is
+#   kind=spec for the same reason (value rule for the consumer); flagged with (c). (e) mandate-all-stas-one-target
+#   (STA_List_Count 0 with one target under Request_Mode 1) is kind=spec. (f) Window and timer are carried in
+#   Request_Mode 1 although "ignored" (golden has a non-zero window so its byte order is visible). (g) 0x9b window
+#   little-endian vs 0xc3 window big-endian is deliberate (UPSTREAM line 12 vs SPEC line 191); the goldens use the
+#   same window value (0x012c) so a shared encoder fails one of them. (h) 0xa3 reason 0x00 (reserved; upstream sends
+#   it, audit 123) and any STA_MAC are carried raw (kind=spec); the port encoder writing 0x00 is a consumer question.
+#   (i) 0x9d twenty-one-stas pins the difference from upstream's MAX_STA_LIST 20 cap (audit 113).
+#   (j) 0xa0 Protocol 0x00 and 0x02-0xff are raw reserved values (Table 130).
+# Coordinator correction 2026-11-20 (user decision, 0009 A8): Request Mode 0 with a target list is invalid (ValueOutOfRange) for strict decoding; 0x9b opportunity-with-target is upstream's sender form (em_steering.cpp:488-493) -> kind=lenient, decoded=targets-dropped (the lenient body has no targets); 0xc3 has no production sender -> kind=invalid.
+tlv	case	fields	hex
+0x92	golden	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=1	3c1d2e3f4a5102a0b1c2d3e480
+0x92	left	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=0	3c1d2e3f4a5102a0b1c2d3e400
+0x92	mld-addresses	sta_mac=7a6b5c4d3e21;ap_mac=0e1f2a3b4c5d;assoc=1	7a6b5c4d3e210e1f2a3b4c5d80
+0x92	reserved-bits-set	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=1;event_reserved=0x7f	3c1d2e3f4a5102a0b1c2d3e4ff
+0x92	reserved-bits-clear	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=1;event_reserved=0x00	3c1d2e3f4a5102a0b1c2d3e480
+0x92	reserved-bits-set-left	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=0;event_reserved=0x55	3c1d2e3f4a5102a0b1c2d3e455
+0x92	empty	kind=invalid;error=Truncated	-
+0x92	cut-sta-mac	sta_mac=hex:3c1d2e3f;kind=invalid;error=Truncated	3c1d2e3f
+0x92	cut-ap-mac	sta_mac=3c1d2e3f4a51;ap_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	3c1d2e3f4a5102a0b1c2d3
+0x92	missing-event-octet	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	3c1d2e3f4a5102a0b1c2d3e4
+0x92	trailing-bytes	sta_mac=3c1d2e3f4a51;ap_mac=02a0b1c2d3e4;assoc=1;trailing=hex:a5;kind=invalid;error=TrailingBytes	3c1d2e3f4a5102a0b1c2d3e480a5
+0x9b	golden	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=1;window=0x012c;timer=0x00c8;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6	02a0b1c2d3e4d02c0100c8023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d73245a4b3c2d1e0f5106
+0x9b	opportunity-all-stas	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0258;timer=0x0003;stas=0;targets=0	02a0b1c2d3e400580200030000
+0x9b	opportunity-listed-stas	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=1;link_removal=0;window=0x0a0b;timer=0x0c0d;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=0	02a0b1c2d3e4200b0a0c0d023c1d2e3f4a517a6b5c4d3e2100
+0x9b	mandate-one-target-for-all	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=1;link_removal=0;window=0;timer=0x01f4;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36	02a0b1c2d3e4e0000001f4023c1d2e3f4a517a6b5c4d3e21010e1f2a3b4c5d7324
+0x9b	mandate-all-stas-one-target	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0102;stas=0;targets=1;t0_bssid=ffffffffffff;t0_class=0;t0_ch=0	02a0b1c2d3e480000001020001ffffffffffff0000
+0x9b	mandate-wildcard-target	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=0;window=0;timer=0x0064;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=ffffffffffff;t0_class=255;t0_ch=255	02a0b1c2d3e4c000000064013c1d2e3f4a5101ffffffffffffffff
+0x9b	opportunity-with-target	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x003c;timer=0x0001;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;kind=lenient;decoded=targets-dropped	02a0b1c2d3e4003c000001013c1d2e3f4a51010e1f2a3b4c5d7324
+0x9b	targets-not-one-or-stas	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0203;stas=3;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;s2_mac=0a1b2c3d4e5f;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6	02a0b1c2d3e48000000203033c1d2e3f4a517a6b5c4d3e210a1b2c3d4e5f020e1f2a3b4c5d73245a4b3c2d1e0f5106
+0x9b	req-mode-alone	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36	02a0b1c2d3e48002010304013c1d2e3f4a51010e1f2a3b4c5d7324
+0x9b	dissoc-imminent-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=1;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e440020103040000
+0x9b	abridged-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=1;link_removal=0;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e420020103040000
+0x9b	link-removal-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=1;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e410020103040000
+0x9b	reserved-bits-set	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=1;link_removal=0;mode_reserved=0x0f;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36	02a0b1c2d3e4af02010304013c1d2e3f4a51010e1f2a3b4c5d7324
+0x9b	reserved-bits-clear	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=1;link_removal=0;mode_reserved=0x00;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36	02a0b1c2d3e4a002010304013c1d2e3f4a51010e1f2a3b4c5d7324
+0x9b	reserved-bits-set-zero-flags	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;mode_reserved=0x05;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e405020103040000
+0x9b	max-window-timer	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0xfffe;timer=0xfdfe;stas=0;targets=0	02a0b1c2d3e400fefffdfe0000
+0x9b	empty	kind=invalid;error=Truncated	-
+0x9b	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x9b	missing-mode-octet	bssid=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0x9b	cut-window	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=hex:01;kind=invalid;error=Truncated	02a0b1c2d3e40001
+0x9b	cut-timer	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=hex:03;kind=invalid;error=Truncated	02a0b1c2d3e400020103
+0x9b	missing-sta-count	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;kind=invalid;error=Truncated	02a0b1c2d3e40002010304
+0x9b	missing-target-count	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=0;kind=invalid;error=Truncated	02a0b1c2d3e4000201030400
+0x9b	cut-sta-mac	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=hex:3c1d2e;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e
+0x9b	stas-overstated	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=2;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;kind=invalid;error=Truncated	02a0b1c2d3e48000000304023c1d2e3f4a51010e1f2a3b4c5d7324
+0x9b	targets-overstated	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;kind=invalid;error=Truncated	02a0b1c2d3e48000000304023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d7324
+0x9b	cut-target-entry	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e3f4a51010e1f2a3b4c5d73
+0x9b	cut-target-bssid	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=hex:0e1f2a3b;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e3f4a51010e1f2a3b
+0x9b	trailing-bytes	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=1;window=0x012c;timer=0x00c8;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4d02c0100c8023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d73245a4b3c2d1e0f5106a5
+0x9b	zero-counts-trailing	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0258;timer=0x0003;stas=0;targets=0;trailing=hex:3c1d2e3f4a51;kind=invalid;error=TrailingBytes	02a0b1c2d3e4005802000300003c1d2e3f4a51
+0x9c	golden	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0;target_bssid=0e1f2a3b4c5d	02a0b1c2d3e43c1d2e3f4a51000e1f2a3b4c5d
+0x9c	no-target	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=6	02a0b1c2d3e43c1d2e3f4a5106
+0x9c	upstream-form	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0	02a0b1c2d3e43c1d2e3f4a5100
+0x9c	reject-with-target	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=7;target_bssid=5a4b3c2d1e0f	02a0b1c2d3e43c1d2e3f4a51075a4b3c2d1e0f
+0x9c	status-raw-high	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0xff	02a0b1c2d3e43c1d2e3f4a51ff
+0x9c	empty	kind=invalid;error=Truncated	-
+0x9c	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x9c	cut-sta-mac	bssid=02a0b1c2d3e4;sta_mac=hex:3c1d2e3f;kind=invalid;error=Truncated	02a0b1c2d3e43c1d2e3f
+0x9c	missing-status	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;kind=invalid;error=Truncated	02a0b1c2d3e43c1d2e3f4a51
+0x9c	target-1-octet	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0;target_bssid=hex:0e;kind=invalid;error=Truncated	02a0b1c2d3e43c1d2e3f4a51000e
+0x9c	target-5-octets	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0;target_bssid=hex:0e1f2a3b4c;kind=invalid;error=Truncated	02a0b1c2d3e43c1d2e3f4a51000e1f2a3b4c
+0x9c	trailing-after-target	bssid=02a0b1c2d3e4;sta_mac=3c1d2e3f4a51;status=0;target_bssid=0e1f2a3b4c5d;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e43c1d2e3f4a51000e1f2a3b4c5da5
+0x9d	golden	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21	02a0b1c2d3e4000e10023c1d2e3f4a517a6b5c4d3e21
+0x9d	unblock	bssid=02a0b1c2d3e4;control=1;validity=0;stas=1;s0_mac=3c1d2e3f4a51	02a0b1c2d3e4010000013c1d2e3f4a51
+0x9d	timed-block	bssid=02a0b1c2d3e4;control=2;validity=0x0102;stas=1;s0_mac=3c1d2e3f4a51	02a0b1c2d3e4020102013c1d2e3f4a51
+0x9d	indefinite-block	bssid=02a0b1c2d3e4;control=3;validity=0xfffe;stas=1;s0_mac=7a6b5c4d3e21	02a0b1c2d3e403fffe017a6b5c4d3e21
+0x9d	control-reserved-4	bssid=02a0b1c2d3e4;control=4;validity=0x0a0b;stas=1;s0_mac=3c1d2e3f4a51	02a0b1c2d3e4040a0b013c1d2e3f4a51
+0x9d	control-reserved-ff	bssid=02a0b1c2d3e4;control=0xff;validity=0x0a0b;stas=1;s0_mac=3c1d2e3f4a51	02a0b1c2d3e4ff0a0b013c1d2e3f4a51
+0x9d	twenty-one-stas	bssid=02a0b1c2d3e4;control=0;validity=0x003c;stas=21;s0_mac=0a1b2c3d4e00;s1_mac=0a1b2c3d4e01;s2_mac=0a1b2c3d4e02;s3_mac=0a1b2c3d4e03;s4_mac=0a1b2c3d4e04;s5_mac=0a1b2c3d4e05;s6_mac=0a1b2c3d4e06;s7_mac=0a1b2c3d4e07;s8_mac=0a1b2c3d4e08;s9_mac=0a1b2c3d4e09;s10_mac=0a1b2c3d4e0a;s11_mac=0a1b2c3d4e0b;s12_mac=0a1b2c3d4e0c;s13_mac=0a1b2c3d4e0d;s14_mac=0a1b2c3d4e0e;s15_mac=0a1b2c3d4e0f;s16_mac=0a1b2c3d4e10;s17_mac=0a1b2c3d4e11;s18_mac=0a1b2c3d4e12;s19_mac=0a1b2c3d4e13;s20_mac=0a1b2c3d4e14	02a0b1c2d3e400003c150a1b2c3d4e000a1b2c3d4e010a1b2c3d4e020a1b2c3d4e030a1b2c3d4e040a1b2c3d4e050a1b2c3d4e060a1b2c3d4e070a1b2c3d4e080a1b2c3d4e090a1b2c3d4e0a0a1b2c3d4e0b0a1b2c3d4e0c0a1b2c3d4e0d0a1b2c3d4e0e0a1b2c3d4e0f0a1b2c3d4e100a1b2c3d4e110a1b2c3d4e120a1b2c3d4e130a1b2c3d4e14
+0x9d	zero-stas	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;stas=0;kind=invalid;error=InvalidLength	02a0b1c2d3e4000e1000
+0x9d	empty	kind=invalid;error=Truncated	-
+0x9d	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x9d	missing-control	bssid=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0x9d	cut-validity	bssid=02a0b1c2d3e4;control=0;validity=hex:0e;kind=invalid;error=Truncated	02a0b1c2d3e4000e
+0x9d	missing-sta-count	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;kind=invalid;error=Truncated	02a0b1c2d3e4000e10
+0x9d	stas-overstated	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;stas=2;s0_mac=3c1d2e3f4a51;kind=invalid;error=Truncated	02a0b1c2d3e4000e10023c1d2e3f4a51
+0x9d	cut-sta-mac	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;stas=1;s0_mac=hex:3c1d2e3f4a;kind=invalid;error=Truncated	02a0b1c2d3e4000e10013c1d2e3f4a
+0x9d	trailing-bytes	bssid=02a0b1c2d3e4;control=0;validity=0x0e10;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4000e10023c1d2e3f4a517a6b5c4d3e21a5
+0x9e	golden	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;op_class=115;channel=36	3c1d2e3f4a510e1f2a3b4c5d7324
+0x9e	other-values	mac=7a6b5c4d3e21;target_bssid=5a4b3c2d1e0f;op_class=81;channel=11	7a6b5c4d3e215a4b3c2d1e0f510b
+0x9e	empty	kind=invalid;error=Truncated	-
+0x9e	cut-mac	mac=hex:3c1d2e3f4a;kind=invalid;error=Truncated	3c1d2e3f4a
+0x9e	cut-target-bssid	mac=3c1d2e3f4a51;target_bssid=hex:0e1f2a;kind=invalid;error=Truncated	3c1d2e3f4a510e1f2a
+0x9e	missing-channel	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;op_class=115;kind=invalid;error=Truncated	3c1d2e3f4a510e1f2a3b4c5d73
+0x9e	trailing-bytes	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;op_class=115;channel=36;trailing=hex:a5;kind=invalid;error=TrailingBytes	3c1d2e3f4a510e1f2a3b4c5d7324a5
+0x9f	golden	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;result=0	3c1d2e3f4a510e1f2a3b4c5d00
+0x9f	failure	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;result=1	3c1d2e3f4a510e1f2a3b4c5d01
+0x9f	result-reserved-2	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;result=2	3c1d2e3f4a510e1f2a3b4c5d02
+0x9f	result-reserved-ff	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;result=0xff	3c1d2e3f4a510e1f2a3b4c5dff
+0x9f	empty	kind=invalid;error=Truncated	-
+0x9f	cut-mac	mac=hex:3c1d;kind=invalid;error=Truncated	3c1d
+0x9f	cut-target-bssid	mac=3c1d2e3f4a51;target_bssid=hex:0e1f2a3b4c;kind=invalid;error=Truncated	3c1d2e3f4a510e1f2a3b4c
+0x9f	missing-result	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;kind=invalid;error=Truncated	3c1d2e3f4a510e1f2a3b4c5d
+0x9f	trailing-bytes	mac=3c1d2e3f4a51;target_bssid=0e1f2a3b4c5d;result=1;trailing=hex:a5;kind=invalid;error=TrailingBytes	3c1d2e3f4a510e1f2a3b4c5d01a5
+0xa0	golden	protocol=1;payload=hex:0102030405a0b1c2	010102030405a0b1c2
+0xa0	empty-payload	protocol=1;payload=hex:	01
+0xa0	protocol-reserved-0	protocol=0;payload=hex:ff00	00ff00
+0xa0	protocol-reserved-ff	protocol=0xff;payload=hex:7b7d	ff7b7d
+0xa0	empty	kind=invalid;error=Truncated	-
+0xa3	golden	reason=1;sta_mac=3c1d2e3f4a51	013c1d2e3f4a51
+0xa3	not-associated	reason=2;sta_mac=7a6b5c4d3e21	027a6b5c4d3e21
+0xa3	capability-failure	reason=3;sta_mac=000000000000	03000000000000
+0xa3	bh-channel	reason=4;sta_mac=3c1d2e3f4a51	043c1d2e3f4a51
+0xa3	bh-signal	reason=5;sta_mac=3c1d2e3f4a51	053c1d2e3f4a51
+0xa3	bh-rejected	reason=6;sta_mac=3c1d2e3f4a51	063c1d2e3f4a51
+0xa3	reason-reserved-0	reason=0;sta_mac=3c1d2e3f4a51	003c1d2e3f4a51
+0xa3	upstream-zero	reason=0;sta_mac=000000000000	00000000000000
+0xa3	reason-reserved-7	reason=7;sta_mac=3c1d2e3f4a51	073c1d2e3f4a51
+0xa3	reason-reserved-ff	reason=0xff;sta_mac=fedcba987654	fffedcba987654
+0xa3	empty	kind=invalid;error=Truncated	-
+0xa3	missing-sta-mac	reason=1;kind=invalid;error=Truncated	01
+0xa3	cut-sta-mac	reason=1;sta_mac=hex:3c1d2e3f4a;kind=invalid;error=Truncated	013c1d2e3f4a
+0xa3	trailing-bytes	reason=1;sta_mac=3c1d2e3f4a51;trailing=hex:a5;kind=invalid;error=TrailingBytes	013c1d2e3f4a51a5
+0xbf	golden	bssids=2;b0_bssid=02a0b1c2d3e4;b0_status=1;b1_bssid=0e1f2a3b4c5d;b1_status=0	0202a0b1c2d3e4010e1f2a3b4c5d00
+0xbf	one-bssid	bssids=1;b0_bssid=5a4b3c2d1e0f;b0_status=0	015a4b3c2d1e0f00
+0xbf	zero-bssids	bssids=0	00
+0xbf	status-reserved	bssids=2;b0_bssid=02a0b1c2d3e4;b0_status=2;b1_bssid=0e1f2a3b4c5d;b1_status=0xff	0202a0b1c2d3e4020e1f2a3b4c5dff
+0xbf	empty	kind=invalid;error=Truncated	-
+0xbf	bssids-overstated	bssids=2;b0_bssid=02a0b1c2d3e4;b0_status=1;kind=invalid;error=Truncated	0202a0b1c2d3e401
+0xbf	cut-bssid	bssids=1;b0_bssid=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0xbf	missing-status	bssids=1;b0_bssid=02a0b1c2d3e4;kind=invalid;error=Truncated	0102a0b1c2d3e4
+0xbf	trailing-bytes	bssids=1;b0_bssid=5a4b3c2d1e0f;b0_status=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	015a4b3c2d1e0f00a5
+0xbf	zero-bssids-trailing	bssids=0;trailing=hex:02a0b1c2d3e401;kind=invalid;error=TrailingBytes	0002a0b1c2d3e401
+0xc3	golden	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=1;window=0x012c;timer=0x00c8;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6;t1_reason=19	02a0b1c2d3e4d0012c00c8023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d7324055a4b3c2d1e0f510613
+0xc3	opportunity-all-stas	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0258;timer=0x0003;stas=0;targets=0	02a0b1c2d3e400025800030000
+0xc3	opportunity-listed-stas	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=1;link_removal=0;window=0x0a0b;timer=0x0c0d;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=0	02a0b1c2d3e4200a0b0c0d023c1d2e3f4a517a6b5c4d3e2100
+0xc3	mandate-one-target-for-all	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=1;link_removal=0;window=0;timer=0x01f4;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5	02a0b1c2d3e4e0000001f4023c1d2e3f4a517a6b5c4d3e21010e1f2a3b4c5d732405
+0xc3	mandate-all-stas-one-target	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0102;stas=0;targets=1;t0_bssid=ffffffffffff;t0_class=0;t0_ch=0;t0_reason=0	02a0b1c2d3e480000001020001ffffffffffff000000
+0xc3	mandate-wildcard-target	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=0;window=0;timer=0x0064;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=ffffffffffff;t0_class=255;t0_ch=255;t0_reason=255	02a0b1c2d3e4c000000064013c1d2e3f4a5101ffffffffffffffffff
+0xc3	opportunity-with-target	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x003c;timer=0x0001;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;kind=invalid;error=ValueOutOfRange	02a0b1c2d3e400003c0001013c1d2e3f4a51010e1f2a3b4c5d732405
+0xc3	targets-not-one-or-stas	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0203;stas=3;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;s2_mac=0a1b2c3d4e5f;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6;t1_reason=19	02a0b1c2d3e48000000203033c1d2e3f4a517a6b5c4d3e210a1b2c3d4e5f020e1f2a3b4c5d7324055a4b3c2d1e0f510613
+0xc3	req-mode-alone	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5	02a0b1c2d3e48001020304013c1d2e3f4a51010e1f2a3b4c5d732405
+0xc3	dissoc-imminent-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=1;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e440010203040000
+0xc3	abridged-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=1;link_removal=0;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e420010203040000
+0xc3	link-removal-alone	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=1;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e410010203040000
+0xc3	reserved-bits-set	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=1;link_removal=0;mode_reserved=0x0f;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5	02a0b1c2d3e4af01020304013c1d2e3f4a51010e1f2a3b4c5d732405
+0xc3	reserved-bits-clear	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=1;link_removal=0;mode_reserved=0x00;window=0x0102;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5	02a0b1c2d3e4a001020304013c1d2e3f4a51010e1f2a3b4c5d732405
+0xc3	reserved-bits-set-zero-flags	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;mode_reserved=0x05;window=0x0102;timer=0x0304;stas=0;targets=0	02a0b1c2d3e405010203040000
+0xc3	max-window-timer	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0xfffe;timer=0xfdfe;stas=0;targets=0	02a0b1c2d3e400fffefdfe0000
+0xc3	reason-codes-raw	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=0;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6;t1_reason=255	02a0b1c2d3e48000000304023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d7324005a4b3c2d1e0f5106ff
+0xc3	empty	kind=invalid;error=Truncated	-
+0xc3	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0xc3	missing-mode-octet	bssid=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0xc3	cut-window	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=hex:01;kind=invalid;error=Truncated	02a0b1c2d3e40001
+0xc3	cut-timer	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=hex:03;kind=invalid;error=Truncated	02a0b1c2d3e400010203
+0xc3	missing-sta-count	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;kind=invalid;error=Truncated	02a0b1c2d3e40001020304
+0xc3	missing-target-count	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0102;timer=0x0304;stas=0;kind=invalid;error=Truncated	02a0b1c2d3e4000102030400
+0xc3	cut-sta-mac	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=hex:3c1d2e;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e
+0xc3	stas-overstated	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=2;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;kind=invalid;error=Truncated	02a0b1c2d3e48000000304023c1d2e3f4a51010e1f2a3b4c5d732405
+0xc3	targets-overstated	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;kind=invalid;error=Truncated	02a0b1c2d3e48000000304023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d732405
+0xc3	cut-target-entry	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e3f4a51010e1f2a3b4c5d7324
+0xc3	cut-target-bssid	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=0;abridged=0;link_removal=0;window=0;timer=0x0304;stas=1;s0_mac=3c1d2e3f4a51;targets=1;t0_bssid=hex:0e1f2a3b;kind=invalid;error=Truncated	02a0b1c2d3e48000000304013c1d2e3f4a51010e1f2a3b
+0xc3	trailing-bytes	bssid=02a0b1c2d3e4;req_mode=1;dissoc_imminent=1;abridged=0;link_removal=1;window=0x012c;timer=0x00c8;stas=2;s0_mac=3c1d2e3f4a51;s1_mac=7a6b5c4d3e21;targets=2;t0_bssid=0e1f2a3b4c5d;t0_class=115;t0_ch=36;t0_reason=5;t1_bssid=5a4b3c2d1e0f;t1_class=81;t1_ch=6;t1_reason=19;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4d0012c00c8023c1d2e3f4a517a6b5c4d3e21020e1f2a3b4c5d7324055a4b3c2d1e0f510613a5
+0xc3	zero-counts-trailing	bssid=02a0b1c2d3e4;req_mode=0;dissoc_imminent=0;abridged=0;link_removal=0;window=0x0258;timer=0x0003;stas=0;targets=0;trailing=hex:3c1d2e3f4a51;kind=invalid;error=TrailingBytes	02a0b1c2d3e4000258000300003c1d2e3f4a51
+0xc9	golden	status_code=0x0011	0011
+0xc9	zero	status_code=0	0000
+0xc9	high-octet	status_code=0x0102	0102
+0xc9	max	status_code=0xfffe	fffe
+0xc9	empty	kind=invalid;error=Truncated	-
+0xc9	one-octet	status_code=hex:00;kind=invalid;error=Truncated	00
+0xc9	trailing-bytes	status_code=0x0011;trailing=hex:a5;kind=invalid;error=TrailingBytes	0011a5
+0xca	golden	reason_code=0x0011	0011
+0xca	zero	reason_code=0	0000
+0xca	high-octet	reason_code=0x0102	0102
+0xca	max	reason_code=0xfffe	fffe
+0xca	empty	kind=invalid;error=Truncated	-
+0xca	one-octet	reason_code=hex:00;kind=invalid;error=Truncated	00
+0xca	trailing-bytes	reason_code=0x0011;trailing=hex:a5;kind=invalid;error=TrailingBytes	0011a5

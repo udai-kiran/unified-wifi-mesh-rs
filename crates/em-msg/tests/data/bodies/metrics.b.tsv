@@ -1,0 +1,185 @@
+# Builder B (Codex), 2026-11-20.
+# Sources: fixture-conventions.md and spec-b07.md (EasyMesh excerpts fetched via usp-spec, document easymesh).
+# Audit: docs/data/tlv-spec-audit.tsv rows reproduced in spec-b07.md; row numbers appear with each layout.
+# Value layouts; multi-octet integers are big-endian except 0xc5; byte strings and cut fields are raw.
+# 0x93 (EasyMesh 17.2.21; audit 83-84): BSSID count(1), count x { AP MAC(6) }.
+# 0x94 (17.2.22; audit 85-89): AP MAC(6), utilization(1), STA count(2), flags(1: BE/BK/VO/VI bits 7/6/5/4, reserved 3-0), ESP BE(3), optional ESP BK/VO/VI(3 each in order).
+# 0x95 (17.2.23; audit 90-91): STA MAC(6).
+# 0x96 (17.2.24; audit 92-95): STA MAC(6), BSSID count(1), count x { AP MAC(6), delta(4), down rate(4), up rate(4), RCPI(1) }.
+# 0x97 (17.2.25; audit 96-98): operating class(1), channel count(1), channel count x { channel(1), STA count(1), STA count x { STA MAC(6) } }.
+# 0x98 (17.2.26; audit 99-100): operating class(1), STA count(1), count x { STA MAC(6), channel(1), delta(4), RCPI(1) }.
+# 0x99 (17.2.27; audit 101-105): STA MAC(6), class(1), channel(1), BSSID(6), detail(1), SSID length(1), SSID(length), report count(1), count x { length(1), class(1), channels(length-1) }, ID count(1), IDs(count); lenient rows omit ID count and IDs.
+# 0x9a (17.2.28; audit 106-107): STA MAC(6), reserved(1), report count(1), count x { raw element ID(1), length(1), body(length) }.
+# 0xa2 (17.2.35; audit 119-121): STA MAC(6), bytes sent/received, packets sent/received, TX errors, RX errors, retransmissions(4 each).
+# 0xc5 (17.2.59; audit 195): collection interval(4, little-endian).
+# 0xc6 (17.2.60; audit 196-197): RUID(6), noise(1), transmit(1), receive self(1), receive other(1).
+# 0xc7 (17.2.61; audit 198-200): BSSID(6), unicast sent/received, multicast sent/received, broadcast sent/received(4 each).
+# 0xc8 (17.2.62; audit 201-203): STA MAC(6), BSSID count(1), count x { BSSID(6), downlink rate(4), uplink rate(4), receive utilization(4), transmit utilization(4) }.
+# 0xb0 (17.2.73; audit 224-225): STA MAC(6), TID count(1), count x { TID(1), queue size(1) }.
+tlv	case	fields	hex
+0x93	golden	bssids=2;b0_mac=02a0b1c2d3e4;b1_mac=3c1d2e3f4a51	0202a0b1c2d3e43c1d2e3f4a51
+0x93	one-bssid	bssids=1;b0_mac=7a6b5c4d3e21	017a6b5c4d3e21
+0x93	zero-bssids	bssids=0	00
+0x93	three-bssids	bssids=3;b0_mac=02a0b1c2d3e4;b1_mac=02a0b1c2d3e5;b2_mac=0e1f2a3b4c5d	0302a0b1c2d3e402a0b1c2d3e50e1f2a3b4c5d
+0x93	empty	kind=invalid;error=Truncated	-
+0x93	cut-mac	bssids=1;b0_mac=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0x93	bssids-overstated	bssids=2;b0_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	0202a0b1c2d3e4
+0x93	trailing-bytes	bssids=1;b0_mac=7a6b5c4d3e21;trailing=hex:a5;kind=invalid;error=TrailingBytes	017a6b5c4d3e21a5
+0x93	zero-bssids-trailing	bssids=0;trailing=hex:3c1d2e3f4a51;kind=invalid;error=TrailingBytes	003c1d2e3f4a51
+0x94	golden	bssid=02a0b1c2d3e4;util=87;num_sta=0x0102;inc_be=1;inc_bk=1;inc_vo=1;inc_vi=1;esp_be=hex:a1b2c3;esp_bk=hex:b1c2d3;esp_vo=hex:c1d2e3;esp_vi=hex:d1e2f3	02a0b1c2d3e4570102f0a1b2c3b1c2d3c1d2e3d1e2f3
+0x94	be-only	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=0;inc_vi=0;esp_be=hex:a1b2c3	02a0b1c2d3e40c010280a1b2c3
+0x94	upstream-be-zero	bssid=3c1d2e3f4a51;util=0;num_sta=3;inc_be=1;inc_bk=0;inc_vo=0;inc_vi=0;esp_be=hex:000000	3c1d2e3f4a5100000380000000
+0x94	bk-alone	bssid=02a0b1c2d3e4;util=34;num_sta=0x0a0b;inc_be=0;inc_bk=1;inc_vo=0;inc_vi=0;esp_be=hex:a1b2c3;esp_bk=hex:b1c2d3	02a0b1c2d3e4220a0b40a1b2c3b1c2d3
+0x94	vo-alone	bssid=02a0b1c2d3e4;util=56;num_sta=0x0c0d;inc_be=0;inc_bk=0;inc_vo=1;inc_vi=0;esp_be=hex:a1b2c3;esp_vo=hex:c1d2e3	02a0b1c2d3e4380c0d20a1b2c3c1d2e3
+0x94	vi-alone	bssid=02a0b1c2d3e4;util=78;num_sta=0x0e0f;inc_be=0;inc_bk=0;inc_vo=0;inc_vi=1;esp_be=hex:a1b2c3;esp_vi=hex:d1e2f3	02a0b1c2d3e44e0e0f10a1b2c3d1e2f3
+0x94	include-be-clear	bssid=02a0b1c2d3e4;util=90;num_sta=0;inc_be=0;inc_bk=0;inc_vo=0;inc_vi=0;esp_be=hex:000000	02a0b1c2d3e45a000000000000
+0x94	be-bk-vi	bssid=02a0b1c2d3e4;util=255;num_sta=0xffff;inc_be=1;inc_bk=1;inc_vo=0;inc_vi=1;esp_be=hex:a1b2c3;esp_bk=hex:b1c2d3;esp_vi=hex:d1e2f3	02a0b1c2d3e4ffffffd0a1b2c3b1c2d3d1e2f3
+0x94	reserved-bits-set	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=1;inc_vi=0;flags_reserved=0x0f;esp_be=hex:a1b2c3;esp_vo=hex:c1d2e3	02a0b1c2d3e40c0102afa1b2c3c1d2e3
+0x94	reserved-bits-clear	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=1;inc_vi=0;flags_reserved=0x00;esp_be=hex:a1b2c3;esp_vo=hex:c1d2e3	02a0b1c2d3e40c0102a0a1b2c3c1d2e3
+0x94	reserved-bits-set-zero-flags	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=0;inc_bk=0;inc_vo=0;inc_vi=0;flags_reserved=0x05;esp_be=hex:a1b2c3	02a0b1c2d3e40c010205a1b2c3
+0x94	empty	kind=invalid;error=Truncated	-
+0x94	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x94	cut-num-sta	bssid=02a0b1c2d3e4;util=12;num_sta=hex:01;kind=invalid;error=Truncated	02a0b1c2d3e40c01
+0x94	missing-esp-be	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=0;inc_vi=0;kind=invalid;error=Truncated	02a0b1c2d3e40c010280
+0x94	cut-esp-be	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=0;inc_vi=0;esp_be=hex:a1b2;kind=invalid;error=Truncated	02a0b1c2d3e40c010280a1b2
+0x94	bk-flag-without-field	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=1;inc_vo=0;inc_vi=0;esp_be=hex:a1b2c3;kind=invalid;error=Truncated	02a0b1c2d3e40c0102c0a1b2c3
+0x94	vi-flag-cut-field	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=1;inc_vo=0;inc_vi=1;esp_be=hex:a1b2c3;esp_bk=hex:b1c2d3;esp_vi=hex:d1e2;kind=invalid;error=Truncated	02a0b1c2d3e40c0102d0a1b2c3b1c2d3d1e2
+0x94	field-without-flag	bssid=02a0b1c2d3e4;util=12;num_sta=258;inc_be=1;inc_bk=0;inc_vo=0;inc_vi=0;esp_be=hex:a1b2c3;trailing=hex:b1c2d3;kind=invalid;error=TrailingBytes	02a0b1c2d3e40c010280a1b2c3b1c2d3
+0x94	trailing-bytes	bssid=02a0b1c2d3e4;util=87;num_sta=0x0102;inc_be=1;inc_bk=1;inc_vo=1;inc_vi=1;esp_be=hex:a1b2c3;esp_bk=hex:b1c2d3;esp_vo=hex:c1d2e3;esp_vi=hex:d1e2f3;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4570102f0a1b2c3b1c2d3c1d2e3d1e2f3a5
+0x95	golden	sta_mac=02a0b1c2d3e4	02a0b1c2d3e4
+0x95	other-mac	sta_mac=fe0d1c2b3a49	fe0d1c2b3a49
+0x95	empty	kind=invalid;error=Truncated	-
+0x95	cut-mac	sta_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x95	trailing-bytes	sta_mac=02a0b1c2d3e4;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4a5
+0x96	golden	sta_mac=02a0b1c2d3e4;bssids=2;b0_mac=3c1d2e3f4a51;b0_delta=0x01020304;b0_down=866;b0_up=0x00010203;b0_rcpi=180;b1_mac=7a6b5c4d3e21;b1_delta=0x0a0b0c0d;b1_down=0x11223344;b1_up=0xfffefdfc;b1_rcpi=96	02a0b1c2d3e4023c1d2e3f4a51010203040000036200010203b47a6b5c4d3e210a0b0c0d11223344fffefdfc60
+0x96	zero-bssids	sta_mac=02a0b1c2d3e4;bssids=0	02a0b1c2d3e400
+0x96	one-bssid	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=250;b0_down=1201;b0_up=573;b0_rcpi=220	02a0b1c2d3e4013c1d2e3f4a51000000fa000004b10000023ddc
+0x96	rcpi-reserved-221	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=0;b0_down=0;b0_up=0;b0_rcpi=221	02a0b1c2d3e4013c1d2e3f4a51000000000000000000000000dd
+0x96	rcpi-reserved-255	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=0xffffffff;b0_down=0xffffffff;b0_up=0xffffffff;b0_rcpi=255	02a0b1c2d3e4013c1d2e3f4a51ffffffffffffffffffffffffff
+0x96	empty	kind=invalid;error=Truncated	-
+0x96	cut-sta-mac	sta_mac=hex:02a0b1;kind=invalid;error=Truncated	02a0b1
+0x96	missing-bssids-count	sta_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0x96	bssids-overstated	sta_mac=02a0b1c2d3e4;bssids=2;b0_mac=3c1d2e3f4a51;b0_delta=250;b0_down=1201;b0_up=573;b0_rcpi=180;kind=invalid;error=Truncated	02a0b1c2d3e4023c1d2e3f4a51000000fa000004b10000023db4
+0x96	cut-delta	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=hex:010203;kind=invalid;error=Truncated	02a0b1c2d3e4013c1d2e3f4a51010203
+0x96	missing-rcpi	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=250;b0_down=1201;b0_up=573;kind=invalid;error=Truncated	02a0b1c2d3e4013c1d2e3f4a51000000fa000004b10000023d
+0x96	trailing-bytes	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_delta=250;b0_down=1201;b0_up=573;b0_rcpi=180;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4013c1d2e3f4a51000000fa000004b10000023db4a5
+0x96	zero-bssids-trailing	sta_mac=02a0b1c2d3e4;bssids=0;trailing=hex:00;kind=invalid;error=TrailingBytes	02a0b1c2d3e40000
+0x97	golden	op_class=115;chans=2;c0_ch=36;c0_stas=2;c0_s0_mac=02a0b1c2d3e4;c0_s1_mac=3c1d2e3f4a51;c1_ch=44;c1_stas=1;c1_s0_mac=7a6b5c4d3e21	7302240202a0b1c2d3e43c1d2e3f4a512c017a6b5c4d3e21
+0x97	zero-chans	op_class=81;chans=0	5100
+0x97	channel-zero-stas	op_class=81;chans=2;c0_ch=1;c0_stas=0;c1_ch=6;c1_stas=1;c1_s0_mac=02a0b1c2d3e4	51020100060102a0b1c2d3e4
+0x97	three-chans	op_class=131;chans=3;c0_ch=1;c0_stas=1;c0_s0_mac=02a0b1c2d3e4;c1_ch=5;c1_stas=1;c1_s0_mac=3c1d2e3f4a51;c2_ch=233;c2_stas=1;c2_s0_mac=7a6b5c4d3e21	8303010102a0b1c2d3e405013c1d2e3f4a51e9017a6b5c4d3e21
+0x97	empty	kind=invalid;error=Truncated	-
+0x97	missing-chans-count	op_class=115;kind=invalid;error=Truncated	73
+0x97	chans-overstated	op_class=115;chans=2;c0_ch=36;c0_stas=1;c0_s0_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	7302240102a0b1c2d3e4
+0x97	missing-stas-count	op_class=115;chans=1;c0_ch=36;kind=invalid;error=Truncated	730124
+0x97	stas-overstated	op_class=115;chans=1;c0_ch=36;c0_stas=2;c0_s0_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	7301240202a0b1c2d3e4
+0x97	cut-sta-mac	op_class=115;chans=1;c0_ch=36;c0_stas=1;c0_s0_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	7301240102a0b1c2d3
+0x97	second-opclass-block	op_class=115;chans=1;c0_ch=36;c0_stas=1;c0_s0_mac=02a0b1c2d3e4;trailing=hex:51010601020304050607;kind=invalid;error=TrailingBytes	7301240102a0b1c2d3e451010601020304050607
+0x97	zero-chans-trailing	op_class=81;chans=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	5100a5
+0x98	golden	op_class=115;stas=2;s0_mac=02a0b1c2d3e4;s0_ch=36;s0_delta=0x01020304;s0_rcpi=150;s1_mac=3c1d2e3f4a51;s1_ch=44;s1_delta=0x0a0b0c0d;s1_rcpi=88	730202a0b1c2d3e42401020304963c1d2e3f4a512c0a0b0c0d58
+0x98	zero-stas	op_class=81;stas=0	5100
+0x98	one-sta	op_class=81;stas=1;s0_mac=7a6b5c4d3e21;s0_ch=11;s0_delta=1500;s0_rcpi=220	51017a6b5c4d3e210b000005dcdc
+0x98	rcpi-reserved-221	op_class=81;stas=1;s0_mac=7a6b5c4d3e21;s0_ch=6;s0_delta=0;s0_rcpi=221	51017a6b5c4d3e210600000000dd
+0x98	rcpi-reserved-255	op_class=81;stas=1;s0_mac=7a6b5c4d3e21;s0_ch=6;s0_delta=0xffffffff;s0_rcpi=255	51017a6b5c4d3e2106ffffffffff
+0x98	empty	kind=invalid;error=Truncated	-
+0x98	missing-stas-count	op_class=115;kind=invalid;error=Truncated	73
+0x98	stas-overstated	op_class=115;stas=2;s0_mac=02a0b1c2d3e4;s0_ch=36;s0_delta=0x01020304;s0_rcpi=150;kind=invalid;error=Truncated	730202a0b1c2d3e4240102030496
+0x98	cut-delta	op_class=115;stas=1;s0_mac=02a0b1c2d3e4;s0_ch=36;s0_delta=hex:0102;kind=invalid;error=Truncated	730102a0b1c2d3e4240102
+0x98	missing-rcpi	op_class=115;stas=1;s0_mac=02a0b1c2d3e4;s0_ch=36;s0_delta=0x01020304;kind=invalid;error=Truncated	730102a0b1c2d3e42401020304
+0x98	trailing-bytes	op_class=115;stas=1;s0_mac=02a0b1c2d3e4;s0_ch=36;s0_delta=0x01020304;s0_rcpi=150;trailing=hex:a5;kind=invalid;error=TrailingBytes	730102a0b1c2d3e4240102030496a5
+0x99	golden	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=1;ssid_len=7;ssid=hex:486f6d654e6574;reports=2;r0_len=3;r0_class=115;r0_chans=hex:242c;r1_len=2;r1_class=81;r1_chans=hex:06;num_ids=3;ids=hex:0030dd	02a0b1c2d3e473ff3c1d2e3f4a510107486f6d654e6574020373242c025106030030dd
+0x99	wildcard-ssid-bssid	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=ffffffffffff;detail=0;ssid_len=0;ssid=hex:;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e47324ffffffffffff00000000
+0x99	channel-255-no-reports	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=0;ssid_len=7;ssid=hex:486f6d654e6574;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e473ff3c1d2e3f4a510007486f6d654e65740000
+0x99	detail-2	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=2;ssid_len=4;ssid=hex:43616665;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e451063c1d2e3f4a510204436166650000
+0x99	detail-1-zero-ids	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e451063c1d2e3f4a510104436166650000
+0x99	detail-reserved-3	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=3;ssid_len=0;ssid=hex:;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e451063c1d2e3f4a5103000000
+0x99	detail-reserved-ff	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=0xff;ssid_len=0;ssid=hex:;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e451063c1d2e3f4a51ff000000
+0x99	report-len-1-empty-list	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=0;ssid_len=0;ssid=hex:;reports=1;r0_len=1;r0_class=115;r0_chans=hex:;num_ids=0;ids=hex:	02a0b1c2d3e473ff3c1d2e3f4a51000001017300
+0x99	ids-with-detail-0	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=0;ssid_len=0;ssid=hex:;reports=0;num_ids=2;ids=hex:0030	02a0b1c2d3e451063c1d2e3f4a51000000020030
+0x99	ssid-32	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=0;ssid_len=32;ssid=hex:4142434445464748494a4b4c4d4e4f505152535455565758595a303132333435;reports=0;num_ids=0;ids=hex:	02a0b1c2d3e451063c1d2e3f4a5100204142434445464748494a4b4c4d4e4f505152535455565758595a3031323334350000
+0x99	upstream-default-spec	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=3c1d2e3f4a51;detail=1;ssid_len=7;ssid=hex:486f6d654e6574;reports=1;r0_len=2;r0_class=115;r0_chans=hex:24;num_ids=0;ids=hex:	02a0b1c2d3e473243c1d2e3f4a510107486f6d654e65740102732400
+0x99	upstream-default	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=3c1d2e3f4a51;detail=1;ssid_len=7;ssid=hex:486f6d654e6574;reports=1;r0_len=2;r0_class=115;r0_chans=hex:24;kind=lenient;decoded=num-ids-zero	02a0b1c2d3e473243c1d2e3f4a510107486f6d654e657401027324
+0x99	upstream-channel-0-fallback-spec	sta_mac=02a0b1c2d3e4;op_class=81;channel=255;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;reports=1;r0_len=2;r0_class=81;r0_chans=hex:ff;num_ids=0;ids=hex:	02a0b1c2d3e451ff3c1d2e3f4a51010443616665010251ff00
+0x99	upstream-channel-0-fallback	sta_mac=02a0b1c2d3e4;op_class=81;channel=255;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;reports=1;r0_len=2;r0_class=81;r0_chans=hex:ff;kind=lenient;decoded=num-ids-zero	02a0b1c2d3e451ff3c1d2e3f4a51010443616665010251ff
+0x99	upstream-forwarded-reports-spec	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=ffffffffffff;detail=0;ssid_len=7;ssid=hex:486f6d654e6574;reports=2;r0_len=4;r0_class=115;r0_chans=hex:242830;r1_len=2;r1_class=118;r1_chans=hex:34;num_ids=0;ids=hex:	02a0b1c2d3e473ffffffffffffff0007486f6d654e657402047324283002763400
+0x99	upstream-forwarded-reports	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=ffffffffffff;detail=0;ssid_len=7;ssid=hex:486f6d654e6574;reports=2;r0_len=4;r0_class=115;r0_chans=hex:242830;r1_len=2;r1_class=118;r1_chans=hex:34;kind=lenient;decoded=num-ids-zero	02a0b1c2d3e473ffffffffffffff0007486f6d654e6574020473242830027634
+0x99	upstream-forwarded-detail-2-spec	sta_mac=02a0b1c2d3e4;op_class=128;channel=255;bssid=3c1d2e3f4a51;detail=2;ssid_len=0;ssid=hex:;reports=1;r0_len=3;r0_class=128;r0_chans=hex:2a9b;num_ids=0;ids=hex:	02a0b1c2d3e480ff3c1d2e3f4a5102000103802a9b00
+0x99	upstream-forwarded-detail-2	sta_mac=02a0b1c2d3e4;op_class=128;channel=255;bssid=3c1d2e3f4a51;detail=2;ssid_len=0;ssid=hex:;reports=1;r0_len=3;r0_class=128;r0_chans=hex:2a9b;kind=lenient;decoded=num-ids-zero	02a0b1c2d3e480ff3c1d2e3f4a5102000103802a9b
+0x99	upstream-detail-1-no-elements-spec	sta_mac=02a0b1c2d3e4;op_class=118;channel=52;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;reports=1;r0_len=2;r0_class=118;r0_chans=hex:34;num_ids=0;ids=hex:	02a0b1c2d3e476343c1d2e3f4a510104436166650102763400
+0x99	upstream-detail-1-no-elements	sta_mac=02a0b1c2d3e4;op_class=118;channel=52;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;reports=1;r0_len=2;r0_class=118;r0_chans=hex:34;kind=lenient;decoded=num-ids-zero	02a0b1c2d3e476343c1d2e3f4a5101044361666501027634
+0x99	upstream-with-elements	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=1;ssid_len=7;ssid=hex:486f6d654e6574;reports=1;r0_len=2;r0_class=115;r0_chans=hex:24;num_ids=2;ids=hex:0030	02a0b1c2d3e473ff3c1d2e3f4a510107486f6d654e657401027324020030
+0x99	empty	kind=invalid;error=Truncated	-
+0x99	cut-sta-mac	sta_mac=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0x99	missing-ssid-len	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=3c1d2e3f4a51;detail=1;kind=invalid;error=Truncated	02a0b1c2d3e473243c1d2e3f4a5101
+0x99	ssid-overstated	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=3c1d2e3f4a51;detail=1;ssid_len=7;ssid=hex:486f6d65;kind=invalid;error=Truncated	02a0b1c2d3e473243c1d2e3f4a510107486f6d65
+0x99	missing-num-report	sta_mac=02a0b1c2d3e4;op_class=115;channel=36;bssid=3c1d2e3f4a51;detail=1;ssid_len=4;ssid=hex:43616665;kind=invalid;error=Truncated	02a0b1c2d3e473243c1d2e3f4a51010443616665
+0x99	reports-overstated	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=0;ssid_len=0;ssid=hex:;reports=2;r0_len=2;r0_class=115;r0_chans=hex:24;kind=invalid;error=Truncated	02a0b1c2d3e473ff3c1d2e3f4a51000002027324
+0x99	report-len-overstated	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=0;ssid_len=0;ssid=hex:;reports=1;r0_len=4;r0_class=115;r0_chans=hex:24;kind=invalid;error=Truncated	02a0b1c2d3e473ff3c1d2e3f4a51000001047324
+0x99	report-len-0	sta_mac=02a0b1c2d3e4;op_class=115;channel=255;bssid=3c1d2e3f4a51;detail=0;ssid_len=0;ssid=hex:;reports=1;r0_len=0;num_ids=0;ids=hex:;kind=invalid;error=InvalidLength	02a0b1c2d3e473ff3c1d2e3f4a510000010000
+0x99	ids-overstated	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=1;ssid_len=0;ssid=hex:;reports=0;num_ids=3;ids=hex:0030;kind=invalid;error=Truncated	02a0b1c2d3e451063c1d2e3f4a51010000030030
+0x99	trailing-bytes	sta_mac=02a0b1c2d3e4;op_class=81;channel=6;bssid=3c1d2e3f4a51;detail=1;ssid_len=0;ssid=hex:;reports=0;num_ids=1;ids=hex:dd;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e451063c1d2e3f4a5101000001dda5
+0x9a	golden	sta_mac=02a0b1c2d3e4;reserved=0;reports=2;r0_id=39;r0_len=29;r0_body=hex:0100057324010203040506070800640a9c403c1d2e3f4a51010a0b0c0d;r1_id=39;r1_len=3;r1_body=hex:020405	02a0b1c2d3e40002271d0100057324010203040506070800640a9c403c1d2e3f4a51010a0b0c0d2703020405
+0x9a	zero-reports	sta_mac=02a0b1c2d3e4;reserved=0;reports=0	02a0b1c2d3e40000
+0x9a	one-report	sta_mac=3c1d2e3f4a51;reserved=0;reports=1;r0_id=39;r0_len=3;r0_body=hex:070205	3c1d2e3f4a5100012703070205
+0x9a	element-len-0	sta_mac=02a0b1c2d3e4;reserved=0;reports=1;r0_id=39;r0_len=0;r0_body=hex:	02a0b1c2d3e400012700
+0x9a	other-element-id	sta_mac=02a0b1c2d3e4;reserved=0;reports=1;r0_id=0xdd;r0_len=4;r0_body=hex:00506f9a	02a0b1c2d3e40001dd0400506f9a
+0x9a	reserved-set	sta_mac=02a0b1c2d3e4;reserved=0xff;reports=1;r0_id=39;r0_len=3;r0_body=hex:070205	02a0b1c2d3e4ff012703070205
+0x9a	reserved-clear	sta_mac=02a0b1c2d3e4;reserved=0x00;reports=1;r0_id=39;r0_len=3;r0_body=hex:070205	02a0b1c2d3e400012703070205
+0x9a	empty	kind=invalid;error=Truncated	-
+0x9a	cut-sta-mac	sta_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x9a	missing-reports-count	sta_mac=02a0b1c2d3e4;reserved=0;kind=invalid;error=Truncated	02a0b1c2d3e400
+0x9a	reports-overstated	sta_mac=02a0b1c2d3e4;reserved=0;reports=2;r0_id=39;r0_len=3;r0_body=hex:070205;kind=invalid;error=Truncated	02a0b1c2d3e400022703070205
+0x9a	element-len-overstated	sta_mac=02a0b1c2d3e4;reserved=0;reports=1;r0_id=39;r0_len=29;r0_body=hex:070205;kind=invalid;error=Truncated	02a0b1c2d3e40001271d070205
+0x9a	missing-element-len	sta_mac=02a0b1c2d3e4;reserved=0;reports=1;r0_id=39;kind=invalid;error=Truncated	02a0b1c2d3e4000127
+0x9a	trailing-bytes	sta_mac=02a0b1c2d3e4;reserved=0;reports=1;r0_id=39;r0_len=3;r0_body=hex:070205;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e400012703070205a5
+0x9a	zero-reports-trailing	sta_mac=02a0b1c2d3e4;reserved=0;reports=0;trailing=hex:2700;kind=invalid;error=TrailingBytes	02a0b1c2d3e400002700
+0xa2	golden	sta_mac=02a0b1c2d3e4;bytes_sent=0x01020304;bytes_recv=0x05060708;pkts_sent=0x090a0b0c;pkts_recv=0x0d0e0f10;tx_errors=17;rx_errors=258;retrans=0x00abcdef	02a0b1c2d3e40102030405060708090a0b0c0d0e0f10000000110000010200abcdef
+0xa2	all-zero	sta_mac=02a0b1c2d3e4;bytes_sent=0;bytes_recv=0;pkts_sent=0;pkts_recv=0;tx_errors=0;rx_errors=0;retrans=0	02a0b1c2d3e400000000000000000000000000000000000000000000000000000000
+0xa2	all-max	sta_mac=3c1d2e3f4a51;bytes_sent=0xffffffff;bytes_recv=0xfffffffe;pkts_sent=0xfffffffd;pkts_recv=0xfffffffc;tx_errors=0xfffffffb;rx_errors=0xfffffffa;retrans=0xfffffff9	3c1d2e3f4a51fffffffffffffffefffffffdfffffffcfffffffbfffffffafffffff9
+0xa2	empty	kind=invalid;error=Truncated	-
+0xa2	cut-sta-mac	sta_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0xa2	cut-last-counter	sta_mac=02a0b1c2d3e4;bytes_sent=0x01020304;bytes_recv=0x05060708;pkts_sent=0x090a0b0c;pkts_recv=0x0d0e0f10;tx_errors=17;rx_errors=258;retrans=hex:00abcd;kind=invalid;error=Truncated	02a0b1c2d3e40102030405060708090a0b0c0d0e0f10000000110000010200abcd
+0xa2	missing-last-counter	sta_mac=02a0b1c2d3e4;bytes_sent=0x01020304;bytes_recv=0x05060708;pkts_sent=0x090a0b0c;pkts_recv=0x0d0e0f10;tx_errors=17;rx_errors=258;kind=invalid;error=Truncated	02a0b1c2d3e40102030405060708090a0b0c0d0e0f100000001100000102
+0xa2	trailing-bytes	sta_mac=02a0b1c2d3e4;bytes_sent=0x01020304;bytes_recv=0x05060708;pkts_sent=0x090a0b0c;pkts_recv=0x0d0e0f10;tx_errors=17;rx_errors=258;retrans=0x00abcdef;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e40102030405060708090a0b0c0d0e0f10000000110000010200abcdefa5
+0xc5	golden	interval=0x0a0b0c0d	0d0c0b0a
+0xc5	one-second	interval=1000	e8030000
+0xc5	zero	interval=0	00000000
+0xc5	max	interval=0xffffffff	ffffffff
+0xc5	empty	kind=invalid;error=Truncated	-
+0xc5	cut-interval	interval=hex:0d0c0b;kind=invalid;error=Truncated	0d0c0b
+0xc5	trailing-bytes	interval=0x0a0b0c0d;trailing=hex:a5;kind=invalid;error=TrailingBytes	0d0c0b0aa5
+0xc6	golden	ruid=02a0b1c2d3e0;noise=161;transmit=12;rx_self=34;rx_other=56	02a0b1c2d3e0a10c2238
+0xc6	all-zero	ruid=02a0b1c2d3f0;noise=0;transmit=0;rx_self=0;rx_other=0	02a0b1c2d3f000000000
+0xc6	all-max	ruid=02a0b1c2d3f0;noise=255;transmit=255;rx_self=255;rx_other=255	02a0b1c2d3f0ffffffff
+0xc6	empty	kind=invalid;error=Truncated	-
+0xc6	cut-ruid	ruid=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0xc6	missing-rx-other	ruid=02a0b1c2d3e0;noise=161;transmit=12;rx_self=34;kind=invalid;error=Truncated	02a0b1c2d3e0a10c22
+0xc6	trailing-bytes	ruid=02a0b1c2d3e0;noise=161;transmit=12;rx_self=34;rx_other=56;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e0a10c2238a5
+0xc7	golden	bssid=02a0b1c2d3e4;uni_sent=0x01020304;uni_recv=0x05060708;multi_sent=0x090a0b0c;multi_recv=0x0d0e0f10;bcast_sent=258;bcast_recv=0x00abcdef	02a0b1c2d3e40102030405060708090a0b0c0d0e0f100000010200abcdef
+0xc7	upstream-all-zero	bssid=000000000000;uni_sent=0;uni_recv=0;multi_sent=0;multi_recv=0;bcast_sent=0;bcast_recv=0	000000000000000000000000000000000000000000000000000000000000
+0xc7	all-max	bssid=3c1d2e3f4a51;uni_sent=0xffffffff;uni_recv=0xfffffffe;multi_sent=0xfffffffd;multi_recv=0xfffffffc;bcast_sent=0xfffffffb;bcast_recv=0xfffffffa	3c1d2e3f4a51fffffffffffffffefffffffdfffffffcfffffffbfffffffa
+0xc7	empty	kind=invalid;error=Truncated	-
+0xc7	cut-bssid	bssid=hex:02a0b1;kind=invalid;error=Truncated	02a0b1
+0xc7	cut-last-counter	bssid=02a0b1c2d3e4;uni_sent=0x01020304;uni_recv=0x05060708;multi_sent=0x090a0b0c;multi_recv=0x0d0e0f10;bcast_sent=258;bcast_recv=hex:00ab;kind=invalid;error=Truncated	02a0b1c2d3e40102030405060708090a0b0c0d0e0f100000010200ab
+0xc7	trailing-bytes	bssid=02a0b1c2d3e4;uni_sent=0x01020304;uni_recv=0x05060708;multi_sent=0x090a0b0c;multi_recv=0x0d0e0f10;bcast_sent=258;bcast_recv=0x00abcdef;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e40102030405060708090a0b0c0d0e0f100000010200abcdefa5
+0xc8	golden	sta_mac=02a0b1c2d3e4;bssids=2;b0_mac=3c1d2e3f4a51;b0_dl=0x01020304;b0_ul=0x05060708;b0_util_rx=0x090a0b0c;b0_util_tx=0x0d0e0f10;b1_mac=7a6b5c4d3e21;b1_dl=866700;b1_ul=6500;b1_util_rx=258;b1_util_tx=0xfedcba98	02a0b1c2d3e4023c1d2e3f4a510102030405060708090a0b0c0d0e0f107a6b5c4d3e21000d398c0000196400000102fedcba98
+0xc8	zero-bssids	sta_mac=02a0b1c2d3e4;bssids=0	02a0b1c2d3e400
+0xc8	one-bssid	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_dl=1201000;b0_ul=573000;b0_util_rx=1000;b0_util_tx=2000	02a0b1c2d3e4013c1d2e3f4a51001253680008be48000003e8000007d0
+0xc8	empty	kind=invalid;error=Truncated	-
+0xc8	cut-sta-mac	sta_mac=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0xc8	missing-bssids-count	sta_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0xc8	bssids-overstated	sta_mac=02a0b1c2d3e4;bssids=2;b0_mac=3c1d2e3f4a51;b0_dl=1201000;b0_ul=573000;b0_util_rx=1000;b0_util_tx=2000;kind=invalid;error=Truncated	02a0b1c2d3e4023c1d2e3f4a51001253680008be48000003e8000007d0
+0xc8	cut-util-tx	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_dl=1201000;b0_ul=573000;b0_util_rx=1000;b0_util_tx=hex:0007;kind=invalid;error=Truncated	02a0b1c2d3e4013c1d2e3f4a51001253680008be48000003e80007
+0xc8	trailing-bytes	sta_mac=02a0b1c2d3e4;bssids=1;b0_mac=3c1d2e3f4a51;b0_dl=1201000;b0_ul=573000;b0_util_rx=1000;b0_util_tx=2000;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e4013c1d2e3f4a51001253680008be48000003e8000007d0a5
+0xc8	zero-bssids-trailing	sta_mac=02a0b1c2d3e4;bssids=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e400a5
+0xb0	golden	sta_mac=02a0b1c2d3e4;tids=3;t0_tid=0;t0_qs=0x12;t1_tid=5;t1_qs=0xfe;t2_tid=7;t2_qs=0x80	02a0b1c2d3e403001205fe0780
+0xb0	zero-tids	sta_mac=02a0b1c2d3e4;tids=0	02a0b1c2d3e400
+0xb0	one-tid	sta_mac=3c1d2e3f4a51;tids=1;t0_tid=6;t0_qs=200	3c1d2e3f4a510106c8
+0xb0	tid-out-of-range-raw	sta_mac=02a0b1c2d3e4;tids=2;t0_tid=15;t0_qs=0;t1_tid=0xff;t1_qs=0xff	02a0b1c2d3e4020f00ffff
+0xb0	empty	kind=invalid;error=Truncated	-
+0xb0	cut-sta-mac	sta_mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0xb0	missing-tids-count	sta_mac=02a0b1c2d3e4;kind=invalid;error=Truncated	02a0b1c2d3e4
+0xb0	tids-overstated	sta_mac=02a0b1c2d3e4;tids=2;t0_tid=0;t0_qs=0x12;kind=invalid;error=Truncated	02a0b1c2d3e4020012
+0xb0	cut-pair	sta_mac=02a0b1c2d3e4;tids=1;t0_tid=5;kind=invalid;error=Truncated	02a0b1c2d3e40105
+0xb0	trailing-bytes	sta_mac=02a0b1c2d3e4;tids=1;t0_tid=6;t0_qs=200;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e40106c8a5
+0xb0	upstream-nine-zero-octets	sta_mac=000000000000;tids=0;trailing=hex:0000;kind=invalid;error=TrailingBytes	000000000000000000

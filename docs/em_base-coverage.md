@@ -52,7 +52,7 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 452 | struct | `em_attrib_t` | em-msg | framing / codes / validation metadata | planned |
 | 458 | struct | `em_tlv_t` | em-msg | framing / codes / validation metadata | planned |
 | 464 | struct | `em_cmdu_t` | em-msg | framing / codes / validation metadata | planned |
-| 475 | struct | `em_client_assoc_event_t` | em-msg | Client Association Event TLV body | planned |
+| 475 | struct | `em_client_assoc_event_t` | em-msg | `ClientAssociationEvent` | ported (em-msg B08) |
 | 482 | alias | `em_enum_type_t` | do not port | C storage alias for enums | n/a |
 | 484 | enum | `em_service_type_t` | em-types | `ServiceType`; `cli` (0x02) and `none` excluded, see D3 | ported |
 | 493 | enum | `em_profile_type_t` | em-types | `ProfileType`; `reserved` and `max` excluded | ported |
@@ -68,13 +68,13 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 583 | struct | `em_unassoc_work_channel_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 595 | struct | `em_unassoc_work_opclass_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 607 | struct | `em_unassoc_work_list_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 620 | struct | `em_unassoc_query_channel_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 633 | struct | `em_unassoc_query_opclass_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 645 | struct | `em_unassoc_query_list_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 665 | struct | `em_unassoc_sta_metric_entry_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 673 | struct | `em_unassoc_sta_metrics_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 679 | struct | `em_unassoc_sta_metric_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 686 | struct | `em_unassoc_sta_link_metrics_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 620 | struct | `em_unassoc_query_channel_t` | em-msg | `UnassociatedQueryChannel` | ported (em-msg B07) |
+| 633 | struct | `em_unassoc_query_opclass_t` | em-msg | `UnassociatedStaLinkMetricsQuery`, with `UnassociatedQueryChannel` | ported (em-msg B07) |
+| 645 | struct | `em_unassoc_query_list_t` | em-msg | no Rust type; the sender's list of operating classes | not needed: one TLV is written per operating class, so the list is not on the wire (0009 D2, B07) |
+| 665 | struct | `em_unassoc_sta_metric_entry_t` | em-msg | no Rust type; an entry of the data model's response list | not needed: the wire form is `UnassociatedStaMetrics` (0009 D2, B07) |
+| 673 | struct | `em_unassoc_sta_metrics_rsp_t` | em-msg | no Rust type; the data model's response list, an input to the sender | not needed: the wire form is `UnassociatedStaLinkMetricsResponse` (0009 D2, B07) |
+| 679 | struct | `em_unassoc_sta_metric_t` | em-msg | `UnassociatedStaMetrics` | ported (em-msg B07) |
+| 686 | struct | `em_unassoc_sta_link_metrics_rsp_t` | em-msg | `UnassociatedStaLinkMetricsResponse`, with `UnassociatedStaMetrics` | ported (em-msg B07) |
 | 692 | enum | `em_tlv_requirement_t` | em-msg | framing / codes / validation metadata | planned |
 | 698 | enum | `em_msg_type_t` | em-types | `MsgType` | ported |
 | 773 | enum | `em_attrib_id_t` | em-msg | framing / codes / validation metadata | planned |
@@ -82,17 +82,17 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 811 | enum | `em_tlv_type_t` | em-types | `TlvType`; `max` excluded | ported |
 | 937 | enum | `em_vendor_airties_tlv_type_t` | em-msg | framing / codes / validation metadata | planned |
 | 943 | enum | `em_channel_pref_reason_t` | em-msg | no Rust type; the reason is a raw 4-bit value on `PreferenceOperatingClass` | not needed: the reason octet is carried raw (0009 D2, B05) |
-| 960 | struct | `em_qos_mgmt_des_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 960 | struct | `em_qos_mgmt_des_t` | em-msg | `QosManagementDescriptor<'a>` | ported (em-msg B09) |
 | 967 | struct | `em_agent_list_agent_t` | em-msg | `Agent` | ported (em-msg B03) |
 | 973 | struct | `em_agent_list_t` | em-msg | `AgentList` | ported (em-msg B03) |
-| 978 | struct | `em_anti_chan_usage_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 978 | struct | `em_anti_chan_usage_t` | em-msg | `AnticipatedChannelUsage<'a>`, with `AnticipatedUsage<'a>` | ported (em-msg B06) |
 | 995 | struct | `em_dpp_bootstrap_uri_t` | em-msg | DPP-related TLV body (consumed by em-easyconnect) | planned |
 | 1002 | struct | `em_cce_indication_t` | em-msg | DPP-related TLV body (consumed by em-easyconnect) | planned |
 | 1006 | struct | `em_encap_dpp_t` | em-msg | DPP-related TLV body (consumed by em-easyconnect) | planned |
-| 1022 | struct | `em_assoc_sts_notif_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1022 | struct | `em_assoc_sts_notif_t` | em-msg | `AssociationStatusNotification`, with `AssociationStatusEntry` | ported (em-msg B08) |
 | 1028 | struct | `em_prof2_error_t` | em-msg | `Profile2ErrorCode` | ported (em-msg B03) |
-| 1035 | struct | `em_cac_term_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1043 | struct | `em_cac_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1035 | struct | `em_cac_term_t` | em-msg | `CacTermination`, with `CacTerminationRadio` | ported (em-msg B06) |
+| 1043 | struct | `em_cac_req_t` | em-msg | `CacRequest`, with `CacRequestRadio` | ported (em-msg B06) |
 | 1053 | struct | `em_timestamp_t` | em-msg | `Timestamp<'a>` | ported (em-msg B05) |
 | 1059 | enum | `em_scanner_type_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1064 | struct | `em_scan_result_id_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
@@ -102,63 +102,63 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 1105 | struct | `em_scan_params_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1115 | struct | `em_channel_scan_req_op_class_t` | em-msg | `ScanOperatingClass<'a>` | ported (em-msg B05) |
 | 1121 | struct | `em_channel_scan_req_t` | em-msg | `ChannelScanRequest<'a>`, with `ScanRequestRadio<'a>` | ported (em-msg B05) |
-| 1130 | struct | `em_higher_layer_data_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1135 | struct | `em_error_code_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1140 | struct | `em_bh_steering_resp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1146 | struct | `em_bh_steering_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1153 | struct | `em_client_assoc_ctrl_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1161 | struct | `em_steering_btm_rprt_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1168 | struct | `em_steering_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1130 | struct | `em_higher_layer_data_t` | em-msg | `HigherLayerData<'a>` | ported (em-msg B08) |
+| 1135 | struct | `em_error_code_t` | em-msg | `ErrorCode` | ported (em-msg B08) |
+| 1140 | struct | `em_bh_steering_resp_t` | em-msg | `BackhaulSteeringResponse` | ported (em-msg B08) |
+| 1146 | struct | `em_bh_steering_req_t` | em-msg | `BackhaulSteeringRequest` | ported (em-msg B08) |
+| 1153 | struct | `em_client_assoc_ctrl_req_t` | em-msg | `ClientAssociationControlRequest` | ported (em-msg B08) |
+| 1161 | struct | `em_steering_btm_rprt_t` | em-msg | `SteeringBtmReport` | ported (em-msg B08) |
+| 1168 | struct | `em_steering_req_t` | em-msg | `SteeringRequest`, with `SteeringMode`, `SteeringTarget` and `SteeringFlags` | ported (em-msg B08) |
 | 1185 | struct | `em_80211_btm_req_reqmode_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1194 | struct | `em_80211_neighbor_report_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1206 | struct | `em_80211_btm_req_var_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1212 | struct | `em_profile2_steering_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1217 | struct | `em_beacon_metrics_resp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1224 | struct | `em_beacon_ap_channel_rprt_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1230 | struct | `em_beacon_element_list_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1235 | struct | `em_beacon_metrics_query_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1248 | struct | `em_unassoc_sta_link_metrics_query_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1256 | struct | `em_assoc_sta_mac_addr_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1260 | struct | `em_assoc_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1268 | struct | `em_assoc_sta_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1274 | struct | `em_assoc_ext_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1282 | struct | `em_assoc_sta_ext_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1212 | struct | `em_profile2_steering_req_t` | em-msg | `Profile2SteeringRequest`, with `Profile2SteeringTarget` | ported (em-msg B08) |
+| 1217 | struct | `em_beacon_metrics_resp_t` | em-msg | `BeaconMetricsResponse<'a>`, with `MeasurementReportElement<'a>` | ported (em-msg B07) |
+| 1224 | struct | `em_beacon_ap_channel_rprt_t` | em-msg | `ApChannelReport<'a>` | ported (em-msg B07) |
+| 1230 | struct | `em_beacon_element_list_t` | em-msg | no Rust type; the element IDs are a counted list | not needed: the element IDs are a borrowed slice, `element_ids` on `BeaconMetricsQuery` (0009 D2, B07) |
+| 1235 | struct | `em_beacon_metrics_query_t` | em-msg | `BeaconMetricsQuery<'a>` | ported (em-msg B07) |
+| 1248 | struct | `em_unassoc_sta_link_metrics_query_t` | em-msg | `UnassociatedStaLinkMetricsQuery`, with `UnassociatedQueryChannel` | ported (em-msg B07) |
+| 1256 | struct | `em_assoc_sta_mac_addr_t` | em-msg | `StaMacAddress` | ported (em-msg B07) |
+| 1260 | struct | `em_assoc_link_metrics_t` | em-msg | `AssociatedStaBssMetrics` | ported (em-msg B07) |
+| 1268 | struct | `em_assoc_sta_link_metrics_t` | em-msg | `AssociatedStaLinkMetrics` | ported (em-msg B07) |
+| 1274 | struct | `em_assoc_ext_link_metrics_t` | em-msg | `ExtendedLinkMetricsBss` | ported (em-msg B07) |
+| 1282 | struct | `em_assoc_sta_ext_link_metrics_t` | em-msg | `AssociatedStaExtendedLinkMetrics` | ported (em-msg B07) |
 | 1288 | struct | `em_assoc_vendor_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1296 | struct | `em_assoc_sta_vendor_link_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1304 | struct | `em_ap_metrics_query_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1304 | struct | `em_ap_metrics_query_t` | em-msg | `ApMetricsQuery` | ported (em-msg B07) |
 | 1309 | struct | `em_ap_radio_id_t` | em-msg | `ApRadioIdentifier` (over `MacValue`) | ported (em-msg B03) |
-| 1313 | struct | `em_ap_metric_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1326 | struct | `em_ap_ext_metric_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1336 | struct | `em_radio_metric_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1344 | struct | `em_assoc_sta_traffic_sts_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1355 | struct | `em_assoc_wifi6_sta_sts_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1313 | struct | `em_ap_metric_t` | em-msg | `ApMetrics` | ported (em-msg B07) |
+| 1326 | struct | `em_ap_ext_metric_t` | em-msg | `ApExtendedMetrics` | ported (em-msg B07) |
+| 1336 | struct | `em_radio_metric_t` | em-msg | `RadioMetrics` | ported (em-msg B07) |
+| 1344 | struct | `em_assoc_sta_traffic_sts_t` | em-msg | `AssociatedStaTrafficStats` | ported (em-msg B07) |
+| 1355 | struct | `em_assoc_wifi6_sta_sts_t` | em-msg | `AssociatedWifi6StaStatusReport`, with `Wifi6TidQueueSize` | ported (em-msg B07) |
 | 1362 | struct | `em_client_info_t` | em-msg | `ClientInfo` | ported (em-msg B04) |
 | 1367 | struct | `em_client_cap_rprt_t` | em-msg | `ClientCapabilityReport<'a>` | ported (em-msg B04) |
 | 1373 | struct | `em_op_class_ch_rprt_t` | em-msg | `OperatingChannel` | ported (em-msg B05) |
 | 1378 | struct | `em_op_channel_rprt_t` | em-msg | `OperatingChannelReport` | ported (em-msg B05) |
-| 1384 | struct | `em_spatial_reuse_rprt_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1384 | struct | `em_spatial_reuse_rprt_t` | em-msg | `SpatialReuseReport`, with `SpatialReuseParameters` | ported (em-msg B06) |
 | 1404 | struct | `em_alarm_samples_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1412 | struct | `em_link_report_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1421 | enum | `em_chan_sel_resp_code_type_t` | em-msg | no Rust type; the code is a raw octet on `ChannelSelectionResponse` | not needed: the response code is carried raw (0009 D2, B05) |
 | 1428 | enum | `em_prof2_error_code_reason_code_type_t` | em-msg | `Profile2ErrorReason` (in `Profile2ErrorCode`) | ported (em-msg B03) |
 | 1446 | struct | `em_channel_sel_rsp_t` | em-msg | `ChannelSelectionResponse` | ported (em-msg B05) |
-| 1451 | struct | `em_spatial_reuse_cfg_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1451 | struct | `em_spatial_reuse_cfg_rsp_t` | em-msg | `SpatialReuseConfigResponse` | ported (em-msg B06) |
 | 1455 | struct | `em_channel_pref_op_class_t` | em-msg | `PreferenceOperatingClass<'a>` | ported (em-msg B05) |
 | 1461 | struct | `em_channel_pref_t` | em-msg | `ChannelPreference<'a>` | ported (em-msg B05) |
 | 1467 | struct | `em_tx_power_limit_t` | em-msg | `TransmitPowerLimit` | ported (em-msg B05) |
-| 1472 | struct | `em_spatial_reuse_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1472 | struct | `em_spatial_reuse_req_t` | em-msg | `SpatialReuseRequest`, with `SpatialReuseParameters` | ported (em-msg B06) |
 | 1490 | struct | `em_radio_op_restrict_channel_t` | em-msg | `RestrictedChannel` | ported (em-msg B05) |
 | 1495 | struct | `em_radio_op_restrict_op_class_t` | em-msg | `RestrictedOperatingClass` | ported (em-msg B05) |
 | 1501 | struct | `em_radio_op_restriction_t` | em-msg | `RadioOperationRestriction` | ported (em-msg B05) |
-| 1508 | struct | `em_cac_comp_rprt_pair_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1513 | struct | `em_cac_comp_rprt_radio_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1522 | struct | `em_cac_comp_rprt_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1528 | struct | `em_cac_avail_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1534 | struct | `em_cac_non_occ_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1540 | struct | `em_cac_active_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1546 | struct | `em_cac_status_rprt_avail_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1551 | struct | `em_cac_status_rprt_non_occ_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1556 | struct | `em_cac_status_rprt_active_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1508 | struct | `em_cac_comp_rprt_pair_t` | em-msg | `CacDetectedPair` | ported (em-msg B06) |
+| 1513 | struct | `em_cac_comp_rprt_radio_t` | em-msg | `CacCompletionRadio` | ported (em-msg B06) |
+| 1522 | struct | `em_cac_comp_rprt_t` | em-msg | `CacCompletionReport` | ported (em-msg B06) |
+| 1528 | struct | `em_cac_avail_t` | em-msg | `CacAvailableChannel` | ported (em-msg B06) |
+| 1534 | struct | `em_cac_non_occ_t` | em-msg | `CacNonOccupancyChannel` | ported (em-msg B06) |
+| 1540 | struct | `em_cac_active_t` | em-msg | `CacActiveChannel` | ported (em-msg B06) |
+| 1546 | struct | `em_cac_status_rprt_avail_t` | em-msg | no Rust type; the counted list is a `Vec` on `CacStatusReport` | not needed: the three counted lists are `Vec`s on `CacStatusReport` (0009 D2, B06) |
+| 1551 | struct | `em_cac_status_rprt_non_occ_t` | em-msg | no Rust type; the counted list is a `Vec` on `CacStatusReport` | not needed: the three counted lists are `Vec`s on `CacStatusReport` (0009 D2, B06) |
+| 1556 | struct | `em_cac_status_rprt_active_t` | em-msg | no Rust type; the counted list is a `Vec` on `CacStatusReport` | not needed: the three counted lists are `Vec`s on `CacStatusReport` (0009 D2, B06) |
 | 1561 | struct | `em_media_spec_data_t` | em-msg | no Rust type; the bytes are `LocalInterface::media_info` | not needed: media-specific info is carried as raw bytes (0009 D2, B01) |
 | 1571 | struct | `em_local_interface_t` | em-msg | `LocalInterface<'a>` | ported (em-msg B01) |
 | 1576 | struct | `em_device_info_type_t` | em-msg | `DeviceInformation<'a>` | ported (em-msg B01) |
@@ -179,24 +179,24 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 1656 | struct | `em_assoc_clients_bss_t` | em-msg | `AssociatedBss` | ported (em-msg B03) |
 | 1662 | struct | `em_assoc_clients_t` | em-msg | `AssociatedClients` | ported (em-msg B03) |
 | 1667 | struct | `em_bssid_t` | em-msg | `Bssid` (over `MacValue`) | ported (em-msg B03) |
-| 1671 | struct | `em_status_code_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1675 | struct | `em_reason_code_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1671 | struct | `em_status_code_t` | em-msg | `StatusCode` | ported (em-msg B08) |
+| 1675 | struct | `em_reason_code_t` | em-msg | `ReasonCode` | ported (em-msg B08) |
 | 1679 | struct | `em_affiliated_sta_metrics_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1689 | struct | `em_bss_conf_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1693 | struct | `em_bss_conf_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1697 | struct | `em_8021q_settings_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1703 | struct | `em_traffic_sep_policy_ssid_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1709 | struct | `em_traffic_sep_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1697 | struct | `em_8021q_settings_t` | em-msg | `Default8021QSettings` | ported (em-msg B09) |
+| 1703 | struct | `em_traffic_sep_policy_ssid_t` | em-msg | no Rust type; the packed struct is not used on the wire (audit 175) | not needed: the wire form is `TrafficSeparationSsid<'a>` (0009 D2, B09) |
+| 1709 | struct | `em_traffic_sep_policy_t` | em-msg | no Rust type; the packed struct is not used on the wire (audit 175) | not needed: the wire form is `TrafficSeparationPolicy<'a>` (0009 D2, B09) |
 | 1714 | struct | `em_bh_akm_suite_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1719 | struct | `em_fh_akm_suite_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1724 | struct | `em_fh_akm_suite_info_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1729 | struct | `em_bh_akm_suite_info_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1734 | struct | `em_akm_suite_info_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1738 | struct | `em_bh_sta_radio_cap_t` | em-msg | `BackhaulStaRadioCapabilities` | ported (em-msg B04) |
-| 1745 | struct | `em_anti_channel_pref_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1745 | struct | `em_anti_channel_pref_t` | em-msg | `AnticipatedChannelPreference<'a>`, with `AnticipatedOperatingClass<'a>` | ported (em-msg B06) |
 | 1750 | struct | `em_profile_2_ap_cap_t` | em-msg | `Profile2ApCapability` | ported (em-msg B04) |
-| 1761 | struct | `em_service_prio_rule_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 1771 | struct | `em_dscp_map_table_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 1761 | struct | `em_service_prio_rule_t` | em-msg | `ServicePrioritizationRule` | ported (em-msg B09) |
+| 1771 | struct | `em_dscp_map_table_t` | em-msg | `DscpMappingTable` | ported (em-msg B09) |
 | 1775 | struct | `em_assoc_sta_traffic_stats_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1786 | struct | `em_source_info_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 1790 | struct | `em_tunneled_msg_type_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
@@ -231,24 +231,24 @@ Generated from a typedef scan of the pinned header (struct/enum/union blocks, pl
 | 2027 | struct | `em_eht_operations_bss_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2043 | struct | `em_eht_operations_radio_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2050 | struct | `em_eht_operations_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2055 | struct | `em_avail_spectrum_inquiry_req_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2059 | struct | `em_avail_spectrum_inquiry_rsp_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 2055 | struct | `em_avail_spectrum_inquiry_req_t` | em-msg | `AvailableSpectrumInquiryRequest<'a>` (over `SpectrumInquiryObject<'a>`) | ported (em-msg B06) |
+| 2059 | struct | `em_avail_spectrum_inquiry_rsp_t` | em-msg | `AvailableSpectrumInquiryResponse<'a>` (over `SpectrumInquiryObject<'a>`) | ported (em-msg B06) |
 | 2063 | struct | `em_channel_scan_cap_radio_t` | em-msg | `ScanCapabilityRadio<'a>` | ported (em-msg B05) |
 | 2073 | struct | `em_channel_scan_cap_t` | em-msg | `ChannelScanCapabilities<'a>` | ported (em-msg B05) |
 | 2079 | enum | `em_cac_method_type_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2086 | struct | `em_cac_cap_method_t` | em-msg | `CacMethod<'a>` | ported (em-msg B04) |
 | 2093 | struct | `em_cac_cap_radio_t` | em-msg | `CacRadio<'a>` | ported (em-msg B04) |
 | 2099 | struct | `em_cac_cap_t` | em-msg | `CacCapabilities<'a>` | ported (em-msg B04) |
-| 2105 | struct | `em_metric_cltn_interval_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2109 | struct | `em_steering_policy_sta_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2114 | struct | `em_steering_policy_radio_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2121 | struct | `em_steering_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2128 | struct | `em_metric_rprt_policy_radio_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2136 | struct | `em_metric_rprt_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 2105 | struct | `em_metric_cltn_interval_t` | em-msg | `MetricCollectionInterval` | ported (em-msg B07) |
+| 2109 | struct | `em_steering_policy_sta_t` | em-msg | no Rust type; the MAC list is a `Vec` on `SteeringPolicy` | not needed: the MAC lists are `Vec`s on `SteeringPolicy` (0009 D2, B09) |
+| 2114 | struct | `em_steering_policy_radio_t` | em-msg | `RadioSteeringPolicy` | ported (em-msg B09) |
+| 2121 | struct | `em_steering_policy_t` | em-msg | `SteeringPolicy`, with `RadioSteeringPolicy` | ported (em-msg B09) |
+| 2128 | struct | `em_metric_rprt_policy_radio_t` | em-msg | `RadioMetricReportingPolicy` | ported (em-msg B09) |
+| 2136 | struct | `em_metric_rprt_policy_t` | em-msg | `MetricReportingPolicy`, with `RadioMetricReportingPolicy` | ported (em-msg B09) |
 | 2142 | struct | `em_channel_scan_rprt_policy_t` | em-msg | `ChannelScanReportingPolicy` | ported (em-msg B05) |
-| 2147 | struct | `em_unsuccessful_assoc_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2153 | struct | `em_bh_bss_config_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
-| 2160 | struct | `em_qos_mgmt_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
+| 2147 | struct | `em_unsuccessful_assoc_policy_t` | em-msg | `UnsuccessfulAssociationPolicy` | ported (em-msg B09) |
+| 2153 | struct | `em_bh_bss_config_t` | em-msg | `BackhaulBssConfiguration` | ported (em-msg B09) |
+| 2160 | struct | `em_qos_mgmt_policy_t` | em-msg | no Rust type; the packed struct is not used on the wire (audit 270) | not needed: the wire form is `QosManagementPolicy` (0009 D2, B09) |
 | 2168 | struct | `em_link_stats_alarm_cfg_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2174 | struct | `em_client_filters_cfg_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
 | 2179 | struct | `em_vendor_policy_t` | em-msg | TLV body / wire code; confirm wire vs internal at em-msg port | planned |
