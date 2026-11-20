@@ -11,7 +11,7 @@
 //! - TLVs that are not in the table are accepted.
 //! - Only mandatory rows are length-checked, and only on the first TLV of
 //!   their type. The check is `3 + value.len() < min_len`, where `min_len` is
-//!   upstream's minimum or, for the 25 rows in [`crate::spec_min`], the spec's.
+//!   upstream's minimum or, for the 26 rows in [`crate::spec_min`], the spec's.
 //! - Optional rows are never a violation, whatever their length.
 //! - A message type with an empty table, or with no table, gets framing
 //!   checks only. So does AP-Autoconfiguration WSC without an M1 or M2
@@ -19,7 +19,7 @@
 //!
 //! Intentional differences: validation is stateless (upstream never resets
 //! its presence flags or error counter), errors are returned instead of
-//! printed, and no length is subtracted before it is checked. For 25 rows
+//! printed, and no length is subtracted before it is checked. For 26 rows
 //! where upstream's minimum rejects TLVs the spec allows, the minimum is the
 //! spec's ([`crate::spec_min`], note 0008 D8).
 //!
@@ -1087,6 +1087,31 @@ mod tests {
     }
 
     // Spec minimum lengths ---------------------------------------------------
+
+    #[test]
+    fn link_metric_query_validates_the_two_octet_minimum() {
+        let query = crate::bodies::LinkMetricQuery::new(0, None, 0).unwrap();
+        let mut builder = MsgBuilder::new(&header_for(MsgType::LINK_METRIC_QUERY), AL_SAP_BUDGET);
+        builder.body(&query);
+        let cmdu = builder.finish().unwrap();
+        let (_, tlv_area) = CmduHeader::parse(&cmdu).unwrap();
+        assert_eq!(
+            TlvIter::new(tlv_area).next().unwrap().unwrap().value,
+            &[0, 0]
+        );
+        let one_octet = [(TlvType::LINK_METRIC_QUERY, vec![0])];
+        for profile in PROFILES {
+            assert_eq!(validate(&cmdu, ProfileType(profile)), Ok(()));
+            assert_eq!(
+                check(MsgType::LINK_METRIC_QUERY, &one_octet, profile),
+                table_error(vec![violation(
+                    TlvType::LINK_METRIC_QUERY,
+                    ViolationKind::TooShort,
+                    "table 6-16 of IEEE-1905-1",
+                )])
+            );
+        }
+    }
 
     /// The violation kinds that `tlv_type` gets in a message of `msg_type`.
     fn kinds_for(

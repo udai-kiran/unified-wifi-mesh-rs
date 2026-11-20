@@ -7,7 +7,8 @@
 
 use em_types::TlvType;
 
-use crate::error::FramingError;
+use crate::bodies::{TlvBody, TlvBodyLenient};
+use crate::error::{DecodeError, FramingError};
 
 /// Length of a TLV header (type byte and 2-byte length), in bytes.
 pub(crate) const TLV_HEADER_LEN: usize = 3;
@@ -19,6 +20,41 @@ pub struct Tlv<'a> {
     pub tlv_type: TlvType,
     /// Value bytes, without the 3-byte TLV header.
     pub value: &'a [u8],
+}
+
+impl<'a> Tlv<'a> {
+    /// Decodes the value as body `B` (strict, note 0009 D4).
+    ///
+    /// # Errors
+    ///
+    /// [`DecodeError::WrongType`] if the TLV is not of type `B::TLV_TYPE`, otherwise
+    /// the error of `B::decode_value`.
+    pub fn decode<B: TlvBody<'a>>(&self) -> Result<B, DecodeError> {
+        self.check_type::<B>()?;
+        B::decode_value(self.value)
+    }
+
+    /// Decodes the value as body `B` in its lenient form; `Ok(None)` is upstream's empty value.
+    ///
+    /// # Errors
+    ///
+    /// [`DecodeError::WrongType`] if the TLV is not of type `B::TLV_TYPE`, otherwise
+    /// the error of `B::decode_value_lenient`.
+    pub fn decode_lenient<B: TlvBodyLenient<'a>>(&self) -> Result<Option<B>, DecodeError> {
+        self.check_type::<B>()?;
+        B::decode_value_lenient(self.value)
+    }
+
+    fn check_type<B: TlvBody<'a>>(&self) -> Result<(), DecodeError> {
+        if self.tlv_type == B::TLV_TYPE {
+            Ok(())
+        } else {
+            Err(DecodeError::WrongType {
+                expected: B::TLV_TYPE,
+                found: self.tlv_type,
+            })
+        }
+    }
 }
 
 /// Walks the TLVs of a TLV area (the bytes after the CMDU header).

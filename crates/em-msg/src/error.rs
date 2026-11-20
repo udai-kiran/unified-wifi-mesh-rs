@@ -4,6 +4,8 @@
 
 use core::fmt;
 
+use em_types::TlvType;
+
 /// A CMDU or its TLV area is malformed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramingError {
@@ -44,6 +46,8 @@ pub enum BuildError {
     TlvTooLong,
     /// End of Message cannot be added with `tlv`; `finish` adds it.
     EndOfMessageNotAllowed,
+    /// A TLV body could not be encoded (see [`MsgBuilder::body`](crate::MsgBuilder::body)).
+    Encode(EncodeError),
 }
 
 impl fmt::Display for BuildError {
@@ -57,11 +61,19 @@ impl fmt::Display for BuildError {
                     "End of Message is added by finish and cannot be added as a TLV"
                 )
             }
+            Self::Encode(error) => write!(f, "a TLV body could not be encoded: {error}"),
         }
     }
 }
 
-impl std::error::Error for BuildError {}
+impl std::error::Error for BuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encode(error) => Some(error),
+            Self::OverBudget | Self::TlvTooLong | Self::EndOfMessageNotAllowed => None,
+        }
+    }
+}
 
 /// A TLV value could not be decoded.
 ///
@@ -81,6 +93,24 @@ pub enum DecodeError {
         /// Number of bytes left over.
         remaining: usize,
     },
+    /// The TLV is not of the type the body is decoded as.
+    WrongType {
+        /// Type of the body that was asked for.
+        expected: TlvType,
+        /// Type of the TLV that was given.
+        found: TlvType,
+    },
+    /// A length or set-count field, or the length of the whole value, cannot describe the bytes.
+    /// For example, a transmitter link metric value of 12 octets holds two MACs and no pairs.
+    InvalidLength {
+        /// The value of the field, or the length of the whole value.
+        len: usize,
+    },
+    /// A field value that changes the layout is outside the range the body accepts.
+    ValueOutOfRange {
+        /// The value that was read.
+        value: u32,
+    },
 }
 
 impl fmt::Display for DecodeError {
@@ -94,6 +124,15 @@ impl fmt::Display for DecodeError {
             }
             Self::TrailingBytes { remaining } => {
                 write!(f, "the TLV value has {remaining} unexpected trailing bytes")
+            }
+            Self::WrongType { expected, found } => {
+                write!(f, "expected a TLV of type {expected:?}, found {found:?}")
+            }
+            Self::InvalidLength { len } => {
+                write!(f, "the length field value {len} does not fit the TLV value")
+            }
+            Self::ValueOutOfRange { value } => {
+                write!(f, "the field value {value} is out of range")
             }
         }
     }
@@ -114,6 +153,13 @@ pub enum EncodeError {
         /// Largest count the field can hold.
         max: usize,
     },
+    /// A collection is shorter than the body requires, so the bytes would not decode strictly.
+    CountTooSmall {
+        /// Length of the collection.
+        len: usize,
+        /// Smallest count the body accepts.
+        min: usize,
+    },
     /// A value does not fit in its field.
     ValueTooLarge {
         /// The value that was given.
@@ -132,6 +178,12 @@ impl fmt::Display for EncodeError {
                     "a collection of {len} items does not fit in its count field (largest count {max})"
                 )
             }
+            Self::CountTooSmall { len, min } => {
+                write!(
+                    f,
+                    "a collection of {len} items is below the smallest count {min} the body accepts"
+                )
+            }
             Self::ValueTooLarge { value, max } => {
                 write!(
                     f,
@@ -143,3 +195,49 @@ impl fmt::Display for EncodeError {
 }
 
 impl std::error::Error for EncodeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_kinds_have_readable_messages() {
+        let wrong_type = DecodeError::WrongType {
+            expected: TlvType::WSC,
+            found: TlvType(0xF8),
+        };
+        assert_eq!(
+            wrong_type.to_string(),
+            "expected a TLV of type WSC(0x11), found TlvType(0xF8)"
+        );
+        assert_eq!(
+            DecodeError::InvalidLength { len: 5 }.to_string(),
+            "the length field value 5 does not fit the TLV value"
+        );
+        assert_eq!(
+            DecodeError::ValueOutOfRange { value: 9 }.to_string(),
+            "the field value 9 is out of range"
+        );
+        let encode = BuildError::Encode(EncodeError::CountTooLarge { len: 256, max: 255 });
+        assert_eq!(
+            encode.to_string(),
+            "a TLV body could not be encoded: a collection of 256 items does not fit in its count field (largest count 255)"
+        );
+    }
+
+    #[test]
+    fn count_too_small_has_a_readable_message() {
+        assert_eq!(
+            EncodeError::CountTooSmall { len: 0, min: 1 }.to_string(),
+            "a collection of 0 items is below the smallest count 1 the body accepts"
+        );
+    }
+
+    #[test]
+    fn build_error_encode_has_the_encode_error_as_source() {
+        use std::error::Error;
+        let inner = EncodeError::ValueTooLarge { value: 2, max: 1 };
+        assert!(BuildError::Encode(inner).source().is_some());
+        assert!(BuildError::OverBudget.source().is_none());
+    }
+}

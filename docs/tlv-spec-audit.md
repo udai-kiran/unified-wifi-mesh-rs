@@ -72,9 +72,12 @@ The port decisions follow 0008 D7 and D8. Each of the 288 rows that differ from 
 
 | port_rule | Rows | Meaning |
 |---|---:|---|
-| SPEC | 268 | The spec settles the point; the port follows it |
+| SPEC | 269 | The spec settles the point; the port follows it |
 | UPSTREAM | 5 | The spec is silent; the port keeps upstream's bytes |
-| UNSURE | 15 | The spec text can be read two ways, or defers to a document not available; the consumer decides and records it in its note |
+| UNSURE | 14 | The spec text can be read two ways, or defers to a document not available; the consumer decides and records it in its note |
+
+Counts as of 2026-11-20: row 321 (Link Metric Query length) moved from UNSURE to SPEC by the user's
+decision in note 0009 D3, so SPEC is 269 and UNSURE 14. The total of 288 is unchanged.
 
 How the rules were assigned:
 - **First pass:** six parallel agents decided the rows from the spec text, reading sections
@@ -103,7 +106,7 @@ How the rules were assigned:
     favours `0x03`.
   - **314:** Table 6-10 repeats the interface group "k – 1 times", so one interface is always
     present. Upstream's 19-octet minimum is the spec minimum.
-  - **321, 340:** see UNSURE below.
+  - **321:** decided as SPEC on 2026-11-20 (note 0009 D3). **340:** see UNSURE below.
   - The finding text of rows 311, 314, 332 and 337 over-states the defect.
 
 **UPSTREAM (5):** byte order the TLV table does not name (D6 keeps upstream's bytes):
@@ -113,7 +116,7 @@ How the rules were assigned:
 - TID-to-Link `Num_Mapping` (19, little-endian);
 - Metric Collection Interval (195, little-endian).
 
-**UNSURE (15):**
+**UNSURE (14):**
 - HE and Wi-Fi 6 MCS set order, and MCS NSS Length meaning, which are defined only in IEEE 802.11
   (rows 3, 221, 222). Row 3's byte order is still big-endian per the spec.
 - TID-to-Link Direction values, from IEEE 802.11be (23);
@@ -124,7 +127,6 @@ How the rules were assigned:
 - reporting a BSS outside the requested radios (200);
 - which BSSs `Num_BSS` counts (231);
 - 1905.1 bridging tuple count `L` (315);
-- Link Metric Query length: Table 6-16 fixes 8 octets but omits the EUI-48 for "all neighbors" (321);
 - WSC minimum length, which 1905.1 leaves to WSC v2.0.7 Tables 8/9, not available (340);
 - the neighbor-device group repeat (317);
 - 6 GHz in SupportedFreqBand (337).

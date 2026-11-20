@@ -1,0 +1,58 @@
+# builder B (Codex), 2026-11-20
+# Sources: .claude/tasks/b01-builder-b/spec-ieee1905-b01.md; docs/data/tlv-spec-audit.tsv lines 303-318 (port_rule; supplied port decisions apply); docs/0009-tlv-bodies.md D2-D4.
+# 0x0b: OUI (3 octets), vendor information (remaining octets).
+# 0x01: AL MAC address (6 octets).
+# 0x02: interface MAC address (6 octets).
+# 0x03: AL MAC (6), interface count (1), then each interface: MAC (6), media type (2, big-endian), info length (1), info (length octets).
+# 0x04: tuple count (1), then each tuple: MAC count (1), followed by that many MAC addresses (6 octets each).
+# 0x06: local interface MAC (6), then zero or more neighbor MAC addresses (6 octets each); no count octet.
+# 0x07: local interface MAC (6), then zero or more neighbor AL MACs (6) and flag octets (bridge bit 7, reserved bits 6-0); no count octet.
+tlv	case	fields	hex
+0x0b	golden	oui=hex:506f9a;info=hex:01020304a5	506f9a01020304a5
+0x0b	oui-only	oui=hex:506f9a;info=hex:	506f9a
+0x0b	cut-oui	oui=hex:506f;kind=invalid;error=Truncated	506f
+0x0b	empty	kind=invalid;error=Truncated	-
+0x01	golden	al_mac=021122334455	021122334455
+0x01	cut-mac	al_mac=hex:0211223344;kind=invalid;error=Truncated	0211223344
+0x01	seven-octets	al_mac=021122334455;trailing=hex:a5;kind=invalid;error=TrailingBytes	021122334455a5
+0x01	empty	kind=invalid;error=Truncated	-
+0x02	golden	mac=02a0b1c2d3e1	02a0b1c2d3e1
+0x02	cut-mac	mac=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x02	seven-octets	mac=02a0b1c2d3e1;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e1a5
+0x02	empty	kind=invalid;error=Truncated	-
+0x03	golden	al_mac=021122334455;ifaces=2;if0_mac=02a0b1c2d3e1;if0_media=0x0105;if0_info=hex:02f0e1d2c3b440022a9b;if1_mac=02a0b1c2d3e2;if1_media=0x0001;if1_info=hex:	0211223344550202a0b1c2d3e101050a02f0e1d2c3b440022a9b02a0b1c2d3e2000100
+0x03	zero-interfaces	al_mac=021122334455;ifaces=0	02112233445500
+0x03	info-absent-ethernet	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e2;if0_media=0x0001;if0_info=hex:	0211223344550102a0b1c2d3e2000100
+0x03	info-present-80211	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e3;if0_media=0x0104;if0_info=hex:02f0e1d2c3b490010700	0211223344550102a0b1c2d3e301040a02f0e1d2c3b490010700
+0x03	info-present-1901	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e3;if0_media=0x0201;if0_info=hex:0a1b2c3d4e5f60	0211223344550102a0b1c2d3e30201070a1b2c3d4e5f60
+0x03	three-interfaces	al_mac=021122334455;ifaces=3;if0_mac=02a0b1c2d3e1;if0_media=0x0105;if0_info=hex:02f0e1d2c3b440022a9b;if1_mac=02a0b1c2d3e2;if1_media=0x0001;if1_info=hex:;if2_mac=02a0b1c2d3e3;if2_media=0x0201;if2_info=hex:0a1b2c3d4e5f60	0211223344550302a0b1c2d3e101050a02f0e1d2c3b440022a9b02a0b1c2d3e200010002a0b1c2d3e30201070a1b2c3d4e5f60
+0x03	media-80211-info-empty	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e1;if0_media=0x0105;if0_info=hex:	0211223344550102a0b1c2d3e1010500
+0x03	media-0108-info-10	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e1;if0_media=0x0108;if0_info=hex:02f0e1d2c3b440022a9b	0211223344550102a0b1c2d3e101080a02f0e1d2c3b440022a9b
+0x03	media-unknown	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e2;if0_media=0xffff;if0_info=hex:	0211223344550102a0b1c2d3e2ffff00
+0x03	cut-al-mac	al_mac=hex:0211223344;kind=invalid;error=Truncated	0211223344
+0x03	missing-count	al_mac=021122334455;kind=invalid;error=Truncated	021122334455
+0x03	count-overstates	al_mac=021122334455;ifaces=2;if0_mac=02a0b1c2d3e2;if0_media=0x0001;if0_info=hex:;kind=invalid;error=Truncated	0211223344550202a0b1c2d3e2000100
+0x03	cut-iface-mac	al_mac=021122334455;ifaces=1;if0_mac=hex:02a0b1c2;kind=invalid;error=Truncated	0211223344550102a0b1c2
+0x03	cut-media-type	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e1;if0_media=hex:01;kind=invalid;error=Truncated	0211223344550102a0b1c2d3e101
+0x03	info-length-overstates	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e1;if0_media=0x0105;if0_info_len=10;if0_info=hex:02f0e1d2c3b4;kind=invalid;error=Truncated	0211223344550102a0b1c2d3e101050a02f0e1d2c3b4
+0x03	trailing-bytes	al_mac=021122334455;ifaces=1;if0_mac=02a0b1c2d3e2;if0_media=0x0001;if0_info=hex:;trailing=hex:a5;kind=invalid;error=TrailingBytes	0211223344550102a0b1c2d3e2000100a5
+0x04	golden	tuples=2;t0_count=2;t0_mac0=02a0b1c2d3e1;t0_mac1=02a0b1c2d3e2;t1_count=1;t1_mac0=02a0b1c2d3e3	020202a0b1c2d3e102a0b1c2d3e20102a0b1c2d3e3
+0x04	zero-tuples	tuples=0	00
+0x04	tuple-zero-macs	tuples=2;t0_count=0;t1_count=1;t1_mac0=02a0b1c2d3e3	02000102a0b1c2d3e3
+0x04	empty	kind=invalid;error=Truncated	-
+0x04	tuples-overstate	tuples=2;t0_count=1;t0_mac0=02a0b1c2d3e1;kind=invalid;error=Truncated	020102a0b1c2d3e1
+0x04	tuple-count-overstates	tuples=1;t0_count=2;t0_mac0=02a0b1c2d3e1;kind=invalid;error=Truncated	010202a0b1c2d3e1
+0x04	cut-mac	tuples=1;t0_count=1;t0_mac0=hex:02a0b1c2d3;kind=invalid;error=Truncated	010102a0b1c2d3
+0x04	trailing-bytes	tuples=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0x06	golden	local_mac=02a0b1c2d3e1;neighbors=2;nb0_mac=3c1d2e3f4a5b;nb1_mac=7a6b5c4d3e2f	02a0b1c2d3e13c1d2e3f4a5b7a6b5c4d3e2f
+0x06	no-neighbors	local_mac=02a0b1c2d3e1;neighbors=0	02a0b1c2d3e1
+0x06	empty	kind=invalid;error=Truncated	-
+0x06	cut-local-mac	local_mac=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0x06	partial-neighbor	local_mac=02a0b1c2d3e1;neighbors=1;nb0_mac=3c1d2e3f4a5b;partial=hex:7a6b5c;kind=invalid;error=Truncated	02a0b1c2d3e13c1d2e3f4a5b7a6b5c
+0x07	golden	local_mac=02a0b1c2d3e1;neighbors=2;nb0_al_mac=0266778899aa;nb0_bridge=1;nb0_reserved=0;nb1_al_mac=02bbccddeeff;nb1_bridge=0;nb1_reserved=0	02a0b1c2d3e10266778899aa8002bbccddeeff00
+0x07	no-neighbors	local_mac=02a0b1c2d3e1;neighbors=0	02a0b1c2d3e1
+0x07	bridge-clear	local_mac=02a0b1c2d3e2;neighbors=1;nb0_al_mac=02bbccddeeff;nb0_bridge=0;nb0_reserved=0	02a0b1c2d3e202bbccddeeff00
+0x07	reserved-bits-set	local_mac=02a0b1c2d3e1;neighbors=2;nb0_al_mac=0266778899aa;nb0_bridge=1;nb0_reserved=0x7f;nb1_al_mac=02bbccddeeff;nb1_bridge=0;nb1_reserved=0x7f	02a0b1c2d3e10266778899aaff02bbccddeeff7f
+0x07	empty	kind=invalid;error=Truncated	-
+0x07	cut-local-mac	local_mac=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0x07	partial-neighbor	local_mac=02a0b1c2d3e1;neighbors=1;nb0_al_mac=0266778899aa;nb0_bridge=1;nb0_reserved=0;partial=hex:02bbccddeeff;kind=invalid;error=Truncated	02a0b1c2d3e10266778899aa8002bbccddeeff

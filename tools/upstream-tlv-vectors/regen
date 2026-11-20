@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""Generate or check the pinned upstream TLV sender vectors.
+
+Extracts the listed struct definitions and sender functions from pinned git objects
+(`git --no-replace-objects show <pin>:<path>`), compiles them as free functions against
+shim.hpp with c++ -std=c++17, runs vectors.cpp and writes
+crates/em-msg/tests/data/upstream_tlv_vectors.tsv. The upstream working tree is never read.
+A sizeof/offsetof probe of every extracted struct is checked against PROBE_EXPECTED and
+recorded in the fixture as `# Probe:` lines. The harness output must hold exactly the cases of
+expected_case_inputs(), in its order, and each case's inputs must equal the values given there.
+check_row() then checks each row's return value and bytes.
+
+Exit 0: success; 1: invalid extraction or content, or --check found a stale fixture;
+2: usage, I/O (including a missing fixture under --check), git, compiler, harness or probe failure.
+"""
+# SPDX-License-Identifier: Apache-2.0
+
+import argparse
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+PIN = "ba4180ba36748629f10c20babc4320dd69c9db4f"
+ROOT = Path(__file__).resolve().parents[2]
+TOOL = ROOT / "tools/upstream-tlv-vectors"
+FIXTURE = ROOT / "crates/em-msg/tests/data/upstream_tlv_vectors.tsv"
+
+BASE_H = "inc/em_base.h"
+EM_CPP = "src/em/em.cpp"
+CONFIG_CPP = "src/em/config/em_configuration.cpp"
+
+# Structs copied verbatim into structs.inc: (path, first line, last line, expected first line,
+# struct name). The struct must be a `typedef struct { ... } __attribute__((__packed__)) NAME;`.
+STRUCTS = [
+    (BASE_H, 1750, 1759, "typedef struct {", "em_profile_2_ap_cap_t"),
+]
+
+# Sender functions copied into senders.inc: (path, first line, last line, expected first line,
+# class qualifier). The qualifier is removed from the first line so the function compiles as a
+# free function. To add a sender, append one entry here and its cases to vectors.cpp and
+# expected_cases() (see README.md).
+SENDERS = [
+    (EM_CPP, 1772, 1797, "short em_t::create_prof_2_tlv(unsigned char *buff)", "em_t"),
+    (CONFIG_CPP, 3847, 3869,
+     "unsigned short em_configuration_t::create_error_code_tlv(unsigned char *buff, int val, "
+     "mac_addr_t sta_mac)", "em_configuration_t"),
+]
+
+# Layout of each extracted struct as GCC lays it out. Bit-fields have no offsetof, so the probe
+# covers the whole size and the whole-byte members.
+PROBE_EXPECTED = {
+    "em_profile_2_ap_cap_t": {"sizeof": 4, "max_prior_rule": 0, "reserved1": 1, "max_vid_count": 3},
+}
+
+PROBE_PREFIX = "# Probe: "
+COLUMN_LINE = "case\tfunction\tinputs\treturn\thex"
+HEX_OR_DASH = re.compile(r"-|(?:[0-9a-f]{2})+")
+
+
+class ContentError(Exception):
+    pass
+
+
+class ToolError(Exception):
+    pass
+
+
+def run(command, **kwargs):
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+    except OSError as exc:
+        raise ToolError(f"cannot run {command[0]}: {exc}") from exc
+    if result.returncode:
+        detail = (result.stderr + result.stdout).decode("utf-8", "replace").strip()
+        raise ToolError(f"command failed ({result.returncode}): {' '.join(map(str, command))}\n{detail}")
+    return result.stdout
+
+
+def read_sources(upstream):
+    paths = sorted({entry[0] for entry in STRUCTS} | {entry[0] for entry in SENDERS})
+    return {path: run(["git", "--no-replace-objects", "-C", str(upstream), "show", f"{PIN}:{path}"])
+            for path in paths}
+
+
+def mask_noncode(text):
+    """Mask comments and ordinary C/C++ literals while preserving positions."""
+    pattern = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+    return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), text)
+
+
+def extract_range(source, path, first, last, signature):
+    """Return lines first..last (1-based, inclusive) after checking the start and the braces."""
+    try:
+        lines = source.decode("utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError as exc:
+        raise ContentError(f"invalid UTF-8 in {path}") from exc
+    where = f"{path}:{first}-{last}"
+    if first < 1 or last < first or len(lines) < last:
+        raise ContentError(f"missing range {where}")
+    if lines[first - 1].strip() != signature:
+        raise ContentError(f"unexpected start of {where}")
+    if not lines[last - 1].strip():
+        raise ContentError(f"range {where} ends on a blank line")
+    chunk = "".join(lines[first - 1:last])
+    code = mask_noncode(chunk)
+    depth = 0
+    outer_close = None
+    for position, char in enumerate(code):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth < 0:
+                raise ContentError(f"unbalanced braces in {where}")
+            if depth == 0 and outer_close is None:
+                outer_close = position
+    if outer_close is None or depth != 0:
+        raise ContentError(f"unbalanced braces in {where}")
+    return chunk, code[outer_close + 1:].strip()
+
+
+def extract_struct(source, entry):
+    path, first, last, signature, name = entry
+    chunk, tail = extract_range(source, path, first, last, signature)
+    if tail != f"__attribute__((__packed__)) {name};":
+        raise ContentError(f"unexpected end of {path}:{first}-{last}: {tail!r}")
+    return f"// {path}:{first}-{last}\n{chunk}"
+
+
+def strip_qualifier(first_line, qualifier):
+    """Turn `T Class::name(...)` into `T name(...)`; only the declaration line is touched."""
+    pattern = re.compile(rf"\b{re.escape(qualifier)}::")
+    if len(pattern.findall(first_line)) != 1:
+        raise ContentError(f"expected exactly one {qualifier}:: in {first_line.strip()!r}")
+    return pattern.sub("", first_line, count=1)
+
+
+def extract_sender(source, entry):
+    path, first, last, signature, qualifier = entry
+    chunk, tail = extract_range(source, path, first, last, signature)
+    if tail:
+        raise ContentError(f"unexpected end of {path}:{first}-{last}: {tail!r}")
+    declaration, newline, body = chunk.partition("\n")
+    return f"// {path}:{first}-{last}\n{strip_qualifier(declaration, qualifier)}{newline}{body}"
+
+
+def write_extractions(sources, scratch):
+    structs = [extract_struct(sources[entry[0]], entry) for entry in STRUCTS]
+    senders = [extract_sender(sources[entry[0]], entry) for entry in SENDERS]
+    (scratch / "structs.inc").write_text("\n".join(structs), encoding="utf-8")
+    (scratch / "senders.inc").write_text("\n".join(senders), encoding="utf-8")
+    for name in ("shim.hpp", "vectors.cpp"):
+        (scratch / name).write_bytes((TOOL / name).read_bytes())
+
+
+def compile_and_run(scratch, cxx):
+    """Compile vectors.cpp in scratch and run it. Returns (body bytes, compiler version, flags)."""
+    env = os.environ.copy()
+    env["CCACHE_DISABLE"] = "1"  # some build environments have a read-only ccache directory
+    cxxflags = ["-std=c++17", "-O2"]
+    lines = run([cxx, "--version"], env=env).decode("utf-8", "replace").splitlines()
+    if not lines:
+        raise ToolError(f"compiler {cxx} did not report a version")
+    run([cxx, *cxxflags, "vectors.cpp", "-o", "vectors"], cwd=scratch, env=env)
+    output_path = scratch / "body.tsv"
+    run([str(scratch / "vectors"), str(output_path)], cwd=scratch, env=env)
+    return output_path.read_bytes(), lines[0], cxxflags
+
+
+def parse_probe(body):
+    """Return {struct: {member: value}} from the `# Probe:` lines of the harness output."""
+    probes = {}
+    for line in body.decode("ascii", "replace").splitlines():
+        if not line.startswith("# Probe:"):
+            continue
+        if not line.startswith(PROBE_PREFIX):
+            raise ToolError(f"malformed probe line {line!r}")
+        parts = line[len(PROBE_PREFIX):].split()
+        if len(parts) < 2 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", parts[0]):
+            raise ToolError(f"malformed probe line {line!r}")
+        name, *items = parts
+        if name in probes:
+            raise ToolError(f"duplicate probe for {name}")
+        values = {}
+        has_sizeof = False
+        for item in items:
+            key, separator, value = item.partition("=")
+            member = re.fullmatch(r"offsetof\(([A-Za-z_][A-Za-z0-9_]*)\)", key)
+            if member:
+                key = member.group(1)
+            if (not separator or (not member and key != "sizeof")
+                    or not re.fullmatch(r"[0-9]+", value) or key in values):
+                raise ToolError(f"malformed probe item {item!r} for {name}")
+            try:
+                values[key] = int(value)
+            except ValueError as exc:
+                raise ToolError(f"malformed probe item {item!r} for {name}") from exc
+            if not member and key == "sizeof":
+                has_sizeof = True
+        if not has_sizeof:
+            raise ToolError(f"missing sizeof in probe for {name}")
+        probes[name] = values
+    return probes
+
+
+def check_probe(body):
+    actual = parse_probe(body)
+    if actual != PROBE_EXPECTED:
+        raise ToolError(f"sizeof/offsetof probe mismatch: expected {PROBE_EXPECTED}, got {actual}")
+
+
+def expected_case_inputs():
+    """The exact input fields for each (function, case), in fixture order."""
+    rows = {("em_t::create_prof_2_tlv", "default"): {"fill": "ff"}}
+    for value in (0, 1, 255, 256):
+        for suffix in ("null", "mac"):
+            key = ("em_configuration_t::create_error_code_tlv", f"val-{value}-{suffix}")
+            rows[key] = {"fill": "ff", "val": str(value),
+                         "sta_mac": "null" if suffix == "null" else "021122334455"}
+    return rows
+
+
+def expected_cases():
+    """The exact (function, case) rows the fixture must hold, in order."""
+    return list(expected_case_inputs())
+
+
+def _fields(text):
+    result = {}
+    for pair in text.split(";"):
+        key, separator, value = pair.partition("=")
+        if not separator or not re.fullmatch(r"[a-z_]+", key) or key in result or not value:
+            raise ContentError(f"invalid or duplicate input field in {text!r}")
+        result[key] = value
+    return result
+
+
+def validate_body(body):
+    """Reject an incomplete or inconsistent harness result. Returns the data rows."""
+    try:
+        lines = body.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ContentError("harness output is not ASCII") from exc
+    if not body.endswith(b"\n"):
+        raise ContentError("harness output does not end with a newline")
+    data = [line for line in lines if not line.startswith("#")]
+    if not data or data[0] != COLUMN_LINE:
+        raise ContentError("missing column line")
+    rows = [line.split("\t") for line in data[1:]]
+    keys = []
+    expected_inputs = expected_case_inputs()
+    for row in rows:
+        if len(row) != 5 or any(not column for column in row):
+            raise ContentError(f"invalid TSV row {row}")
+        case, function, inputs, returned, hex_text = row
+        key = (function, case)
+        keys.append(key)
+        try:
+            actual_inputs = _fields(inputs)
+            if key not in expected_inputs:
+                raise ContentError(f"{function}/{case}: unexpected case")
+            if actual_inputs != expected_inputs[key]:
+                raise ContentError(f"{function}/{case}: inputs differ from expected: "
+                                   f"expected {expected_inputs[key]}, got {actual_inputs}")
+            check_row(case, function, actual_inputs, returned, hex_text)
+        except (KeyError, ValueError) as exc:
+            raise ContentError(f"{function}/{case}: {exc}") from exc
+    if len(set(keys)) != len(keys):
+        raise ContentError("duplicate (function, case) row")
+    expected = expected_cases()
+    if keys != expected:
+        missing = [key for key in expected if key not in keys]
+        raise ContentError(f"case list differs from expected; missing {missing}, got {keys}")
+    return rows
+
+
+def check_row(case, function, inputs, returned, hex_text):
+    if not re.fullmatch(r"[0-9]+", returned) or not HEX_OR_DASH.fullmatch(hex_text):
+        raise ContentError(f"{function}/{case}: bad return or hex")
+    data = b"" if hex_text == "-" else bytes.fromhex(hex_text)
+    if int(returned) != len(data):
+        raise ContentError(f"{function}/{case}: return {returned} does not match {len(data)} bytes")
+    if function == "em_t::create_prof_2_tlv":
+        if set(inputs) != {"fill"} or len(data) != PROBE_EXPECTED["em_profile_2_ap_cap_t"]["sizeof"]:
+            raise ContentError(f"{function}/{case}: wrong inputs or length")
+        # src/em/em.cpp:1772-1797 at ba4180b sets max_prior_rule, reserved1 and
+        # max_vid_count to 0 and only dpp_onboarding to 1 in the bit fields.
+        # GCC places dpp_onboarding at 0x10 in the third byte for this layout.
+        if data != bytes((0x00, 0x00, 0x10, 0x00)):
+            raise ContentError(f"{function}/{case}: unexpected Profile-2 bytes {hex_text}")
+    elif function == "em_configuration_t::create_error_code_tlv":
+        if set(inputs) != {"fill", "val", "sta_mac"} or len(data) != 7:
+            raise ContentError(f"{function}/{case}: wrong inputs or length")
+        # memcpy of an int copies its low byte on the little-endian build host.
+        if data[0] != int(inputs["val"]) & 0xFF:
+            raise ContentError(f"{function}/{case}: first octet is not the low byte of val")
+        if inputs["sta_mac"] == "null":
+            expected_mac = bytes(6)
+        elif re.fullmatch(r"(?:[0-9a-f]{2}){6}", inputs["sta_mac"]):
+            expected_mac = bytes.fromhex(inputs["sta_mac"])
+        else:
+            raise ContentError(f"{function}/{case}: bad sta_mac")
+        if data[1:] != expected_mac:
+            raise ContentError(f"{function}/{case}: MAC octets differ from sta_mac")
+    else:
+        raise ContentError(f"unexpected function {function}")
+
+
+def build_fixture(body, cxx, cxx_version, cxxflags):
+    header = ["# Generated by tools/upstream-tlv-vectors/regen; do not edit.\n",
+              f"# Upstream: rdkcentral/unified-wifi-mesh @ {PIN}\n",
+              "# Extraction command: git --no-replace-objects -C <upstream> show <pin>:<path>\n"]
+    for path, first, last, _, name in STRUCTS:
+        header.append(f"# Extract struct {name}: git show {PIN}:{path} lines {first}-{last}\n")
+    for path, first, last, signature, qualifier in SENDERS:
+        header.append(f"# Extract function ({qualifier}:: removed): git show {PIN}:{path} lines {first}-{last}\n")
+    header.extend([f"# C++ compiler: {cxx_version}\n",
+                   f"# Compile: {cxx} {' '.join(cxxflags)} vectors.cpp -o vectors\n",
+                   "# Run: ./vectors <output>\n",
+                   "# Regenerate: python3 tools/upstream-tlv-vectors/regen\n",
+                   "# Check: python3 tools/upstream-tlv-vectors/regen --check\n",
+                   "# Fields: case, function, inputs, return (bytes written), hex (lowercase; '-' is empty).\n",
+                   "# Probe lines give the GCC layout of each extracted struct.\n"])
+    return "".join(header).encode("utf-8") + body
+
+
+def write_atomically(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+        os.chmod(name, 0o644)
+        os.replace(name, path)
+    except BaseException as original:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup:
+            raise ToolError(f"atomic write failed: {original}; cannot remove temporary file {name}: {cleanup}") from original
+        raise
+
+
+def generate(upstream, cxx):
+    """Build the whole fixture in memory. Returns (fixture bytes, data rows)."""
+    sources = read_sources(upstream)
+    with tempfile.TemporaryDirectory(prefix="upstream-tlv-") as tmp:
+        scratch = Path(tmp)
+        write_extractions(sources, scratch)
+        body, cxx_version, cxxflags = compile_and_run(scratch, cxx)
+    check_probe(body)
+    rows = validate_body(body)
+    return build_fixture(body, cxx, cxx_version, cxxflags), rows
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--upstream", type=Path, default=ROOT.parent / "unified-wifi-mesh")
+    parser.add_argument("--out", type=Path, default=FIXTURE)
+    parser.add_argument("--cxx", default="c++")
+    parser.add_argument("--check", action="store_true",
+                        help="rebuild in memory and compare the whole fixture; write nothing")
+    args = parser.parse_args(argv)
+    try:
+        data, rows = generate(args.upstream, args.cxx)
+        if args.check:
+            if args.out.read_bytes() != data:
+                raise ContentError(f"fixture differs: {args.out}")
+        else:
+            write_atomically(args.out, data)
+        print(f"ok: {len(rows)} rows")
+        return 0
+    except (ContentError, KeyError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (ToolError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted: revision 4** (2026-11-18; revisions 1–3 superseded) |
+| Status | **Accepted: revision 4** (2026-11-18; revisions 1–3 superseded). Amendments A1–A4 |
 | Date | 2026-11-18 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-types`; ownership of every type in `inc/em_base.h` ([coverage table](em_base-coverage.md)); porting order in `STATUS.md` |
@@ -493,6 +493,13 @@ Two clarifications of D5:
   byte-oriented check, and it is intentional.
 - **MAC context in errors.** `from_bytes` does not know the interface's MAC address. The caller
   that loads names from the kernel or from persisted data attaches it when it reports the error.
+
+### A4 (2026-11-20, note 0009): two IEEE 1905.1 TLV codes added
+
+[0009](0009-tlv-bodies.md) D1 adds Push Button Event Notification (0x12, IEEE 1905.1 §6.4.19)
+and Push Button Join Notification (0x13, §6.4.20) to `TlvType` as `spec` codes. Upstream's enum
+has neither, so they go in the `ADDITIONS` table of `codes.rs`. The generated upstream enum
+fixture does not change.
 
 ## Review resolution
 

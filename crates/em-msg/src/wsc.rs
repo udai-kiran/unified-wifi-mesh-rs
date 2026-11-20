@@ -6,9 +6,14 @@
 //! An AP-Autoconfiguration WSC message carries a WSC TLV whose attributes
 //! (2-byte id, 2-byte length, value; big-endian) include the Message Type
 //! attribute `0x1022`. Its first value byte says M1 or M2.
+//!
+//! The module also has the attribute walker ([`WscAttrIter`]) and writer
+//! ([`write_wsc_attr`]) that the WSC bodies are built on (note 0009, D5).
 
 use em_types::TlvType;
 
+use crate::body::{Reader, Writer};
+use crate::error::{DecodeError, EncodeError};
 use crate::tlv::TlvIter;
 
 /// WSC message type M1 (`em_wsc_msg_type_m1`).
@@ -41,6 +46,79 @@ pub fn wsc_msg_type(tlv_area: &[u8]) -> Option<u8> {
         }
     }
     None
+}
+
+/// One WSC attribute: id and value, without the 4-byte attribute header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WscAttr<'a> {
+    /// Attribute id (big-endian on the wire).
+    pub id: u16,
+    /// Value bytes.
+    pub value: &'a [u8],
+}
+
+/// Walks the attributes of a WSC TLV value (or of decrypted settings): 2-byte id,
+/// 2-byte length, value, all big-endian.
+///
+/// An empty input yields nothing. An attribute whose header or value is cut
+/// short yields [`DecodeError::Truncated`]; after an error the iterator yields
+/// nothing more. Unlike [`wsc_msg_type`], which follows upstream and ends a
+/// walk quietly at a short attribute, this walker reports the error.
+#[derive(Debug)]
+pub struct WscAttrIter<'a> {
+    reader: Reader<'a>,
+    finished: bool,
+}
+
+impl<'a> WscAttrIter<'a> {
+    /// Starts a walk over `value`.
+    #[must_use]
+    pub fn new(value: &'a [u8]) -> Self {
+        Self {
+            reader: Reader::new(value),
+            finished: false,
+        }
+    }
+
+    fn read_attr(&mut self) -> Result<WscAttr<'a>, DecodeError> {
+        let id = self.reader.be_u16()?;
+        let len = usize::from(self.reader.be_u16()?);
+        let value = self.reader.bytes(len)?;
+        Ok(WscAttr { id, value })
+    }
+}
+
+impl<'a> Iterator for WscAttrIter<'a> {
+    type Item = Result<WscAttr<'a>, DecodeError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished || self.reader.remaining() == 0 {
+            return None;
+        }
+        let result = self.read_attr();
+        if result.is_err() {
+            self.finished = true;
+        }
+        Some(result)
+    }
+}
+
+/// Writes one WSC attribute: id, length, value.
+///
+/// # Errors
+///
+/// [`EncodeError::CountTooLarge`] if `value` is longer than 65535 bytes; nothing is written.
+pub fn write_wsc_attr(writer: &mut Writer, id: u16, value: &[u8]) -> Result<(), EncodeError> {
+    let Ok(len) = u16::try_from(value.len()) else {
+        return Err(EncodeError::CountTooLarge {
+            len: value.len(),
+            max: usize::from(u16::MAX),
+        });
+    };
+    writer.be_u16(id);
+    writer.be_u16(len);
+    writer.bytes(value);
+    Ok(())
 }
 
 /// Looks for the Message Type attribute in the value of one WSC TLV.
@@ -205,5 +283,178 @@ mod tests {
     fn only_the_first_value_byte_is_used() {
         let bytes = area(&[tlv(TlvType::WSC, &attr(0x1022, &[WSC_M2, WSC_M1])), end()]);
         assert_eq!(wsc_msg_type(&bytes), Some(WSC_M2));
+    }
+
+    // The attribute walker and writer.
+
+    fn walk(value: &[u8]) -> Vec<Result<WscAttr<'_>, DecodeError>> {
+        WscAttrIter::new(value).take(MAX_ITEMS).collect()
+    }
+
+    /// Bound for collecting an iterator in tests, so a runaway iterator fails the test instead of exhausting memory.
+    const MAX_ITEMS: usize = 64;
+
+    #[test]
+    fn empty_input_has_no_attributes() {
+        assert_eq!(walk(&[]).len(), 0);
+    }
+
+    #[test]
+    fn attributes_round_trip_through_the_writer() {
+        let mut writer = Writer::new();
+        write_wsc_attr(&mut writer, 0x1022, &[0x04]).unwrap();
+        write_wsc_attr(&mut writer, 0x104A, &[0x10]).unwrap();
+        write_wsc_attr(&mut writer, 0x1021, b"vendor").unwrap();
+        let bytes = writer.into_bytes();
+        assert_eq!(bytes, attr_bytes_for_round_trip());
+        assert_eq!(
+            walk(&bytes),
+            [
+                Ok(WscAttr {
+                    id: 0x1022,
+                    value: &[0x04]
+                }),
+                Ok(WscAttr {
+                    id: 0x104A,
+                    value: &[0x10]
+                }),
+                Ok(WscAttr {
+                    id: 0x1021,
+                    value: b"vendor"
+                }),
+            ]
+        );
+    }
+
+    fn attr_bytes_for_round_trip() -> Vec<u8> {
+        let mut bytes = attr(0x1022, &[0x04]);
+        bytes.extend(attr(0x104A, &[0x10]));
+        bytes.extend(attr(0x1021, b"vendor"));
+        bytes
+    }
+
+    #[test]
+    fn zero_length_attribute_is_yielded() {
+        let mut bytes = attr(0x1022, &[]);
+        bytes.extend(attr(0x104A, &[0x10]));
+        assert_eq!(
+            walk(&bytes),
+            [
+                Ok(WscAttr {
+                    id: 0x1022,
+                    value: &[]
+                }),
+                Ok(WscAttr {
+                    id: 0x104A,
+                    value: &[0x10]
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn partial_header_is_truncated() {
+        let whole = attr(0x1022, &[0x04]);
+        let expected = [
+            DecodeError::Truncated {
+                needed: 2,
+                remaining: 1,
+            },
+            DecodeError::Truncated {
+                needed: 2,
+                remaining: 0,
+            },
+            DecodeError::Truncated {
+                needed: 2,
+                remaining: 1,
+            },
+        ];
+        for (index, error) in expected.iter().enumerate() {
+            let header_len = index + 1;
+            assert_eq!(
+                walk(&whole[..header_len]),
+                [Err(*error)],
+                "header of {header_len} bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_header_after_a_good_attribute_is_truncated() {
+        let mut bytes = attr(0x1022, &[0x04]);
+        bytes.push(0x10);
+        assert_eq!(
+            walk(&bytes),
+            [
+                Ok(WscAttr {
+                    id: 0x1022,
+                    value: &[0x04]
+                }),
+                Err(DecodeError::Truncated {
+                    needed: 2,
+                    remaining: 1
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn length_past_the_end_is_truncated() {
+        let mut bytes = attr(0x1022, &[0x04, 0x05, 0x06]);
+        bytes.pop();
+        assert_eq!(
+            walk(&bytes),
+            [Err(DecodeError::Truncated {
+                needed: 3,
+                remaining: 2
+            })]
+        );
+        // A header that promises 65535 bytes of nothing.
+        assert_eq!(
+            walk(&[0x10, 0x22, 0xFF, 0xFF]),
+            [Err(DecodeError::Truncated {
+                needed: 65535,
+                remaining: 0
+            })]
+        );
+    }
+
+    #[test]
+    fn nothing_is_yielded_after_an_error() {
+        let bytes = [0x10, 0x22, 0x00, 0x05, 0x01];
+        let mut iter = WscAttrIter::new(&bytes);
+        assert!(matches!(iter.next(), Some(Err(_))));
+        for _ in 0..3 {
+            assert_eq!(iter.next(), None);
+        }
+    }
+
+    #[test]
+    fn writer_accepts_65535_bytes_and_refuses_65536() {
+        let value = vec![0x5A; 65535];
+        let mut writer = Writer::new();
+        write_wsc_attr(&mut writer, 0x1001, &value).unwrap();
+        let bytes = writer.into_bytes();
+        assert_eq!(bytes.len(), 4 + 65535);
+        assert_eq!(bytes[..4], [0x10, 0x01, 0xFF, 0xFF]);
+        assert_eq!(
+            walk(&bytes),
+            [Ok(WscAttr {
+                id: 0x1001,
+                value: &value
+            })]
+        );
+
+        let too_long = vec![0u8; 65536];
+        let mut writer = Writer::new();
+        writer.u8(0xEE);
+        assert_eq!(
+            write_wsc_attr(&mut writer, 0x1001, &too_long),
+            Err(EncodeError::CountTooLarge {
+                len: 65536,
+                max: 65535
+            })
+        );
+        assert_eq!(writer.into_bytes(), [0xEE]);
     }
 }

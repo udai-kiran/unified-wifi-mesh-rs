@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (rev 4; two review rounds on rev 3, round 2 by the Claude correctness reviewer; rev 4 not reviewed: two-round limit). Codec choice, D6, D7 and D8 decided by the user (2026-11-19) |
+| Status | **Accepted** (rev 4; two review rounds on rev 3, round 2 by the Claude correctness reviewer; rev 4 not reviewed: two-round limit). Codec choice, D6, D7 and D8 decided by the user (2026-11-19). Amendment A1 (2026-11-20, note 0009) |
 | Date | 2026-11-19 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-msg` (TLV bodies, added per consumer under 0005 D1); every consumer crate that ports a TLV reader or writer |
@@ -254,6 +254,23 @@ applies to fields whose TLV table names no order.
 
 Interoperability: on these TLVs the port's bytes differ from an unpatched upstream peer's. Each
 consumer note records the effect on interop, and any receive-side tolerance it chooses.
+
+## Amendments
+
+### A1 (2026-11-20, note 0009): all bodies now; lenient decoders
+
+[0009](0009-tlv-bodies.md) replaces D4's "bodies come with their consumer". All TLV bodies are
+ported in `em-msg` now, in batches (0009 D8). The channel questions D4 left for `em-core` are
+settled in batches B05 and B06. 0009 also:
+- adds the `TlvBody` and `TlvBodyLenient` traits (0009 D2);
+- turns D8's receive-side tolerances into separately named lenient decoders, limited to non-spec
+  forms written by an upstream sender. An empty value decodes to `Ok(None)` (0009 D4);
+- makes the double-built spec fixtures and `tools/check-body-fixtures` the D3 item 1 golden
+  source, with upstream sender vectors where a sender can be compiled (0009 D7).
+
+Correction: the empty Backhaul STA MLD Configuration value is written at
+`em_configuration.cpp:3771-3773`; lines 1437-1442, cited in the Context, are a presence check.
+The count of `em-msg` rows is 219, not 216.
 
 ## Acceptance criteria (Step 1)
 

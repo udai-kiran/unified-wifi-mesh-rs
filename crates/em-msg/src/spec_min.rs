@@ -31,7 +31,7 @@ pub struct SpecMinLen {
     pub spec_ref: &'static str,
 }
 
-/// The 25 rows where upstream's minimum is above the spec minimum.
+/// The 26 rows where upstream's minimum is above the spec minimum.
 pub const SPEC_MIN_LENS: &[SpecMinLen] = &[
     // 3 + 1 (Num_Agent = 0). Inferred.
     SpecMinLen {
@@ -207,6 +207,17 @@ pub const SPEC_MIN_LENS: &[SpecMinLen] = &[
         min_len: 11,
         spec_ref: "EasyMesh §17.2.7",
     },
+    // 3 + 1 (selector = 0) + 1 (metrics). Explicit: IEEE 1905.1 Table 6-16
+    // says "If the value is 0, then the EUI-48 field is not present".
+    // See note 0005 A1 and note 0009 D3, audit row 321.
+    SpecMinLen {
+        table: "link_metric_query",
+        row: 0,
+        tlv_type: TlvType::LINK_METRIC_QUERY,
+        upstream_min_len: 11,
+        min_len: 5,
+        spec_ref: "IEEE 1905.1 §6.4.10, Table 6-16",
+    },
     // 3 + 6 (RUID) + 1 (Num_OpClass = 0) + 1 (TxPower). Inferred.
     SpecMinLen {
         table: "op_channel_rprt",
@@ -292,16 +303,16 @@ mod tests {
     }
 
     /// Removing an entry silently restores upstream's stricter minimum, so the
-    /// count is pinned (note 0005 D3: 25 rows).
+    /// count is pinned (note 0005 A1: 26 rows).
     #[test]
-    fn the_list_has_25_entries() {
-        assert_eq!(SPEC_MIN_LENS.len(), 25);
+    fn the_list_has_26_entries() {
+        assert_eq!(SPEC_MIN_LENS.len(), 26);
     }
 
     /// The spec minimums, written out independently of the entries above so
     /// that a changed value fails here (arithmetic in note 0005 D3 data and
     /// docs/tlv-spec-audit.md).
-    const EXPECTED: [(&str, usize, u16); 25] = [
+    const EXPECTED: [(&str, usize, u16); 26] = [
         ("agent_list", 0, 4),
         ("anticipated_channel_pref", 0, 4),
         ("anticipated_channel_usage_rprt", 0, 12),
@@ -321,6 +332,7 @@ mod tests {
         ("combined_infra_metrics", 1, 44),
         ("combined_infra_metrics", 2, 44),
         ("early_ap_cap_rprt", 1, 11),
+        ("link_metric_query", 0, 5),
         ("op_channel_rprt", 0, 11),
         ("sta_link_metrics_rsp", 0, 10),
         ("sta_link_metrics_rsp", 2, 10),
