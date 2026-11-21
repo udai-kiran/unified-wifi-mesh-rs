@@ -24,7 +24,7 @@ Not here: the timer, logging and compact MAC text (see note 0003 D4 and D5 for w
 ## Intentional differences from upstream
 
 - Timestamps are in UTC. Upstream formats local time and appends `Z` (note 0003, "Upstream defect found").
-- `HexDump` matches upstream byte for byte only for inputs up to `u32::MAX` bytes. Upstream takes the length as `unsigned int` (`inc/util.h:170`, `src/utils/util.cpp:218`) and truncates longer vectors (`util.cpp:216`).
+- `HexDump` matches upstream byte for byte only for inputs up to `u32::MAX` bytes. Upstream takes the length as `unsigned int` (`inc/util.h:170`, `src/utils/util.cpp:219`) and truncates longer vectors (`util.cpp:216`).
 - An empty hex dump prints nothing. Upstream prints `buffer NULL or BAD LENGTH = 0 :`.
 
 Base: `rdkcentral/unified-wifi-mesh` @ `ba4180b`.

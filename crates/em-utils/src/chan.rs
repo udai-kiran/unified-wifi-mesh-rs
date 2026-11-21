@@ -285,5 +285,7 @@ mod tests {
         assert_eq!(freq_to_chan(u32::MAX, ""), None);
         assert_eq!(freq_to_chan(0, ""), None);
         assert_eq!(freq_to_chan(5937, ""), Some((136, 2)));
+        // The top of the table (class 183, channel 29) is above `u16::MAX`.
+        assert_eq!(freq_to_chan(118_800, ""), Some((183, 29)));
     }
 }

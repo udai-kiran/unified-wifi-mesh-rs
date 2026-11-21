@@ -7,7 +7,7 @@ use core::fmt;
 /// Wraps a byte slice so that `Display` prints a hex dump.
 ///
 /// For inputs up to `u32::MAX` bytes, the text is byte-for-byte the same as
-/// upstream `print_hex_dump` (`src/utils/util.cpp:218-259`), assuming the C
+/// upstream `print_hex_dump` (`src/utils/util.cpp:219-259`), assuming the C
 /// locale, where printable means `0x20..=0x7e`. Upstream takes the length as
 /// `unsigned int` (`inc/util.h:170`), and its `std::vector` overload casts
 /// `data.size()` to `unsigned int` (`util.cpp:216`), so a longer input would be
@@ -73,7 +73,7 @@ mod tests {
     use super::HexDump;
 
     // The expected text below is the output of a C program that holds
-    // upstream's loop (util.cpp lines 232-258) with the output set to stdout.
+    // upstream's loop (util.cpp lines 236-257) with the output set to stdout.
 
     /// Bytes `0x10`, `0x11`, ... (a mix of control and printable bytes).
     fn sequence(len: u8) -> Vec<u8> {
