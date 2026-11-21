@@ -8,18 +8,19 @@ Synchronous, depends only on `em-types`, no `unsafe`, no clones.
 | Module | Holds | Upstream |
 |---|---|---|
 | `header` | 8-byte CMDU header, `default_relay` | `em_cmdu_t` (`em_base.h`), `add_1905_header` (`em_msg.cpp`) |
-| `tlv` | `TlvIter`, a borrowing walk over the TLV area | `em_tlv_t`, `get_tlv`, `get_first_tlv`, `get_next_tlv`, `validate` walk (`em_msg.cpp`) |
+| `tlv` | `TlvIter`, a borrowing walk over the TLV area | `em_tlv_t`, the walk of `validate` (`em_msg.cpp`). `TlvIter` does not stop at a zero-length TLV; upstream's `get_first_tlv` and `get_next_tlv` are in `readers` |
+| `readers` | The field readers `al_mac_address`, `supported_services`, `profile`, `sta_mac`, `bss_id`, `radio_id`, `freq_band`, `find_tlv`; the offset walker `first_tlv` and `next_tlv` | `em_msg_t` readers (`em_msg.cpp:71-480`): `get_al_mac_address`, `get_supported_service`, `parse_profile_tlv`, `get_profile`, `get_profile_type`, `get_sta_mac`, `get_bss_id`, `get_radio_id`, `get_freq_band`, `get_tlv`, `get_first_tlv`, `get_next_tlv` (note 0009 D6, A10) |
 | `builder` | `MsgBuilder` with a size budget, End of Message added by `finish` | `em_msg_builder_t` (`em_msg.h`, `em_msg.cpp`), `add_tlv` |
-| `wsc` | WSC Message Type selector (M1 = 4, M2 = 5); WSC attribute walker `WscAttrIter` and writer `write_wsc_attr` | `em_configuration_t::get_wsc_msg_type` (`em_configuration.cpp`); the walker and writer are new (note 0009, D5) |
-| `bodies` | `TlvBody`, `TlvBodyLenient`: the traits every typed TLV body implements; the seven IEEE 1905.1 identity and neighbor bodies in `bodies::ieee1905`; the six link metric and push button bodies in `bodies::linkmetric`; the fifteen autoconfiguration, search, topology, profile, WSC and operational BSS bodies in `bodies::autoconfig`; the fifteen capability bodies in `bodies::capability`; the ten channel selection and scan bodies in `bodies::channel`; the eleven CAC, anticipated channel, spatial reuse and spectrum inquiry bodies in `bodies::cac`; the fourteen metrics bodies in `bodies::metrics`; the twelve steering, association control, backhaul steering and code bodies in `bodies::steering`; the ten policy and QoS bodies in `bodies::policy` | the typed TLV bodies, added in batches (note 0009) |
+| `wsc` | WSC Message Type selector (M1 = 4, M2 = 5); WSC attribute walker `WscAttrIter` and writer `write_wsc_attr`; typed attributes `WscAttribute` and ids `WscAttrId`, with the Multi-AP and haul-type Vendor Extensions | `em_configuration_t::get_wsc_msg_type` (`em_configuration.cpp`); the walker, writer and typed attributes are new (note 0009, D5 and A9) |
+| `bodies` | `TlvBody`, `TlvBodyLenient`: the traits every typed TLV body implements; the seven IEEE 1905.1 identity and neighbor bodies in `bodies::ieee1905`; the six link metric and push button bodies in `bodies::linkmetric`; the fifteen autoconfiguration, search, topology, profile, WSC and operational BSS bodies in `bodies::autoconfig`; the fifteen capability bodies in `bodies::capability`; the ten channel selection and scan bodies in `bodies::channel`; the eleven CAC, anticipated channel, spatial reuse and spectrum inquiry bodies in `bodies::cac`; the fourteen metrics bodies in `bodies::metrics`; the twelve steering, association control, backhaul steering and code bodies in `bodies::steering`; the ten policy and QoS bodies in `bodies::policy`; the eleven BSS configuration and Wi-Fi 7 MLD bodies in `bodies::mld`; the thirteen DPP, security and encapsulation bodies in `bodies::security` | the typed TLV bodies, added in batches (note 0009) |
 | `tables` | The 70 validation tables as static data | the table functions `autoconfig_search` .. `i1905_ack` (`em_msg.cpp`) |
 | `validate` | `validate(cmdu, profile)` | `em_msg_t::validate` (`em_msg.cpp`) |
 | `spec_min` | Spec minimum lengths that replace upstream's stricter ones (26 rows) | - |
 | `body` | `Reader`, `Writer` for TLV bodies | hand-written readers and writers replace upstream's packed C structs copied into the frame (note 0008) |
-| `error` | `FramingError`, `BuildError`, `DecodeError`, `EncodeError` | - |
+| `error` | `FramingError`, `BuildError`, `DecodeError`, `EncodeError`, `ReaderError` | - |
 
-Design: [note 0005](../../docs/0005-em-msg-scope.md); typed TLV bodies and the WSC attribute
-walker: [note 0009](../../docs/0009-tlv-bodies.md). The tables equal the golden fixture
+Design: [note 0005](../../docs/0005-em-msg-scope.md); typed TLV bodies, the WSC attribute
+walker and the field readers: [note 0009](../../docs/0009-tlv-bodies.md) (D6 and A10 for the readers). The tables equal the golden fixture
 `tests/data/upstream_msg_tables.tsv`, which is generated from upstream by `tools/gen-upstream-msg-tables`.
 
 Upstream source: `src/em/em_msg.cpp`, `inc/em_msg.h`, and `get_wsc_msg_type` in
@@ -28,13 +29,11 @@ Upstream source: `src/em/em_msg.cpp`, `inc/em_msg.h`, and `get_wsc_msg_type` in
 ## What is not here
 
 - The Ethernet header: `em-transport` (it keeps the MAC addresses next to the CMDU buffer).
-  `CmduHeader::parse` and `validate` take the whole CMDU (from the 8-byte header); `TlvIter::new`
-  and `wsc_msg_type` take the TLV area after the header; `MsgBuilder` produces the whole CMDU.
-- The TLV bodies other than the IEEE 1905.1 identity, neighbor, link metric, push button,
-  autoconfiguration, capability, channel, CAC, spatial reuse, metrics, steering and policy sets (see below)
-  and the field readers (`get_radio_id`, `get_profile`, ...): ported in batches per note 0009. Here are the `Reader` and `Writer` the bodies are built on, the body traits, and the
-  WSC attribute walker and writer.
-- The policy for a received Profile TLV: `em-core`.
+  `CmduHeader::parse` and `validate` take the whole CMDU (from the 8-byte header); `TlvIter::new`,
+  `wsc_msg_type` and the field readers take the TLV area after the header; `MsgBuilder` produces the
+  whole CMDU.
+- The policy for a received Profile TLV, and the fallback for raw profile 0: `em-core` (note 0005 D5.3).
+- The pre-checks and return codes of the callers of `first_tlv` and `next_tlv` (note 0009 A10).
 - SDU fragmentation and CMDU reassembly.
 
 ## Reader and Writer (TLV bodies)
@@ -634,6 +633,162 @@ Intentional differences from upstream (B09):
 - Lenient empty forms (0x8A, 0xB5, 0xC4): upstream sends them, so they decode leniently. See the
   lenient forms above.
 
+## BSS configuration and Wi-Fi 7 MLD bodies (B10)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2 to D5, D8, D9 and A8. The bodies are in
+`bodies::mld`. Each doc comment cites the spec section and table, the audit rows, and the upstream
+struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `BssConfigurationReport<'a>`, with `BssConfigurationReportRadio<'a>` and `BssConfigurationReportBss<'a>` | BSS Configuration Report (0xB7) | §17.2.75, Table 97 |
+| `BssConfigurationRequest<'a>` | BSS Configuration Request (0xBB) | §17.2.84, Table 106 |
+| `BssConfigurationResponse<'a>` | BSS Configuration Response (0xBD) | §17.2.85, Table 107 |
+| `AgentApMldConfiguration<'a>`, with `ApMld<'a>` and `AffiliatedAp` | Agent AP MLD Configuration (0xE0) | §17.2.96, Table 118 |
+| `BackhaulStaMldConfiguration`, with `AffiliatedBsta` | Backhaul STA MLD Configuration (0xE1) | §17.2.97, Table 119 |
+| `AssociatedStaMldConfigurationReport`, with `AffiliatedSta` | Associated STA MLD Configuration Report (0xE2) | §17.2.98, Table 120 |
+| `MldStructure` | MLD Structure (0xE3, spec only) | §17.2.99, Table 121 |
+| `AffiliatedStaMetrics` | Affiliated STA Metrics (0xE4) | §17.2.100, Table 122 |
+| `AffiliatedApMetrics` | Affiliated AP Metrics (0xE5, spec only) | §17.2.101, Table 123 |
+| `TidToLinkMappingPolicy`, with `TidToLinkScope` and `TidToLinkMapping` | TID-to-Link Mapping Policy (0xE6) | §17.2.102, Table 124 |
+| `EhtOperations`, with `EhtOperationsRadio` and `EhtOperationsBss` | EHT Operations (0xE7) | §17.2.103, Table 125 |
+
+- Byte orders: every multi-octet field is big-endian, except the `Num_Mapping` of the TID-to-Link
+  Mapping Policy (0xE6). Upstream writes that count in host order with no `htons`, so it is
+  little-endian here (`em_configuration.cpp:1674`, audit row 19; note 0008 D6). `Expected_Duration`
+  is 3 octets, big-endian. The counters of 0xE4 and 0xE5 are 4 octets, big-endian.
+- "Valid" flags never change the layout. The field each flag qualifies is always on the wire and is
+  kept as found. Reserved values are kept raw (for example Link ID 16 to 255 on 0xE0). Reserved bits,
+  octets and blocks are ignored on decode and written as zero (audit rows 285, 286 and 290).
+- Counts are the list lengths. Zero counts are accepted, except that the BSS Configuration Request
+  and Response values need at least one octet, so an empty value is `Truncated`. SSIDs are raw
+  bytes of 0 to 255 octets (0xB7, 0xE0). Encoders write only what the strict decoder accepts: a
+  count or SSID above 255 is `EncodeError::CountTooLarge`, a Direction or Group Addressed BU
+  Indication Exponent above 3 is `EncodeError::ValueTooLarge`, an `Expected_Duration` above
+  `0xFF_FFFF` is `ValueTooLarge`, and an empty 0xBB or 0xBD value is `CountTooSmall`.
+- TID-to-Link Mapping Policy (0xE6): `is_bSTA_Config` 0 carries the AP MLD mappings. `is_bSTA_Config`
+  1 is the bSTA MLD form, which has `Num_Mapping` zero. `TidToLinkScope::BstaMld` holds no mappings,
+  so a bSTA policy with mappings cannot be encoded. Decoding a nonzero `Num_Mapping` with
+  `is_bSTA_Config` 1 is `DecodeError::ValueOutOfRange` with the count (note 0009 A8). A mapping is
+  the add octet, the STA MLD MAC, the control octet, the presence indicator, the 3-octet
+  `Expected_Duration` (always present), 2 raw octets for each set bit of the presence indicator in
+  wire order, and 7 reserved octets. The bits are not mapped to TIDs here.
+- 0xBB and 0xBD are raw bytes for `em-easyconnect` (note 0009 D5). No DPP attribute framing or JSON
+  is parsed.
+- 0xE4 and 0xE5: the octets after the counters are the spec's reserved expansion. Decoding ignores
+  them, of any length, without `TrailingBytes`, and encoding writes none.
+- 0xE7: 32 reserved octets come before the radios, 25 after each radio's BSSs and 16 after each BSS.
+  The Basic EHT-MCS And NSS Set, Control, CCFS0, CCFS1 and the Disabled Subchannel Bitmap are raw
+  octets.
+- 0xE3 and 0xE5 are spec only: upstream has no type code, sender or receiver (audit rows 293 and 295).
+- Lenient form (`TlvBodyLenient`): the empty value of 0xE1 decodes to `Ok(None)`, which is upstream's
+  "no bSTA MLD" form. The strict decoder rejects it with `Truncated`. There is no other lenient form,
+  and in particular none for an upstream TID-to-Link mapping with a nonzero presence indicator (user
+  decision).
+- Flag-alone tests: the flag octets of 0xB7, 0xE0, 0xE1, 0xE2, 0xE6 and 0xE7 are tested one flag at a
+  time with `assert_each_flag_alone`, which is local to `bodies::mld`.
+
+Intentional differences from upstream (B10):
+
+- 0xB7: upstream sends the SSID length as `strlen + 1` and the trailing NUL as the last SSID octet
+  (`em_configuration.cpp:1149-1155`, audit row 229). This body keeps those octets as raw SSID bytes.
+- 0xE0: upstream always writes SSID Length 32 and a 32-octet SSID padded with NULs
+  (`em_configuration.cpp:1393-1394`, audit row 279), and this body keeps those octets as the SSID.
+  Upstream's receiver steps over each AP MLD by the fixed `sizeof(em_ap_mld_t)`
+  (`em_configuration.cpp:2854`, audit row 278); this body steps by the length on the wire.
+- 0xE1: upstream sends the TLV with an empty value when no bSTA MLD is configured
+  (`em_configuration.cpp:1439-1442`, `3771-3773`, audit row 287). The lenient decoder reads it as
+  `Ok(None)`, and the strict decoder rejects it.
+- 0xE2: when the affiliated count does not fit the value, upstream logs "Malformed" and clamps the
+  count (`em_configuration.cpp:2637-2644`, audit row 291). This body returns `Truncated`.
+- 0xE6: upstream writes every mapping as a fixed 19-octet record and never writes the TID-to-Link
+  entries (`em_configuration.cpp:1687-1690`, audit row 18). A mapping with a nonzero presence
+  indicator therefore does not decode as spec bytes, and there is no lenient form (user decision).
+  Upstream also copies `Num_Mapping` for a bSTA MLD without forcing it to zero
+  (`em_configuration.cpp:1674`, audit row 22); the strict decoder returns `ValueOutOfRange` (A8).
+- 0xE7: upstream's receiver rejects the whole TLV with more than 4 radios or more than 16 BSSs in a
+  radio (`em.cpp:2163-2166`, `em.cpp:2183-2186`). Those are storage limits of upstream's data model,
+  so this body accepts every count from 0 to 255.
+
+## DPP, security and encapsulation bodies (B11)
+
+Design: [note 0009](../../docs/0009-tlv-bodies.md), D2 to D5, D8, D9 and A8. The bodies are in
+`bodies::security`. Each doc comment cites the spec section and table, the audit rows, and the
+upstream struct, sender and receiver lines.
+
+| Body | TLV (type) | Spec |
+|---|---|---|
+| `SourceInfo` | Source Info (0xC0) | §17.2.54, Table 76 |
+| `TunneledMessageType` | Tunneled Message Type (0xC1) | §17.2.55, Table 77 |
+| `Tunneled<'a>` | Tunneled (0xC2) | §17.2.56, Table 78 |
+| `Ieee1905LayerSecurityCapability` | 1905 Layer Security Capability (0xA9) | §17.2.67, Table 89 |
+| `Mic<'a>` | MIC (0xAB) | §17.2.68, Table 90 |
+| `EncryptedPayload<'a>` | Encrypted Payload (0xAC) | §17.2.69, Table 91 |
+| `AkmSuiteCapabilities`, with `AkmSuite` | AKM Suite Capabilities (0xCC) | §17.2.78, Table 100 |
+| `Ieee1905EncapDpp<'a>` | 1905 Encap DPP (0xCD) | §17.2.79, Table 101 |
+| `Ieee1905EncapEapol<'a>` | 1905 Encap EAPOL (0xCE) | §17.2.80, Table 102 |
+| `DppBootstrappingUriNotification<'a>` | DPP Bootstrapping URI Notification (0xCF) | §17.2.81, Table 103 |
+| `DppCceIndication` | DPP CCE Indication (0xD2) | §17.2.82, Table 104 |
+| `DppChirpValue<'a>` | DPP Chirp Value (0xD3) | §17.2.83, Table 105 |
+| `DppMessage<'a>` | DPP Message (0xD1) | §17.2.86, Table 108 |
+
+- Byte orders: every multi-octet integer is big-endian (§3.1.2). The 6-octet counters of 0xAB and
+  0xAC are `Counter48`, which refuses a value above 2^48 - 1. The 2-octet lengths of 0xAB, 0xAC and
+  0xCD are big-endian, and so is the 0xCD frame length. The 0xD3 Hash Length is one octet (note
+  0008 D8), not the 2 octets upstream writes.
+- Raw bytes (note 0009 D5): the Tunneled body, the EAPOL frame, the DPP frame, the DPP URI, the MIC,
+  the AES-SIV output and the 0xD3 hash are borrowed from the value. Nothing is parsed, decrypted or
+  checked here, and the MIC is not computed.
+- Derived lengths: encoders derive the 2-octet lengths of 0xAB, 0xAC and 0xCD, and the 0xD3 Hash
+  Length, from the data. A length above 65535 (above 255 for 0xD3) is `EncodeError::CountTooLarge`.
+  The AKM counts come from the lists, and a count above 255 is `CountTooLarge`.
+- Layout flags: the MAC-present bit of 0xCD and 0xD3 decides whether the Destination STA MAC is on
+  the wire. Encoders set the bit from the `Option`, so the bit and the field cannot disagree. The
+  GAS bit of 0xCD and Hash Validity of 0xD3 never change the layout: the 0xD3 Hash Length and Hash
+  Value are always present (audit row 248).
+- Reserved values are kept raw: 0xC1 values 7 to 255, 0xA9 values 1 to 255 in each field, MIC
+  Version 1 to 3, 0xD2 values 2 to 255, and the 0xCD frame type. Reserved bits are ignored on decode
+  and written as zero. The 0xCC counts take 0 to 255 with no cap.
+- Empty values are spec-valid where the table has no "one or more" rule: the Tunneled body, the
+  EAPOL frame, the DPP URI, the DPP frame, the MIC and AES-SIV output, the 0xD3 hash, and the AKM
+  lists. Fixed-size bodies (0xC0, 0xC1, 0xA9, 0xD2) are exact.
+- Lenient form (`TlvBodyLenient`): the 0xD3 decoder also accepts upstream's 2-octet Hash Length. After
+  the flags and the optional MAC, the form is a big-endian 2-octet length above 0 that equals the
+  octets left, then the hash. It gives the same body as the spec form when the hash is at most 255
+  octets. The length is read in full, so a longer hash (up to 65535 octets) also decodes, and that
+  body cannot be encoded again (`CountTooLarge`). The strict decoder rejects the form with
+  `TrailingBytes`. There is no absent form, so the lenient result is never `Ok(None)` (user
+  decision).
+- Flag-alone tests: the flags of 0xCD and 0xD3 are each tested on their own
+  (`encap_dpp_flags_each_use_their_own_bit`, `chirp_flags_each_use_their_own_bit`), and the GTK Key Id
+  and MIC Version of 0xAB are each tested on their own (`mic_key_id_and_version_each_use_their_own_bits`).
+  These tests are local to `bodies::security` and do not use `assert_each_flag_alone`.
+- No upstream sender or receiver exists at the pin for 0xC0, 0xC1, 0xC2, 0xAB and 0xAC (audit rows
+  188 to 190, 214 and 215), and 0xCF has no production sender (audit row 245). These bodies follow the
+  spec.
+
+Intentional differences from upstream (B11):
+
+- 0xCC: the upstream receiver keeps at most 10 AKMs per BSS (`em_configuration.cpp:5095,5105`, audit
+  row 240). This body keeps every listed suite. The receiver also drops a suite whose selector it does
+  not map (`em_configuration.cpp:5007-5012`) and takes a BSS's AKMs from its network profile
+  (`:5043-5090`). This body does neither.
+- 0xCD: the upstream receiver accepts a frame length up to 3 above the data (`ec_util.cpp:402`, audit
+  row 242). With bit 7 set and fewer than 6 octets left it zeroes the MAC and reads on
+  (`ec_util.cpp:381-388`, audit row 243). This body returns `Truncated` in both cases.
+- 0xCE: the upstream sender (`em_provisioning.cpp:183`) and receiver (`em_provisioning.cpp:392-395`,
+  audit row 244) refuse a zero-length EAPOL frame. This body accepts an empty value.
+- 0xD1: the upstream receiver requires a non-zero frame length (`em_provisioning.cpp:540`, audit row
+  257). This body accepts an empty frame.
+- 0xD2: the upstream receiver treats every value but 1 as an error, so a Disable is never acted on
+  (`em_provisioning.cpp:416-421`, audit row 246). This body keeps the octet raw.
+- 0xD3: upstream writes and reads the Hash Length as 2 octets, big-endian (`ec_util.cpp:337,356-358`,
+  receiver `:300-302`, audit row 247). The strict decoder rejects that form, the lenient decoder accepts
+  it, and the encoder writes the spec form.
+- 0xD3: the upstream receiver ignores the hash when Hash Validity is 0 (`ec_util.cpp:295-298`) and
+  rejects a Hash Length of 0 when Hash Validity is 1 (`ec_util.cpp:303-307`; audit rows 248 and 250).
+  This body keeps the hash for both validities and accepts a length of 0.
+
 ## WSC attributes
 
 The `wsc` module walks and writes the attributes of a WSC TLV value (2-byte id, 2-byte length,
@@ -644,8 +799,41 @@ value, all big-endian):
   attribute is yielded with an empty value.
 - `write_wsc_attr(&mut Writer, id, value)` writes one attribute. A value longer than 65535 bytes is
   `EncodeError::CountTooLarge { len, max: 65535 }`, and nothing is written.
-- `wsc_msg_type` keeps upstream's quiet behaviour. Typed WSC attributes are not here yet (note 0009,
-  D5).
+- `wsc_msg_type` keeps upstream's quiet behaviour.
+
+Typed attributes (note 0009, D5 and A9): `WscAttribute<'a>` has one variant for each of the 32
+attributes that upstream's M1, M2 and Encrypted Settings plaintext build or read, and `Other` for any
+other id. `WscAttribute::decode` takes a `WscAttr` from the walker, and `encode` writes the attribute
+back with `write_wsc_attr`. The ids are the `WscAttrId` constants.
+
+- One-octet values: Version, Message Type, Connection Type Flags, WSC State and RF Bands.
+- Big-endian `u16` values: Authentication Type Flags, Encryption Type Flags, Configuration Methods,
+  Association State, Device Password ID, Configuration Error, Authentication Type and Encryption Type.
+  Encryption Type Flags, Configuration Methods and Configuration Error are big-endian by decision
+  (A9). Upstream copies the first two in host order, and writes Association State, Device Password
+  ID and Configuration Error with no value octets (intentional differences, tested per attribute).
+- Fixed raw arrays: UUID-E and UUID-R (16 octets), MAC Address (6), the two nonces (16), Primary
+  Device Type (8), OS Version (4), Authenticator and Key Wrap Authenticator (8).
+- Variable values, borrowed without a copy: Public Key, Manufacturer, Model Name, Model Number,
+  Serial Number, Device Name, SSID, Network Key and Encrypted Settings. SSID and Network Key keep the
+  trailing NUL that upstream sends.
+- A fixed-width attribute of any other length is `DecodeError::InvalidLength`. Upstream ignores or
+  overruns these lengths (intentional differences, tested per attribute).
+- Vendor Extension (0x1049): `WscVendorExtension` is the 3-octet vendor id and the rest of the value.
+  `MultiApExtension` reads and writes the Wi-Fi Alliance sub-element 0x06 (one flag octet). Reserved
+  bits are ignored on decode and written as zero. Upstream writes this sub-element in the Encrypted
+  Settings and never reads it. `HaulTypeExtension` reads and writes the Comcast haul type (sub-id
+  0x01). It writes upstream's 11-octet value (5 meaningful octets, then 6 zeros) and reads sub-id 0x01
+  from a value of 5 or more octets. Other Comcast sub-ids are `Ok(None)` at any length. A Comcast
+  value with no sub-id, or with sub-id 0x01 and no haul type octet, is `DecodeError::InvalidLength`.
+  This is the only Comcast sub-id typed here. Comcast sub-ids 0x02 to 0x06
+  (`vendor_ext_attr_id_t`) are used by other TLVs (the Vendor Specific policy and metrics code),
+  not by WSC, and `em-core` owns them (note 0009 A11). Other vendor ids are returned as
+  `WscVendorExtension` without interpretation.
+- A variable-length value longer than 65535 octets is `EncodeError::CountTooLarge`, and nothing is
+  written.
+- Encryption, authentication and key wrap are not computed here. They belong to `em-core` with
+  `em-crypto` (note 0006).
 
 ## Lints
 
@@ -691,7 +879,7 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
   flag alone in an otherwise zero value, and checks that it decodes to its own field and encodes
   back to the same bytes. A fixture row that sets several flags together cannot show that two
   flags are not swapped. The `assert_each_flag_alone` helper is in `bodies::capability`,
-  `bodies::cac`, `bodies::steering` and `bodies::policy`; `bodies::channel` and `bodies::metrics`
+  `bodies::cac`, `bodies::steering`, `bodies::policy` and `bodies::mld`; `bodies::channel` and `bodies::metrics`
   have per-flag tests written out.
 - Every `sweep_row` and `sweep_row_lenient` check starts with `check_tlv_column`. It fails unless
   the row's `tlv` column (`0xNN`) is the body's TLV type, so a row cannot be checked by a body of
@@ -714,9 +902,23 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
   panics. `assert_all_used` checks that the rows of a group and the keys its tests use are the same
   set, so every row is used. The `ieee1905` group has 48 rows, the `linkmetric` group 51, the
   `autoconfig` group 137, the `capability` group 167, the `channel` group 155, the `cac` group 140,
-  the `metrics` group 166, the `steering` group 159 and the `policy` group 165.
-- `upstream_tlv_vectors` (test only) loads `tests/data/upstream_tlv_vectors.tsv`, and checks its
-  case list and the bytes of `create_prof_2_tlv` and `create_error_code_tlv`.
+  the `metrics` group 166, the `steering` group 159, the `policy` group 165, the `mld` group 275 and the `security` group 213.
+- `upstream_tlv_vectors` (test only) loads `tests/data/upstream_tlv_vectors.tsv`: 31 rows from seven
+  upstream senders. It checks the exact case list and decodes and re-encodes each row through the
+  body of its sender. The two rows of the unreachable empty-value guards are not decoded; a test
+  checks that their bodies reject an empty value.
+- `upstream_reader_vectors` (test only) loads `tests/data/upstream_reader_vectors.tsv`: 1421 rows
+  from the field readers and walkers run on 73 TLV areas. An upstream `true` must be `Ok(Some)` with
+  the same output. An upstream `false` must be `Ok(None)`, except for the pinned error rows, which
+  must be exactly their `ReaderError`. `find_tlv` is compared by the position of its value, and the
+  walkers by offset and TLV.
+- `tests/data/upstream_test_map.tsv` (note 0009 A10) maps each reader to its Rust test. `get_tlv(em_tlv_t *)`
+  and `get_client_mac_info` are recorded as `not ported: no production caller`. Each
+  `intentional-difference:<id>` tag in `readers.rs` has a row naming its test. `tools/check-test-map`
+  checks that every named test exists and that the tags in the source and the map agree. It also
+  checks the map's shape: every disposition is `rust:<path>` or `skip:<reason>`, all 15 upstream
+  reader rows are present with the two `not ported` rows unchanged, and a tagged row is a `rust:`
+  reference whose test body contains its tag. Python tests: `tools/test_check_test_map.py`.
 - `tools/check-body-fixtures` compares two independent builds of a body group,
   `tests/data/bodies/<group>.a.tsv` and `<group>.b.tsv`. It writes `<group>.tsv` only if the builds
   agree on every row, with the build hashes as provenance. Without `--group`, every group with a
@@ -729,8 +931,9 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
   committed fixture, and succeeds when there are no group files. Exit 0 is success, 1 is a missing
   build, malformed input, disagreement or a stale fixture, and 2 is usage or I/O. Python tests:
   `tools/test_check_body_fixtures.py`.
-- `tools/upstream-tlv-vectors/regen` compiles the pinned upstream senders against a declaration
-  shim and writes `tests/data/upstream_tlv_vectors.tsv`; `--check` rebuilds it in memory. The
+- `tools/upstream-tlv-vectors/regen` compiles the pinned upstream senders and `em_msg_t` readers
+  against a declaration shim and writes `tests/data/upstream_tlv_vectors.tsv` and
+  `tests/data/upstream_reader_vectors.tsv`; `--check` rebuilds both in memory. The
   [tool README](../../tools/upstream-tlv-vectors/README.md) covers the extraction and how to add a
   sender. Python tests: `tools/test_upstream_tlv_vectors.py`.
 - Generated fixtures are never edited by hand.
@@ -746,18 +949,43 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
 - 26 mandatory-row minimum lengths are lowered to the spec minimum where upstream rejects
   spec-valid TLVs (`spec_min`, note 0005 D3 and 0008 D8). The upstream tables themselves are kept
   verbatim.
+- Field readers (`readers`, note 0009 D6 and A10). Each difference has an id, which is its
+  `intentional-difference:<id>` tag in `readers.rs`. The test with that tag is named after the
+  upstream behaviour, and the test map lists it.
+  - `al-mac-length`: an AL MAC Address value must be exactly 6 octets. Upstream copies `htons(len)`
+    octets into a 6-octet buffer.
+  - `bss-id-short-read`, `radio-id-short-read`: a value too short for the 6-octet read is
+    `ValueTooShort`. Upstream reads past the value.
+  - `channel-scan-request-short`: a Channel Scan Request value shorter than 9 octets fails the whole
+    `radio_id` walk, before the End of Message test. The exact 2-octet form with 0 radios is spec
+    valid (§17.2.39) and is `Ok(None)`.
+  - `freq-band-empty`: an empty Supported or Autoconfig Frequency Band value is `ValueTooShort`.
+    Upstream copies the first octet of the next TLV's header.
+  - `missing-end-of-message`, `framing-error`: a framing error is `ReaderError::Framing`. Upstream
+    returns "not found" for a frame without End of Message, and `false` for a TLV that runs past
+    the end.
+  - `walker-size-wrap`: `next_tlv` does not wrap the TLV size at 0xFFFD to 0xFFFF, as upstream's
+    `uint16_t` does.
+  - `walker-zero-length-stop`: not a fix. `first_tlv` and `next_tlv` stop at a zero-length TLV, End
+    of Message included, as upstream does (user decision, A10). Two data-loss cases are tested: an
+    empty Backhaul STA MLD Configuration TLV hides the EHT Operations TLV after it from the walks of
+    BSS configuration, and an empty first TLV of a Backhaul STA Capability Report makes both of its
+    lookups fail. `TlvIter` does not stop at a zero-length TLV, so `find_tlv` still finds the EHT
+    Operations TLV.
+  - `sta-mac-short-value`: a `get_sta_mac` value below its minimum is `ValueTooShort`. Upstream
+    returns `false` (`em_msg.cpp:197-211`).
+  - `supported-service-rejected`: an empty Supported Service value, a length other than `1 + num`,
+    or a count above 8 is an error that gives the reason. Upstream returns `false`
+    (`em_msg.cpp:104-117`).
+  - `profile-rejected`: a Profile value whose length is not 1 or 4, or a raw value of 4 or more, is
+    an error that gives the reason. Upstream returns `false` (`em_msg.cpp:139-148`). The A10 vector
+    rows pin the Profile and Supported Service cases.
+  - Malformed values that upstream rejects with `false` are a `ReaderError` here, not `Ok(None)`.
+    Each of the three tags above is one such case.
 
 ## Status
 
-Step 2 (crate) implemented. Batches B00a and B00b of note 0009 (body traits and entry points, error
-kinds, WSC attribute walker and writer, test macro, lints, and the two fixture tools) are
-implemented and awaiting review. B01 (the seven IEEE 1905.1 identity and neighbor bodies and the
-`ieee1905` fixture), B02 (the six link metric and push button bodies and the `linkmetric`
-fixture) and B03 (the fifteen autoconfiguration, search, topology, profile and operational BSS
-bodies and the `autoconfig` fixture) are implemented. B04 (the fifteen capability bodies and the
-`capability` fixture), B05 (the ten channel selection and scan bodies and the `channel` fixture) and
-B06 (the eleven CAC, anticipated channel, spatial reuse and spectrum inquiry bodies and the `cac`
-fixture) are implemented. B07 (the fourteen metrics bodies and the `metrics` fixture), B08 (the
-twelve steering, association control and code bodies and the `steering` fixture) and B09 (the ten
-policy and QoS bodies and the `policy` fixture) are implemented and under review. B10 to B13 are
-pending. See [STATUS.md](../../STATUS.md).
+Ported. The crate holds the CMDU header, TLV framing, builder and validation, every TLV body of
+note 0009 (batches B01 to B11), the typed WSC attributes (B12) and the field readers and walker
+(B13). B10 to B13 had two review rounds; see [STATUS.md](../../STATUS.md) for the results and the
+low items left open.

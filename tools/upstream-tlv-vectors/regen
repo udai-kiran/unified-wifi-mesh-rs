@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Generate or check the pinned upstream TLV sender vectors.
 
-Extracts the listed struct definitions and sender functions from pinned git objects
-(`git --no-replace-objects show <pin>:<path>`), compiles them as free functions against
-shim.hpp with c++ -std=c++17, runs vectors.cpp and writes
-crates/em-msg/tests/data/upstream_tlv_vectors.tsv. The upstream working tree is never read.
-A sizeof/offsetof probe of every extracted struct is checked against PROBE_EXPECTED and
-recorded in the fixture as `# Probe:` lines. The harness output must hold exactly the cases of
-expected_case_inputs(), in its order, and each case's inputs must equal the values given there.
-check_row() then checks each row's return value and bytes.
+Extracts the listed type definitions, macros, sender functions and em_msg_t reader functions
+from pinned git objects (`git --no-replace-objects show <pin>:<path>`), compiles them against
+shim.hpp with c++ -std=c++17 (senders as free functions, readers as members of the shim's
+em_msg_t), runs vectors.cpp and writes two fixtures:
+crates/em-msg/tests/data/upstream_tlv_vectors.tsv (senders) and
+crates/em-msg/tests/data/upstream_reader_vectors.tsv (readers). The upstream working tree is
+never read. A sizeof/offsetof probe of every extracted struct is checked against PROBE_EXPECTED
+and recorded in the sender fixture as `# Probe:` lines. The harness output must hold exactly the
+cases of expected_case_inputs() and expected_reader_cases(), in their order, with the given
+inputs and areas. check_row() and check_reader_row() then check each row's return value and
+bytes against a model written independently of the harness.
 
 Exit 0: success; 1: invalid extraction or content, or --check found a stale fixture;
 2: usage, I/O (including a missing fixture under --check), git, compiler, harness or probe failure.
@@ -27,32 +30,177 @@ PIN = "ba4180ba36748629f10c20babc4320dd69c9db4f"
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools/upstream-tlv-vectors"
 FIXTURE = ROOT / "crates/em-msg/tests/data/upstream_tlv_vectors.tsv"
+READER_FIXTURE = ROOT / "crates/em-msg/tests/data/upstream_reader_vectors.tsv"
 
 BASE_H = "inc/em_base.h"
+EM_MSG_H = "inc/em_msg.h"
+UTIL_H = "inc/util.h"
 EM_CPP = "src/em/em.cpp"
+EM_MSG_CPP = "src/em/em_msg.cpp"
 CONFIG_CPP = "src/em/config/em_configuration.cpp"
+METRICS_CPP = "src/em/metrics/em_metrics.cpp"
+CAPABILITY_CPP = "src/em/capability/em_capability.cpp"
+POLICY_CPP = "src/em/policy_cfg/em_policy_cfg.cpp"
 
-# Structs copied verbatim into structs.inc: (path, first line, last line, expected first line,
-# struct name). The struct must be a `typedef struct { ... } __attribute__((__packed__)) NAME;`.
+# Macros copied verbatim into defines.inc: (path, first line, last line, expected first line,
+# name). A range of several lines must continue every line but the last with a backslash.
+DEFINES = [
+    (BASE_H, 87, 87, "#define EM_MAX_SERVICE          8", "EM_MAX_SERVICE"),
+    (BASE_H, 94, 94, "#define MAX_MCS  3", "MAX_MCS"),
+    (BASE_H, 111, 111, "#define EM_MAX_CHANNELS_IN_LIST  64", "EM_MAX_CHANNELS_IN_LIST"),
+    (BASE_H, 232, 232, "#define EM_MAX_OPCLASS  64", "EM_MAX_OPCLASS"),
+    (BASE_H, 237, 237, "#define EM_MAX_CHANNELS_PER_OPCLASS   16", "EM_MAX_CHANNELS_PER_OPCLASS"),
+    (BASE_H, 238, 238, "#define EM_MAX_STA_PER_CHANNEL        64", "EM_MAX_STA_PER_CHANNEL"),
+    (BASE_H, 650, 650, "#define EM_MAX_UNASSOC_STA 64", "EM_MAX_UNASSOC_STA"),
+    (UTIL_H, 403, 407, "#define EM_ASSERT_MSG_FALSE(x, ret, ...) \\", "EM_ASSERT_MSG_FALSE"),
+    (UTIL_H, 409, 409,
+     "#define EM_ASSERT_MSG_TRUE(x, ret, ...) EM_ASSERT_MSG_FALSE(!(x), ret, __VA_ARGS__)",
+     "EM_ASSERT_MSG_TRUE"),
+    (UTIL_H, 410, 410,
+     "#define EM_ASSERT_NOT_NULL(x, ret, ...) EM_ASSERT_MSG_FALSE(x == NULL, ret, __VA_ARGS__)",
+     "EM_ASSERT_NOT_NULL"),
+]
+
+# Packed structs copied verbatim into structs.inc: (path, first line, last line, expected first
+# line, struct name). The struct must be a `typedef struct { ... } __attribute__((__packed__)) NAME;`.
 STRUCTS = [
+    (BASE_H, 458, 462, "typedef struct {", "em_tlv_t"),
+    (BASE_H, 521, 523, "typedef struct {", "em_channels_list_t"),
+    (BASE_H, 529, 534, "typedef struct {", "em_op_class_t"),
+    (BASE_H, 552, 557, "typedef struct {", "em_ap_radio_basic_cap_t"),
+    (BASE_H, 679, 684, "typedef struct {", "em_unassoc_sta_metric_t"),
+    (BASE_H, 686, 690, "typedef struct {", "em_unassoc_sta_link_metrics_rsp_t"),
+    (BASE_H, 1115, 1119, "typedef struct {", "em_channel_scan_req_op_class_t"),
+    (BASE_H, 1121, 1128, "typedef struct {", "em_channel_scan_req_t"),
+    (BASE_H, 1362, 1365, "typedef struct {", "em_client_info_t"),
+    (BASE_H, 1634, 1638, "typedef struct {", "em_ap_operational_bss_t"),
+    (BASE_H, 1640, 1644, "typedef struct {", "em_ap_op_bss_radio_t"),
+    (BASE_H, 1646, 1649, "typedef struct {", "em_ap_op_bss_t"),
     (BASE_H, 1750, 1759, "typedef struct {", "em_profile_2_ap_cap_t"),
+    (BASE_H, 1881, 1889, "typedef struct {", "em_ap_ht_cap_t"),
+    (BASE_H, 1891, 1904, "typedef struct {", "em_ap_vht_cap_t"),
+    (BASE_H, 1906, 1909, "typedef struct {", "em_ap_he_mcs_maps_t"),
+    (BASE_H, 1911, 1927, "typedef struct {", "em_ap_he_cap_t"),
+    (BASE_H, 2153, 2158, "typedef struct {", "em_bh_bss_config_t"),
+    (BASE_H, 2199, 2202, "typedef struct {", "em_supported_service_t"),
+    (BASE_H, 2218, 2228, "typedef struct {", "em_ap_radio_advanced_cap_t"),
+]
+
+# Typedefs without the packed attribute: (path, first line, last line, expected first line, name,
+# whether it is a struct). Enums are extracted for their values only; they have no probe.
+PLAIN_TYPES = [
+    (BASE_H, 493, 499, "typedef enum {", "em_profile_type_t", False),
+    (BASE_H, 501, 507, "typedef enum {", "em_freq_band_t", False),
+    (BASE_H, 620, 624, "typedef struct {", "em_unassoc_query_channel_t", True),
+    (BASE_H, 633, 637, "typedef struct {", "em_unassoc_query_opclass_t", True),
+    (BASE_H, 665, 671, "typedef struct {", "em_unassoc_sta_metric_entry_t", True),
+    (BASE_H, 673, 676, "typedef struct {", "em_unassoc_sta_metrics_rsp_t", True),
+    (BASE_H, 811, 935, "typedef enum {", "em_tlv_type_t", False),
+    (BASE_H, 3815, 3819, "typedef struct {", "em_backhaul_bss_config_policy_t", True),
 ]
 
 # Sender functions copied into senders.inc: (path, first line, last line, expected first line,
 # class qualifier). The qualifier is removed from the first line so the function compiles as a
 # free function. To add a sender, append one entry here and its cases to vectors.cpp and
-# expected_cases() (see README.md).
+# expected_case_inputs() (see README.md).
 SENDERS = [
     (EM_CPP, 1772, 1797, "short em_t::create_prof_2_tlv(unsigned char *buff)", "em_t"),
     (CONFIG_CPP, 3847, 3869,
      "unsigned short em_configuration_t::create_error_code_tlv(unsigned char *buff, int val, "
      "mac_addr_t sta_mac)", "em_configuration_t"),
+    (METRICS_CPP, 2384, 2411,
+     "short em_metrics_t::create_error_code_tlv(unsigned char *buff, mac_address_t sta, "
+     "bool sta_found, bool is_associated)", "em_metrics_t"),
+    (CAPABILITY_CPP, 586, 600,
+     "short em_capability_t::create_client_info_tlv(unsigned char *buff, mac_address_t sta, "
+     "bssid_t bssid)", "em_capability_t"),
+    (POLICY_CPP, 336, 349,
+     "short em_policy_cfg_t::create_backhaul_bss_conf_policy_tlv(unsigned char *buff, "
+     "const em_backhaul_bss_config_policy_t *entry)", "em_policy_cfg_t"),
+    (METRICS_CPP, 2702, 2734,
+     "unsigned short em_metrics_t::create_unassoc_sta_link_metrics_query_tlv("
+     "unsigned char *buff, em_unassoc_query_opclass_t *op)", "em_metrics_t"),
+    (METRICS_CPP, 2807, 2867,
+     "unsigned short em_metrics_t::create_unassoc_sta_link_metrics_resp_tlv("
+     "unsigned char *buff, unsigned char op_class, em_unassoc_sta_metrics_rsp_t *rsp)",
+     "em_metrics_t"),
 ]
+
+# em_msg_t reader member functions copied into readers.inc: same entry shape as SENDERS, but the
+# qualifier stays: the shim declares `struct em_msg_t` with the same members and declarations as
+# the pinned class, and readers.inc holds the out-of-class definitions unchanged.
+READERS = [
+    (EM_MSG_CPP, 71, 87, "bool em_msg_t::get_al_mac_address(unsigned char *mac)", "em_msg_t"),
+    (EM_MSG_CPP, 89, 129, "bool em_msg_t::get_supported_service(em_supported_service_t *svc)",
+     "em_msg_t"),
+    (EM_MSG_CPP, 131, 152,
+     "bool em_msg_t::parse_profile_tlv(const unsigned char *value, uint16_t value_len, "
+     "em_profile_type_t *profile)", "em_msg_t"),
+    (EM_MSG_CPP, 154, 175, "bool em_msg_t::get_profile(em_profile_type_t *profile)", "em_msg_t"),
+    (EM_MSG_CPP, 177, 221, "bool em_msg_t::get_sta_mac(mac_address_t *mac)", "em_msg_t"),
+    (EM_MSG_CPP, 223, 249, "bool em_msg_t::get_bss_id(mac_address_t *mac)", "em_msg_t"),
+    (EM_MSG_CPP, 251, 344, "bool em_msg_t::get_radio_id(mac_address_t *mac)", "em_msg_t"),
+    (EM_MSG_CPP, 346, 363, "bool em_msg_t::get_freq_band(em_freq_band_t *band)", "em_msg_t"),
+    (EM_MSG_CPP, 365, 385, "bool em_msg_t::get_profile_type(em_profile_type_t *profile)",
+     "em_msg_t"),
+    (EM_MSG_CPP, 387, 402, "em_tlv_t *em_msg_t::get_tlv(em_tlv_type_t type)", "em_msg_t"),
+    (EM_MSG_CPP, 404, 422,
+     "em_tlv_t *em_msg_t::get_tlv(em_tlv_t* tlvs_buff, unsigned int buff_len, "
+     "em_tlv_type_t type)", "em_msg_t"),
+    (EM_MSG_CPP, 424, 444,
+     "em_tlv_t *em_msg_t::get_first_tlv(em_tlv_t* tlvs_buff, unsigned int buff_len)", "em_msg_t"),
+    (EM_MSG_CPP, 446, 480,
+     "em_tlv_t *em_msg_t::get_next_tlv(em_tlv_t* tlv, em_tlv_t* tlvs_buff, "
+     "unsigned int buff_len)", "em_msg_t"),
+]
+
+# Data members the shim's em_msg_t may declare. Every reader uses only these two.
+SHIM_READER_MEMBERS = ["unsigned char *m_buff;", "unsigned int m_len;"]
 
 # Layout of each extracted struct as GCC lays it out. Bit-fields have no offsetof, so the probe
 # covers the whole size and the whole-byte members.
 PROBE_EXPECTED = {
+    "em_tlv_t": {"sizeof": 3, "type": 0, "len": 1, "value": 3},
+    "em_channels_list_t": {"sizeof": 0, "channel": 0},
+    "em_op_class_t": {"sizeof": 3, "op_class": 0, "max_tx_eirp": 1, "num": 2, "channels": 3},
+    "em_ap_radio_basic_cap_t": {
+        "sizeof": 8, "ruid": 0, "num_bss": 6, "op_class_num": 7, "op_classes": 8,
+    },
+    "em_unassoc_query_channel_t": {"sizeof": 386, "channel": 0, "num_sta": 1, "sta_list": 2},
+    "em_unassoc_query_opclass_t": {
+        "sizeof": 6178, "op_class": 0, "num_channels": 1, "channel_list": 2,
+    },
+    "em_unassoc_sta_metric_entry_t": {
+        "sizeof": 16, "sta_mac": 0, "channel": 6, "op_class": 7, "rcpi": 8, "time_delta": 12,
+    },
+    "em_unassoc_sta_metrics_rsp_t": {"sizeof": 1028, "num_entries": 0, "entry": 4},
+    "em_unassoc_sta_metric_t": {
+        "sizeof": 12, "sta_mac": 0, "channel": 6, "time_delta": 7, "rcpi": 11,
+    },
+    "em_unassoc_sta_link_metrics_rsp_t": {
+        "sizeof": 2, "op_class": 0, "num_sta": 1, "sta_metric": 2,
+    },
+    "em_channel_scan_req_op_class_t": {
+        "sizeof": 2, "op_class": 0, "num_channels": 1, "channel_list": 2,
+    },
+    "em_channel_scan_req_t": {
+        "sizeof": 9, "num_radios": 1, "ruid": 2, "num_op_classes": 8, "op_class": 9,
+    },
+    "em_client_info_t": {"sizeof": 12, "bssid": 0, "client_mac_addr": 6},
+    "em_ap_operational_bss_t": {"sizeof": 7, "bssid": 0, "ssid_len": 6, "ssid": 7},
+    "em_ap_op_bss_radio_t": {"sizeof": 7, "ruid": 0, "bss_num": 6, "bss": 7},
+    "em_ap_op_bss_t": {"sizeof": 1, "radios_num": 0, "radios": 1},
     "em_profile_2_ap_cap_t": {"sizeof": 4, "max_prior_rule": 0, "reserved1": 1, "max_vid_count": 3},
+    "em_ap_ht_cap_t": {"sizeof": 7, "ruid": 0},
+    "em_ap_vht_cap_t": {"sizeof": 12, "ruid": 0, "sprt_tx_mcs": 6, "sprt_rx_mcs": 8},
+    "em_ap_he_mcs_maps_t": {"sizeof": 4, "tx_he_mcs": 0, "rx_he_mcs": 2},
+    "em_ap_he_cap_t": {"sizeof": 21, "ruid": 0, "sprt_mcs_len": 6, "sprt_tx_rx_mcs": 7},
+    "em_bh_bss_config_t": {"sizeof": 7, "bssid": 0},
+    "em_supported_service_t": {"sizeof": 9, "num": 0, "service": 1},
+    "em_ap_radio_advanced_cap_t": {"sizeof": 7, "ruid": 0},
+    "em_backhaul_bss_config_policy_t": {
+        "sizeof": 8, "bssid": 0, "b_profile_1_sta_disallowed": 6, "b_profile_2_sta_disallowed": 7,
+    },
 }
 
 PROBE_PREFIX = "# Probe: "
@@ -80,7 +228,8 @@ def run(command, **kwargs):
 
 
 def read_sources(upstream):
-    paths = sorted({entry[0] for entry in STRUCTS} | {entry[0] for entry in SENDERS})
+    entries = DEFINES + STRUCTS + PLAIN_TYPES + SENDERS + READERS
+    paths = sorted({entry[0] for entry in entries} | {EM_MSG_H})
     return {path: run(["git", "--no-replace-objects", "-C", str(upstream), "show", f"{PIN}:{path}"])
             for path in paths}
 
@@ -122,12 +271,46 @@ def extract_range(source, path, first, last, signature):
     return chunk, code[outer_close + 1:].strip()
 
 
+def _without_spaces(text):
+    return re.sub(r"\s+", "", text)
+
+
 def extract_struct(source, entry):
     path, first, last, signature, name = entry
     chunk, tail = extract_range(source, path, first, last, signature)
-    if tail != f"__attribute__((__packed__)) {name};":
+    if _without_spaces(tail) != f"__attribute__((__packed__)){name};":
         raise ContentError(f"unexpected end of {path}:{first}-{last}: {tail!r}")
     return f"// {path}:{first}-{last}\n{chunk}"
+
+
+def extract_plain_type(source, entry):
+    path, first, last, signature, name, _ = entry
+    chunk, tail = extract_range(source, path, first, last, signature)
+    if _without_spaces(tail) != f"{name};":
+        raise ContentError(f"unexpected end of {path}:{first}-{last}: {tail!r}")
+    return f"// {path}:{first}-{last}\n{chunk}"
+
+
+def extract_define(source, entry):
+    """Return a macro definition: a first line that matches exactly, then continued lines."""
+    path, first, last, signature, name = entry
+    try:
+        lines = source.decode("utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError as exc:
+        raise ContentError(f"invalid UTF-8 in {path}") from exc
+    where = f"{path}:{first}-{last}"
+    if first < 1 or last < first or len(lines) < last:
+        raise ContentError(f"missing range {where}")
+    if lines[first - 1].rstrip("\n") != signature:
+        raise ContentError(f"unexpected start of {where}")
+    if not signature.startswith(f"#define {name}"):
+        raise ContentError(f"{where} does not define {name}")
+    for number in range(first, last + 1):
+        text = lines[number - 1].rstrip("\n")
+        continued = text.endswith("\\")
+        if continued != (number < last):
+            raise ContentError(f"macro continuation does not match the range {where}")
+    return f"// {where}\n{''.join(lines[first - 1:last])}"
 
 
 def strip_qualifier(first_line, qualifier):
@@ -147,17 +330,67 @@ def extract_sender(source, entry):
     return f"// {path}:{first}-{last}\n{strip_qualifier(declaration, qualifier)}{newline}{body}"
 
 
+def extract_reader(source, entry):
+    """Like extract_sender, but the `em_msg_t::` qualifier stays: readers are shim members."""
+    path, first, last, signature, qualifier = entry
+    chunk, tail = extract_range(source, path, first, last, signature)
+    if tail:
+        raise ContentError(f"unexpected end of {path}:{first}-{last}: {tail!r}")
+    if len(re.findall(rf"\b{re.escape(qualifier)}::", signature)) != 1:
+        raise ContentError(f"expected exactly one {qualifier}:: in {signature!r}")
+    return f"// {path}:{first}-{last}\n{chunk}"
+
+
+def check_shim_declarations(shim_text, header_text):
+    """Check the shim's em_msg_t against the pinned class.
+
+    The members must be exactly SHIM_READER_MEMBERS, and every other line must be a method
+    declaration that appears in inc/em_msg.h at the pin (ignoring white space).
+    """
+    match = re.search(r"^struct em_msg_t \{\n(.*?)^\};", shim_text, re.DOTALL | re.MULTILINE)
+    if match is None:
+        raise ContentError("shim.hpp does not declare struct em_msg_t")
+    header_lines = {_without_spaces(line) for line in header_text.splitlines()}
+    members = []
+    for line in match.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("//"):
+            continue
+        if "(" not in line:
+            members.append(line)
+        elif _without_spaces(line) not in header_lines:
+            raise ContentError(f"shim declaration is not in {EM_MSG_H} at the pin: {line!r}")
+    if members != SHIM_READER_MEMBERS:
+        raise ContentError(f"shim em_msg_t members {members} differ from {SHIM_READER_MEMBERS}")
+    for member in members:
+        if _without_spaces(member) not in header_lines:
+            raise ContentError(f"shim member is not in {EM_MSG_H} at the pin: {member!r}")
+
+
 def write_extractions(sources, scratch):
-    structs = [extract_struct(sources[entry[0]], entry) for entry in STRUCTS]
+    types = sorted([(entry[0], entry[1], extract_struct(sources[entry[0]], entry))
+                    for entry in STRUCTS] +
+                   [(entry[0], entry[1], extract_plain_type(sources[entry[0]], entry))
+                    for entry in PLAIN_TYPES])
+    defines = [extract_define(sources[entry[0]], entry) for entry in DEFINES]
     senders = [extract_sender(sources[entry[0]], entry) for entry in SENDERS]
-    (scratch / "structs.inc").write_text("\n".join(structs), encoding="utf-8")
+    readers = [extract_reader(sources[entry[0]], entry) for entry in READERS]
+    shim_text = (TOOL / "shim.hpp").read_text(encoding="utf-8")
+    check_shim_declarations(shim_text, sources[EM_MSG_H].decode("utf-8"))
+    # Upstream declares the types in file order, so that order satisfies their dependencies.
+    (scratch / "defines.inc").write_text("\n".join(defines), encoding="utf-8")
+    (scratch / "structs.inc").write_text("\n".join(text for _, _, text in types), encoding="utf-8")
     (scratch / "senders.inc").write_text("\n".join(senders), encoding="utf-8")
+    (scratch / "readers.inc").write_text("\n".join(readers), encoding="utf-8")
     for name in ("shim.hpp", "vectors.cpp"):
         (scratch / name).write_bytes((TOOL / name).read_bytes())
 
 
 def compile_and_run(scratch, cxx):
-    """Compile vectors.cpp in scratch and run it. Returns (body bytes, compiler version, flags)."""
+    """Compile vectors.cpp in scratch and run it.
+
+    Returns (sender body, reader body, compiler version, flags), the bodies as bytes.
+    """
     env = os.environ.copy()
     env["CCACHE_DISABLE"] = "1"  # some build environments have a read-only ccache directory
     cxxflags = ["-std=c++17", "-O2"]
@@ -165,9 +398,10 @@ def compile_and_run(scratch, cxx):
     if not lines:
         raise ToolError(f"compiler {cxx} did not report a version")
     run([cxx, *cxxflags, "vectors.cpp", "-o", "vectors"], cwd=scratch, env=env)
-    output_path = scratch / "body.tsv"
-    run([str(scratch / "vectors"), str(output_path)], cwd=scratch, env=env)
-    return output_path.read_bytes(), lines[0], cxxflags
+    sender_path = scratch / "senders.tsv"
+    reader_path = scratch / "readers.tsv"
+    run([str(scratch / "vectors"), str(sender_path), str(reader_path)], cwd=scratch, env=env)
+    return sender_path.read_bytes(), reader_path.read_bytes(), lines[0], cxxflags
 
 
 def parse_probe(body):
@@ -212,6 +446,56 @@ def check_probe(body):
         raise ToolError(f"sizeof/offsetof probe mismatch: expected {PROBE_EXPECTED}, got {actual}")
 
 
+STATION = "021122334455"
+OTHER_STATION = "0a0b0c0d0e0f"
+THIRD_STATION = "0211223344aa"
+BSSID = "aabbccddeeff"
+ERROR_CODE_METRICS = "em_metrics_t::create_error_code_tlv"
+CLIENT_INFO = "em_capability_t::create_client_info_tlv"
+BACKHAUL_POLICY = "em_policy_cfg_t::create_backhaul_bss_conf_policy_tlv"
+UNASSOC_QUERY = "em_metrics_t::create_unassoc_sta_link_metrics_query_tlv"
+UNASSOC_RESPONSE = "em_metrics_t::create_unassoc_sta_link_metrics_resp_tlv"
+
+# Query cases: (case, op_class, channels). A channel is (number, [station MAC hex, ...]).
+QUERY_CASES = [
+    ("no-channels", 115, []),
+    ("one-channel-one-sta", 115, [(36, [STATION])]),
+    ("one-channel-two-sta", 121, [(100, [STATION, OTHER_STATION])]),
+    ("two-channels", 115, [(36, [STATION, OTHER_STATION]), (40, [THIRD_STATION])]),
+    ("channel-without-sta", 115, [(36, []), (40, [STATION])]),
+]
+
+# Response cases: (case, op_class, entries). An entry is (MAC hex, channel, op class, rcpi,
+# time delta). The first entries list is shared so that the filter by op class shows.
+MIXED_ENTRIES = [
+    (STATION, 36, 115, 90, 1),
+    (OTHER_STATION, 100, 121, 70, 16909060),
+    (THIRD_STATION, 40, 115, 60, 4294967295),
+]
+RESPONSE_CASES = [
+    ("empty", 115, []),
+    ("one-entry", 115, [(STATION, 36, 115, 90, 1)]),
+    ("op-115-of-mixed", 115, MIXED_ENTRIES),
+    ("op-121-of-mixed", 121, MIXED_ENTRIES),
+    ("op-125-of-mixed", 125, MIXED_ENTRIES),
+]
+
+
+def query_channels_text(channels):
+    if not channels:
+        return "none"
+    parts = []
+    for number, stations in channels:
+        parts.append(f"{number}:{'+'.join(stations) if stations else '-'}")
+    return ",".join(parts)
+
+
+def response_entries_text(entries):
+    if not entries:
+        return "none"
+    return ",".join("/".join(str(field) for field in entry) for entry in entries)
+
+
 def expected_case_inputs():
     """The exact input fields for each (function, case), in fixture order."""
     rows = {("em_t::create_prof_2_tlv", "default"): {"fill": "ff"}}
@@ -220,6 +504,26 @@ def expected_case_inputs():
             key = ("em_configuration_t::create_error_code_tlv", f"val-{value}-{suffix}")
             rows[key] = {"fill": "ff", "val": str(value),
                          "sta_mac": "null" if suffix == "null" else "021122334455"}
+    for found in (0, 1):
+        for associated in (0, 1):
+            rows[(ERROR_CODE_METRICS, f"found-{found}-assoc-{associated}")] = {
+                "fill": "ff", "sta": STATION, "sta_found": str(found),
+                "is_associated": str(associated)}
+    rows[(CLIENT_INFO, "default")] = {"fill": "ff", "sta": STATION, "bssid": BSSID}
+    rows[(CLIENT_INFO, "swapped")] = {"fill": "ff", "sta": BSSID, "bssid": STATION}
+    rows[(BACKHAUL_POLICY, "null-bssid")] = {
+        "fill": "ff", "bssid": "000000000000", "p_one": "1", "p_two": "1"}
+    for p_one in (0, 1):
+        for p_two in (0, 1):
+            rows[(BACKHAUL_POLICY, f"p-one-{p_one}-p-two-{p_two}")] = {
+                "fill": "ff", "bssid": STATION, "p_one": str(p_one), "p_two": str(p_two)}
+    rows[(UNASSOC_QUERY, "null-op")] = {"fill": "ff", "op": "null"}
+    for case, op_class, channels in QUERY_CASES:
+        rows[(UNASSOC_QUERY, case)] = {"fill": "ff", "op_class": str(op_class),
+                                       "channels": query_channels_text(channels)}
+    for case, op_class, entries in RESPONSE_CASES:
+        rows[(UNASSOC_RESPONSE, case)] = {"fill": "ff", "op_class": str(op_class),
+                                          "entries": response_entries_text(entries)}
     return rows
 
 
@@ -277,6 +581,49 @@ def validate_body(body):
     return rows
 
 
+def _mac_bytes(text, where):
+    if not re.fullmatch(r"(?:[0-9a-f]{2}){6}", text):
+        raise ContentError(f"{where}: bad MAC {text!r}")
+    return bytes.fromhex(text)
+
+
+def expected_query_bytes(inputs):
+    """The Unassociated STA Link Metrics Query value for the inputs, built from the spec layout:
+    operating class, channel count, then per channel the number, the STA count and the MACs."""
+    out = bytearray([int(inputs["op_class"])])
+    if inputs["channels"] == "none":
+        out.append(0)
+        return bytes(out)
+    channels = inputs["channels"].split(",")
+    out.append(len(channels))
+    for channel in channels:
+        number, _, stations = channel.partition(":")
+        macs = [] if stations == "-" else stations.split("+")
+        out.extend([int(number), len(macs)])
+        for mac in macs:
+            out.extend(_mac_bytes(mac, "query"))
+    return bytes(out)
+
+
+def expected_response_bytes(inputs):
+    """The Unassociated STA Link Metrics Response value: operating class, STA count, then per STA
+    of that class the MAC, channel, 4-octet big-endian time delta and RCPI."""
+    op_class = int(inputs["op_class"])
+    body = bytearray()
+    count = 0
+    if inputs["entries"] != "none":
+        for entry in inputs["entries"].split(","):
+            mac, channel, entry_class, rcpi, time_delta = entry.split("/")
+            if int(entry_class) != op_class:
+                continue
+            body.extend(_mac_bytes(mac, "response"))
+            body.append(int(channel))
+            body.extend(int(time_delta).to_bytes(4, "big"))
+            body.append(int(rcpi))
+            count += 1
+    return bytes([op_class, count]) + bytes(body)
+
+
 def check_row(case, function, inputs, returned, hex_text):
     if not re.fullmatch(r"[0-9]+", returned) or not HEX_OR_DASH.fullmatch(hex_text):
         raise ContentError(f"{function}/{case}: bad return or hex")
@@ -305,74 +652,689 @@ def check_row(case, function, inputs, returned, hex_text):
             raise ContentError(f"{function}/{case}: bad sta_mac")
         if data[1:] != expected_mac:
             raise ContentError(f"{function}/{case}: MAC octets differ from sta_mac")
+    elif function == ERROR_CODE_METRICS:
+        if set(inputs) != {"fill", "sta", "sta_found", "is_associated"} or len(data) != 7:
+            raise ContentError(f"{function}/{case}: wrong inputs or length")
+        # src/em/metrics/em_metrics.cpp:2384-2411: reason 1 when associated, else 0; sta_found
+        # is ignored; then the station MAC.
+        expected = bytes([1 if inputs["is_associated"] == "1" else 0])
+        if data != expected + _mac_bytes(inputs["sta"], function):
+            raise ContentError(f"{function}/{case}: unexpected bytes {hex_text}")
+    elif function == CLIENT_INFO:
+        if set(inputs) != {"fill", "sta", "bssid"}:
+            raise ContentError(f"{function}/{case}: wrong inputs")
+        # Client Info is the BSSID, then the client MAC, although the parameters are the other
+        # way round.
+        expected = _mac_bytes(inputs["bssid"], function) + _mac_bytes(inputs["sta"], function)
+        if data != expected:
+            raise ContentError(f"{function}/{case}: unexpected bytes {hex_text}")
+    elif function == BACKHAUL_POLICY:
+        if set(inputs) != {"fill", "bssid", "p_one", "p_two"}:
+            raise ContentError(f"{function}/{case}: wrong inputs")
+        bssid = _mac_bytes(inputs["bssid"], function)
+        if bssid == bytes(6):
+            # An all-zero BSSID writes nothing, whatever the flags are.
+            expected = b""
+        else:
+            # GCC puts the bit-fields from the low bit: reserved 0-5, profile 2 bit 6, profile 1
+            # bit 7 (the em_bh_bss_config_t `# Probe:` line has the 7-octet size).
+            flags = (0x80 if inputs["p_one"] == "1" else 0) | (0x40 if inputs["p_two"] == "1" else 0)
+            expected = bssid + bytes([flags])
+        if data != expected:
+            raise ContentError(f"{function}/{case}: unexpected bytes {hex_text}")
+    elif function == UNASSOC_QUERY:
+        if inputs.get("op") == "null":
+            if set(inputs) != {"fill", "op"} or data:
+                raise ContentError(f"{function}/{case}: NULL op must write nothing")
+        elif set(inputs) != {"fill", "op_class", "channels"} or data != expected_query_bytes(inputs):
+            raise ContentError(f"{function}/{case}: unexpected bytes {hex_text}")
+    elif function == UNASSOC_RESPONSE:
+        if set(inputs) != {"fill", "op_class", "entries"} or data != expected_response_bytes(inputs):
+            raise ContentError(f"{function}/{case}: unexpected bytes {hex_text}")
     else:
         raise ContentError(f"unexpected function {function}")
 
 
-def build_fixture(body, cxx, cxx_version, cxxflags):
+# ---------------------------------------------------------------------------------------------
+# Reader vectors (note 0009 D6). The areas below are the corpus. vectors.cpp holds its own copy,
+# written with the upstream enumerators; check_reader_row() rebuilds each area from this table
+# and compares the bytes, so a mistyped type, value or label fails the run.
+# ---------------------------------------------------------------------------------------------
+
+READER_COLUMN_LINE = "case\tfunction\tinputs\tarea\treturn\toutput"
+
+# EasyMesh and IEEE 1905.1 TLV type numbers (note 0009), written from the specifications, not
+# from inc/em_base.h, so that the enumerators vectors.cpp uses are checked against them.
+TLV_TYPES = {
+    "eom": 0x00,
+    "al_mac_address": 0x01,
+    "device_info": 0x03,
+    "autoconf_freq_band": 0x0e,
+    "supported_freq_band": 0x10,
+    "supported_service": 0x80,
+    "radio_id": 0x82,
+    "operational_bss": 0x83,
+    "ap_radio_basic_cap": 0x85,
+    "ht_cap": 0x86,
+    "vht_cap": 0x87,
+    "he_cap": 0x88,
+    "channel_pref": 0x8b,
+    "channel_sel_resp": 0x8e,
+    "op_channel_report": 0x8f,
+    "client_info": 0x90,
+    "client_assoc_event": 0x92,
+    "ap_metrics": 0x94,
+    "assoc_sta_link_metric": 0x96,
+    "bcon_metric_query": 0x99,
+    "bcon_metric_rsp": 0x9a,
+    "channel_scan_req": 0xa6,
+    "channel_scan_rslt": 0xa7,
+    "profile": 0xb3,
+    "bssid": 0xb8,
+    "ap_radio_advanced_cap": 0xbe,
+    "radio_metric": 0xc6,
+    "bh_sta_radio_cap": 0xcb,
+}
+# A type no reader looks for, and a type used for zero-length filler TLVs.
+UNKNOWN_TYPE = 0xff
+FILLER_TYPE = 0xfe
+ABSENT_TYPE = 0xfd  # get_tlv is also asked for this type, which no area holds
+
+MAC_A = "aabbccddeeff"  # pinned tests/test_l1_em_msg.cpp:2697 expected_mac
+MAC_B = "112233445566"  # tests/test_l1_em_msg.cpp:2736 other_mac, :2882 mac_bytes
+MAC_C = "0a0b0c0d0e0f"
+MAC_D = "deadbeef0001"  # tests/test_l1_em_msg.cpp:2920 mac_bytes
+MAC_E = "c1c2c3c4c5c6"
+MAC_F = "b1b2b3b4b5b6"
+MAC_G = "010203040506"
+MAC_H = "060504030201"
+RUID_1 = "a0a1a2a3a4a5"
+RUID_2 = "b0b1b2b3b4b5"
+RUID_3 = "c0c1c2c3c4c5"
+RUID_4 = "d0d1d2d3d4d5"
+RUID_5 = "e0e1e2e3e4e5"
+RUID_6 = "f0f1f2f3f4f5"
+RUID_7 = "101112131415"
+RUID_8 = "202122232425"
+RUID_9 = "303132333435"
+RUID_10 = "404142434445"
+RUID_11 = "505152535455"
+RUID_12 = "606162636465"
+RUID_13 = "707172737475"
+
+SCAN_REQ_ZERO_RADIOS_FULL = "80" + "00" + "000000000000" + "00"
+
+# (name, [(type name or number, value hex), ...]). The End of Message TLV is added to each.
+READER_AREAS = [
+    # Basic shapes. The pinned unit tests tests/test_l1_em_msg.cpp (cited per area) built these.
+    ("eom-only", []),  # :2769 get_al_mac_address_empty_buffer
+    ("al-mac", [("al_mac_address", MAC_A)]),  # :2692 get_al_mac_address_valid_al_mac_tlv_found
+    ("device-info-only", [("device_info", MAC_B)]),  # :2731 ..._al_mac_tlv_not_present
+    ("device-info-then-al-mac",
+     [("device_info", "112233"), ("al_mac_address", MAC_A)]),  # :2806 ..._multiple_tlvs
+    ("al-mac-twice", [("al_mac_address", MAC_A), ("al_mac_address", MAC_B)]),
+    ("unknown-type", [(UNKNOWN_TYPE, "000000000000")]),  # :2950 get_bss_id_no_valid_tlv_found
+    ("zero-length-only", [(FILLER_TYPE, "")]),
+    ("zero-length-then-al-mac", [(FILLER_TYPE, ""), ("al_mac_address", MAC_A)]),
+    # Station and BSSID readers.
+    ("client-info", [("client_info", MAC_A + MAC_B)]),  # :2845 (the TLV is 12 octets here)
+    ("client-assoc-event",
+     [("client_assoc_event", "000000000000" + MAC_B + "01")]),  # :2880 (plus the event octet)
+    ("client-assoc-event-sta-and-bssid", [("client_assoc_event", MAC_E + MAC_F + "80")]),
+    ("ap-metrics", [("ap_metrics", MAC_D + "20" + "0003" + "00")]),  # :2918
+    ("bssid-tlv", [("bssid", MAC_C)]),
+    ("bcon-metric-query",
+     [("bcon_metric_query", MAC_E + "7324" + MAC_F + "00" + "00" + "00" + "00")]),
+    ("bcon-metric-rsp", [("bcon_metric_rsp", MAC_E + "0000")]),
+    ("assoc-sta-link-metric", [("assoc_sta_link_metric", MAC_E + "00")]),
+    ("mixed-sta", [
+        ("client_info", MAC_A + MAC_B),
+        ("client_assoc_event", MAC_C + MAC_D + "80"),
+        ("bcon_metric_query", MAC_E + "7324" + MAC_F + "00" + "00" + "00" + "00"),
+        ("bcon_metric_rsp", MAC_G + "0000"),
+        ("assoc_sta_link_metric", MAC_H + "00"),
+    ]),
+    ("mixed-sta-reversed", [
+        ("assoc_sta_link_metric", MAC_H + "00"),
+        ("bcon_metric_rsp", MAC_G + "0000"),
+        ("bcon_metric_query", MAC_E + "7324" + MAC_F + "00" + "00" + "00" + "00"),
+        ("client_assoc_event", MAC_C + MAC_D + "80"),
+        ("client_info", MAC_A + MAC_B),
+    ]),
+    ("mixed-bss", [
+        ("ap_metrics", MAC_D + "20" + "0003" + "00"),
+        ("bssid", MAC_C),
+        ("client_assoc_event", MAC_E + MAC_F + "80"),
+        ("client_info", MAC_A + MAC_B),
+    ]),
+    ("mixed-bss-reversed", [
+        ("client_info", MAC_A + MAC_B),
+        ("client_assoc_event", MAC_E + MAC_F + "80"),
+        ("bssid", MAC_C),
+        ("ap_metrics", MAC_D + "20" + "0003" + "00"),
+    ]),
+    # Profile (1-octet and 4-octet forms, then values and lengths the parser rejects).
+    ("profile-1-octet-reserved", [("profile", "00")]),
+    ("profile-1-octet-p1", [("profile", "01")]),
+    ("profile-1-octet-p2", [("profile", "02")]),
+    ("profile-1-octet-p3", [("profile", "03")]),
+    ("profile-4-octet-p1", [("profile", "01000000")]),
+    ("profile-4-octet-p2", [("profile", "02000000")]),
+    ("profile-4-octet-p3", [("profile", "03000000")]),
+    ("profile-value-out-of-range", [("profile", "04")]),
+    ("profile-value-ff", [("profile", "ff")]),
+    ("profile-length-2", [("profile", "0200")]),
+    ("profile-length-0", [("profile", "")]),
+    ("profile-twice", [("profile", "01"), ("profile", "03")]),
+    ("profile-after-other", [("device_info", MAC_B), ("profile", "02")]),
+    # Supported Service.
+    ("supported-service-0", [("supported_service", "00")]),
+    ("supported-service-1", [("supported_service", "0100")]),
+    ("supported-service-3", [("supported_service", "03" + "00" + "01" + "a1")]),
+    ("supported-service-8",
+     [("supported_service", "08" + "00" + "01" + "02" + "a0" + "a1" + "03" + "04" + "05")]),
+    # More than EM_MAX_SERVICE: the count is stored before the reader gives up.
+    ("supported-service-9",
+     [("supported_service", "09" + "00" + "01" + "02" + "a0" + "a1" + "03" + "04" + "05" + "06")]),
+    ("supported-service-twice", [("supported_service", "0100"), ("supported_service", "0101")]),
+    ("supported-service-after-other",
+     [("device_info", MAC_B), ("supported_service", "02" + "01" + "a1")]),
+    # Frequency band.
+    ("supported-freq-band-5ghz", [("supported_freq_band", "01")]),
+    ("supported-freq-band-6ghz", [("supported_freq_band", "03")]),
+    ("autoconf-freq-band-24ghz", [("autoconf_freq_band", "00")]),
+    ("autoconf-freq-band-60ghz", [("autoconf_freq_band", "02")]),
+    ("freq-band-supported-then-autoconf",
+     [("supported_freq_band", "01"), ("autoconf_freq_band", "00")]),
+    ("freq-band-autoconf-then-supported",
+     [("autoconf_freq_band", "03"), ("supported_freq_band", "02")]),
+    # Radio identifier readers, one TLV type each.
+    ("radio-id", [("radio_id", RUID_1)]),
+    ("ap-radio-basic-cap", [("ap_radio_basic_cap", RUID_2 + "10" + "00")]),
+    ("ap-radio-advanced-cap", [("ap_radio_advanced_cap", RUID_3 + "00")]),
+    ("ht-cap", [("ht_cap", RUID_4 + "00")]),
+    ("vht-cap", [("vht_cap", RUID_5 + "0000" + "0000" + "00" + "00")]),
+    ("he-cap", [("he_cap", RUID_6 + "04" + "ffffffff" + "0000")]),
+    ("channel-pref", [("channel_pref", RUID_7 + "00")]),
+    ("channel-sel-resp", [("channel_sel_resp", RUID_8 + "00")]),
+    ("op-channel-report", [("op_channel_report", RUID_9 + "00" + "00")]),
+    ("channel-scan-req-1-radio", [("channel_scan_req", "80" + "01" + RUID_10 + "00")]),
+    ("channel-scan-rslt",
+     [("channel_scan_rslt", RUID_11 + "7324" + "00" + "00" + "2010" + "0000" + "00000000" + "00")]),
+    ("radio-metric", [("radio_metric", RUID_12 + "10203040")]),
+    ("bh-sta-radio-cap", [("bh_sta_radio_cap", RUID_13 + "00")]),
+    # Operational BSS: with no radios the walk continues; with radios the first one is used.
+    ("operational-bss-0-radios", [("operational_bss", "00")]),
+    ("operational-bss-0-radios-then-radio-id",
+     [("operational_bss", "00"), ("radio_id", RUID_2)]),
+    ("operational-bss-1-radio",
+     [("operational_bss", "01" + RUID_1 + "01" + MAC_B + "04" + "6d657368")]),
+    ("operational-bss-2-radios", [("operational_bss", "02" + RUID_1 + "00" + RUID_2 + "00")]),
+    # Channel Scan Request: with no radios the walk ends "not found".
+    ("channel-scan-req-0-radios", [("channel_scan_req", "8000")]),
+    ("channel-scan-req-0-radios-full-size", [("channel_scan_req", SCAN_REQ_ZERO_RADIOS_FULL)]),
+    ("channel-scan-req-0-radios-then-radio-id",
+     [("channel_scan_req", SCAN_REQ_ZERO_RADIOS_FULL), ("radio_id", RUID_2)]),
+    ("radio-id-after-unknown", [(UNKNOWN_TYPE, "00"), ("radio_id", RUID_1)]),
+    ("radio-id-twice", [("radio_id", RUID_1), ("radio_id", RUID_2)]),
+    ("ht-cap-then-radio-id", [("ht_cap", RUID_4 + "00"), ("radio_id", RUID_1)]),
+    ("mixed-radio", [
+        ("channel_pref", RUID_7 + "00"),
+        ("channel_sel_resp", RUID_8 + "00"),
+        ("op_channel_report", RUID_9 + "00" + "00"),
+        ("channel_scan_rslt", RUID_11 + "7324" + "00" + "00" + "2010" + "0000" + "00000000" + "00"),
+        ("radio_metric", RUID_12 + "10203040"),
+        ("bh_sta_radio_cap", RUID_13 + "00"),
+        ("ap_radio_basic_cap", RUID_2 + "10" + "00"),
+        ("ap_radio_advanced_cap", RUID_3 + "00"),
+        ("ht_cap", RUID_4 + "00"),
+        ("vht_cap", RUID_5 + "0000" + "0000" + "00" + "00"),
+        ("he_cap", RUID_6 + "04" + "ffffffff" + "0000"),
+        ("operational_bss", "01" + RUID_1 + "00"),
+        ("channel_scan_req", "80" + "01" + RUID_10 + "00"),
+        ("radio_id", RUID_1),
+    ]),
+    ("mixed-radio-reversed", [
+        ("radio_id", RUID_1),
+        ("channel_scan_req", "80" + "01" + RUID_10 + "00"),
+        ("operational_bss", "01" + RUID_1 + "00"),
+        ("he_cap", RUID_6 + "04" + "ffffffff" + "0000"),
+        ("vht_cap", RUID_5 + "0000" + "0000" + "00" + "00"),
+        ("ht_cap", RUID_4 + "00"),
+        ("ap_radio_advanced_cap", RUID_3 + "00"),
+        ("ap_radio_basic_cap", RUID_2 + "10" + "00"),
+        ("bh_sta_radio_cap", RUID_13 + "00"),
+        ("radio_metric", RUID_12 + "10203040"),
+        ("channel_scan_rslt", RUID_11 + "7324" + "00" + "00" + "2010" + "0000" + "00000000" + "00"),
+        ("op_channel_report", RUID_9 + "00" + "00"),
+        ("channel_sel_resp", RUID_8 + "00"),
+        ("channel_pref", RUID_7 + "00"),
+    ]),
+    # Message-like areas that mix the readers' types.
+    ("autoconf-search-like", [
+        ("al_mac_address", MAC_A),
+        ("supported_freq_band", "02"),
+        ("profile", "02"),
+        ("supported_service", "0100"),
+    ]),
+    ("client-capability-like", [
+        ("client_info", MAC_A + MAC_B),
+        ("device_info", "00"),
+        ("radio_id", RUID_1),
+    ]),
+]
+
+# Cases of parse_profile_tlv, which takes a value and its length, not an area:
+# (case, value hex, value_len).
+PARSE_PROFILE_CASES = [
+    ("value-0-length-1", "00", 1),
+    ("value-1-length-1", "01", 1),
+    ("value-2-length-1", "02", 1),
+    ("value-3-length-1", "03", 1),
+    ("value-4-length-1", "04", 1),
+    ("value-ff-length-1", "ff", 1),
+    ("value-1-length-4", "01000000", 4),
+    ("value-2-length-4", "02000000", 4),
+    ("value-3-length-4", "03000000", 4),
+    ("value-4-length-4", "04000000", 4),
+    ("value-2-length-0", "02", 0),
+    ("value-2-length-2", "0200", 2),
+    ("value-2-length-3", "020000", 3),
+    ("value-2-length-5", "0200000000", 5),
+]
+
+GET_AL_MAC = "em_msg_t::get_al_mac_address"
+GET_SERVICE = "em_msg_t::get_supported_service"
+PARSE_PROFILE = "em_msg_t::parse_profile_tlv"
+GET_PROFILE = "em_msg_t::get_profile"
+GET_STA_MAC = "em_msg_t::get_sta_mac"
+GET_BSS_ID = "em_msg_t::get_bss_id"
+GET_RADIO_ID = "em_msg_t::get_radio_id"
+GET_FREQ_BAND = "em_msg_t::get_freq_band"
+GET_PROFILE_TYPE = "em_msg_t::get_profile_type"
+GET_TLV = "em_msg_t::get_tlv(type)"
+GET_TLV_IN_BUFFER = "em_msg_t::get_tlv(buff,len,type)"
+GET_FIRST_TLV = "em_msg_t::get_first_tlv"
+GET_NEXT_TLV = "em_msg_t::get_next_tlv"
+
+# Readers run once per area, in this order (every area, every reader); then the readers that
+# take a TLV type or an offset, then parse_profile_tlv. vectors.cpp writes rows in this order.
+WHOLE_AREA_READERS = [GET_AL_MAC, GET_SERVICE, GET_PROFILE, GET_STA_MAC, GET_BSS_ID,
+                      GET_RADIO_ID, GET_FREQ_BAND, GET_PROFILE_TYPE, GET_FIRST_TLV]
+TYPE_READERS = [GET_TLV, GET_TLV_IN_BUFFER]
+OUT_PARAMETER_READERS = {GET_AL_MAC, GET_SERVICE, GET_PROFILE, GET_STA_MAC, GET_BSS_ID,
+                         GET_RADIO_ID, GET_FREQ_BAND, GET_PROFILE_TYPE}
+
+
+def type_number(kind):
+    return TLV_TYPES[kind] if isinstance(kind, str) else kind
+
+
+def build_area(tlvs):
+    """Concatenate the TLVs (type, 2-octet big-endian length, value) and the End of Message."""
+    out = bytearray()
+    for kind, value_hex in tlvs:
+        value = bytes.fromhex(value_hex)
+        out.append(type_number(kind))
+        out.extend(len(value).to_bytes(2, "big"))
+        out.extend(value)
+    out.extend(b"\x00\x00\x00")
+    return bytes(out)
+
+
+def parse_area(data):
+    """Split a well-formed area into (offset, type, value), the End of Message TLV last."""
+    tlvs = []
+    offset = 0
+    while True:
+        if offset + 3 > len(data):
+            raise ContentError("area is not terminated by an End of Message TLV")
+        length = int.from_bytes(data[offset + 1:offset + 3], "big")
+        if offset + 3 + length > len(data):
+            raise ContentError("area has a TLV that runs past its end")
+        tlvs.append((offset, data[offset], data[offset + 3:offset + 3 + length]))
+        if data[offset] == 0:
+            if length != 0 or offset + 3 != len(data):
+                raise ContentError("End of Message TLV is not the last, empty TLV")
+            return tlvs
+        offset += 3 + length
+
+
+def probe_types(tlvs):
+    """The TLV types get_tlv is asked for: each type in the area once, End of Message, an absent one."""
+    types = []
+    for _, kind, _ in tlvs:
+        if kind != 0 and kind not in types:
+            types.append(kind)
+    return [*types, 0, ABSENT_TYPE]
+
+
+def expected_reader_cases():
+    """The exact (function, case) -> (inputs, area hex) rows of the reader fixture, in order."""
+    rows = {}
+    areas = [(name, build_area(tlvs)) for name, tlvs in READER_AREAS]
+    for function in WHOLE_AREA_READERS:
+        for name, area in areas:
+            inputs = {"len": str(len(area))}
+            if function in OUT_PARAMETER_READERS:
+                inputs["fill"] = "ff"
+            rows[(function, name)] = (inputs, area.hex())
+    for function in TYPE_READERS:
+        for name, area in areas:
+            for kind in probe_types(parse_area(area)):
+                rows[(function, f"{name}@type-{kind:02x}")] = (
+                    {"len": str(len(area)), "type": f"{kind:02x}"}, area.hex())
+    for name, area in areas:
+        for offset, _, _ in parse_area(area):
+            rows[(GET_NEXT_TLV, f"{name}@from-{offset}")] = (
+                {"len": str(len(area)), "from": str(offset)}, area.hex())
+    for case, value_hex, value_len in PARSE_PROFILE_CASES:
+        rows[(PARSE_PROFILE, case)] = (
+            {"value_len": str(value_len), "fill": "ff"}, value_hex)
+    return rows
+
+
+def _first(tlvs, kinds):
+    """The first TLV (offset, type, value) whose type number is in kinds, in frame order."""
+    for tlv in tlvs:
+        if tlv[1] == 0:
+            return None
+        if tlv[1] in kinds:
+            return tlv
+    return None
+
+
+def _need(value, size, what):
+    if len(value) < size:
+        raise ContentError(f"corpus TLV too short for {what}: {len(value)} < {size}")
+
+
+def _bool_text(flag):
+    return "true" if flag else "false"
+
+
+def _profile_result(value, value_len):
+    """Outcome of parse_profile_tlv for a value: (parsed, 4-octet little-endian profile)."""
+    if value_len not in (1, 4) or value[0] >= 4:
+        return False, None
+    return True, bytes([value[0], 0, 0, 0])
+
+
+def model_reader(function, inputs, area):
+    """What a reader returns and writes, from the written-down behaviour, not from the C++.
+
+    Returns (return text, output hex). The areas are well-formed, so a reader never meets a TLV
+    that is too short for the field it reads; the model raises if the corpus has one.
+    """
+    if function == PARSE_PROFILE:
+        parsed, profile = _profile_result(area, int(inputs["value_len"]))
+        return _bool_text(parsed), (profile.hex() if parsed else "ffffffff")
+    tlvs = parse_area(area)
+    ty = TLV_TYPES
+    unwritten_mac = "ff" * 6
+    if function == GET_AL_MAC:
+        found = _first(tlvs, {ty["al_mac_address"]})
+        if found is None:
+            return "false", unwritten_mac
+        _need(found[2], 6, function)
+        return "true", found[2][:6].hex()
+    if function == GET_SERVICE:
+        found = _first(tlvs, {ty["supported_service"]})
+        if found is None:
+            return "false", "ff" * 9
+        value = found[2]
+        _need(value, 1, function)
+        count = value[0]
+        if len(value) != 1 + count:
+            raise ContentError("corpus Supported Service length does not match its count")
+        if count > 8:
+            # The count is written before the check that rejects it; the list stays untouched.
+            return "false", f"{count:02x}" + "ff" * 8
+        return "true", f"{count:02x}" + (value[1:] + bytes(8 - count)).hex()
+    if function in (GET_PROFILE, GET_PROFILE_TYPE):
+        found = _first(tlvs, {ty["profile"]})
+        if found is None:
+            return "false", "00000000"
+        parsed, profile = _profile_result(found[2], len(found[2]))
+        return _bool_text(parsed), (profile.hex() if parsed else "00000000")
+    if function == GET_STA_MAC:
+        found = _first(tlvs, {ty["client_info"], ty["client_assoc_event"], ty["bcon_metric_query"],
+                              ty["bcon_metric_rsp"], ty["assoc_sta_link_metric"]})
+        if found is None:
+            return "false", unwritten_mac
+        # The client MAC follows the BSSID in Client Info; it comes first in the other TLVs.
+        start = 6 if found[1] == ty["client_info"] else 0
+        _need(found[2], start + 6, function)
+        return "true", found[2][start:start + 6].hex()
+    if function == GET_BSS_ID:
+        found = _first(tlvs, {ty["client_info"], ty["client_assoc_event"], ty["ap_metrics"],
+                              ty["bssid"]})
+        if found is None:
+            return "false", unwritten_mac
+        # The BSSID follows the client MAC in Client Association Event; it comes first elsewhere.
+        start = 6 if found[1] == ty["client_assoc_event"] else 0
+        _need(found[2], start + 6, function)
+        return "true", found[2][start:start + 6].hex()
+    if function == GET_RADIO_ID:
+        return _model_radio_id(tlvs)
+    if function == GET_FREQ_BAND:
+        found = _first(tlvs, {ty["supported_freq_band"], ty["autoconf_freq_band"]})
+        if found is None:
+            return "false", "ff" * 4
+        _need(found[2], 1, function)
+        return "true", found[2][:1].hex() + "ff" * 3
+    if function in (GET_TLV, GET_TLV_IN_BUFFER):
+        wanted = int(inputs["type"], 16)
+        if wanted == 0:
+            return "-", "-"
+        found = _first(tlvs, {wanted})
+        return ("-" if found is None else str(found[0])), "-"
+    if function == GET_FIRST_TLV:
+        first = tlvs[0]
+        # An empty first TLV (and the End of Message TLV) is rejected as having no value.
+        return ("0" if len(first[2]) > 0 else "-"), "-"
+    if function == GET_NEXT_TLV:
+        offsets = [tlv[0] for tlv in tlvs]
+        position = offsets.index(int(inputs["from"]))
+        if position + 1 >= len(tlvs):
+            return "-", "-"
+        following = tlvs[position + 1]
+        return ("-" if len(following[2]) == 0 else str(following[0])), "-"
+    raise ContentError(f"unexpected reader {function}")
+
+
+def _model_radio_id(tlvs):
+    ty = TLV_TYPES
+    at_start = {ty["radio_id"], ty["ap_radio_basic_cap"], ty["ap_radio_advanced_cap"],
+                ty["ht_cap"], ty["vht_cap"], ty["he_cap"], ty["channel_pref"],
+                ty["channel_sel_resp"], ty["op_channel_report"], ty["channel_scan_rslt"],
+                ty["radio_metric"], ty["bh_sta_radio_cap"]}
+    for _, kind, value in tlvs:
+        if kind == ty["channel_scan_req"] and len(value) < 9:
+            # sizeof(em_channel_scan_req_t) is 9; a shorter request ends the search.
+            return "false", "ff" * 6
+        if kind == 0:
+            break
+        if kind in at_start:
+            _need(value, 6, GET_RADIO_ID)
+            return "true", value[:6].hex()
+        if kind == ty["operational_bss"]:
+            _need(value, 1, GET_RADIO_ID)
+            if value[0] >= 1:
+                _need(value, 7, GET_RADIO_ID)
+                return "true", value[1:7].hex()
+            continue  # no radios: keep walking
+        if kind == ty["channel_scan_req"]:
+            if value[1] != 0:
+                return "true", value[2:8].hex()
+            return "false", "ff" * 6  # no radios: the search ends here
+    return "false", "ff" * 6
+
+
+def validate_reader_body(body):
+    """Reject an incomplete or inconsistent reader harness result. Returns the data rows."""
+    try:
+        lines = body.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ContentError("reader harness output is not ASCII") from exc
+    if not body.endswith(b"\n"):
+        raise ContentError("reader harness output does not end with a newline")
+    data = [line for line in lines if not line.startswith("#")]
+    if not data or data[0] != READER_COLUMN_LINE:
+        raise ContentError("missing reader column line")
+    rows = [line.split("\t") for line in data[1:]]
+    expected = expected_reader_cases()
+    keys = []
+    for row in rows:
+        if len(row) != 6 or any(not column for column in row):
+            raise ContentError(f"invalid reader TSV row {row}")
+        case, function, inputs, area_hex, returned, output = row
+        key = (function, case)
+        keys.append(key)
+        try:
+            if key not in expected:
+                raise ContentError(f"{function}/{case}: unexpected case")
+            actual_inputs = _fields(inputs)
+            expected_inputs, expected_area = expected[key]
+            if actual_inputs != expected_inputs:
+                raise ContentError(f"{function}/{case}: inputs differ from expected: "
+                                   f"expected {expected_inputs}, got {actual_inputs}")
+            if area_hex != expected_area:
+                raise ContentError(f"{function}/{case}: area differs from the corpus")
+            check_reader_row(case, function, actual_inputs, area_hex, returned, output)
+        except (KeyError, ValueError) as exc:
+            raise ContentError(f"{function}/{case}: {exc}") from exc
+    if len(set(keys)) != len(keys):
+        raise ContentError("duplicate reader (function, case) row")
+    if keys != list(expected):
+        missing = [key for key in expected if key not in keys]
+        raise ContentError(f"reader case list differs from expected; missing {missing[:5]}")
+    return rows
+
+
+def check_reader_row(case, function, inputs, area_hex, returned, output):
+    if not HEX_OR_DASH.fullmatch(area_hex) or not HEX_OR_DASH.fullmatch(output):
+        raise ContentError(f"{function}/{case}: bad area or output hex")
+    area = bytes.fromhex(area_hex)
+    if function != PARSE_PROFILE and inputs["len"] != str(len(area)):
+        raise ContentError(f"{function}/{case}: len differs from the area length")
+    expected_return, expected_output = model_reader(function, inputs, area)
+    if (returned, output) != (expected_return, expected_output):
+        raise ContentError(f"{function}/{case}: expected return {expected_return} and output "
+                           f"{expected_output}, got {returned} and {output}")
+
+
+def provenance_header(cxx_version, cxx, cxxflags, fields, with_senders):
     header = ["# Generated by tools/upstream-tlv-vectors/regen; do not edit.\n",
               f"# Upstream: rdkcentral/unified-wifi-mesh @ {PIN}\n",
               "# Extraction command: git --no-replace-objects -C <upstream> show <pin>:<path>\n"]
+    for path, first, last, _, name in DEFINES:
+        header.append(f"# Extract macro {name}: git show {PIN}:{path} lines {first}-{last}\n")
     for path, first, last, _, name in STRUCTS:
         header.append(f"# Extract struct {name}: git show {PIN}:{path} lines {first}-{last}\n")
-    for path, first, last, signature, qualifier in SENDERS:
-        header.append(f"# Extract function ({qualifier}:: removed): git show {PIN}:{path} lines {first}-{last}\n")
+    for path, first, last, _, name, _ in PLAIN_TYPES:
+        header.append(f"# Extract type {name}: git show {PIN}:{path} lines {first}-{last}\n")
+    if with_senders:
+        for path, first, last, _, qualifier in SENDERS:
+            header.append(f"# Extract function ({qualifier}:: removed): "
+                          f"git show {PIN}:{path} lines {first}-{last}\n")
+    else:
+        for path, first, last, _, qualifier in READERS:
+            header.append(f"# Extract member function ({qualifier}:: kept): "
+                          f"git show {PIN}:{path} lines {first}-{last}\n")
     header.extend([f"# C++ compiler: {cxx_version}\n",
                    f"# Compile: {cxx} {' '.join(cxxflags)} vectors.cpp -o vectors\n",
-                   "# Run: ./vectors <output>\n",
+                   "# Run: ./vectors <sender output> <reader output>\n",
                    "# Regenerate: python3 tools/upstream-tlv-vectors/regen\n",
                    "# Check: python3 tools/upstream-tlv-vectors/regen --check\n",
-                   "# Fields: case, function, inputs, return (bytes written), hex (lowercase; '-' is empty).\n",
-                   "# Probe lines give the GCC layout of each extracted struct.\n"])
+                   fields])
+    return header
+
+
+def build_fixture(body, cxx, cxx_version, cxxflags):
+    header = provenance_header(
+        cxx_version, cxx, cxxflags,
+        "# Fields: case, function, inputs, return (bytes written), hex (lowercase; '-' is empty).\n",
+        with_senders=True)
+    header.append("# Probe lines give the GCC layout of each extracted struct.\n")
+    return "".join(header).encode("utf-8") + body
+
+
+def build_reader_fixture(body, cxx, cxx_version, cxxflags):
+    header = provenance_header(
+        cxx_version, cxx, cxxflags,
+        "# Fields: case, function, inputs, area (hex of the TLV area; for parse_profile_tlv the "
+        "value), return (true, false, an offset into the area, or '-' for NULL), output (hex of "
+        "what the reader wrote; 'ff' bytes were not written; '-' for none).\n",
+        with_senders=False)
+    header.append("# Inputs: len is the area length (m_len or buff_len); fill=ff means the output "
+                  "object was pre-filled with 0xff.\n")
     return "".join(header).encode("utf-8") + body
 
 
 def write_atomically(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    write_all_atomically([(path, data)])
+
+
+def write_all_atomically(files):
+    """Write every (path, data), each by rename. Nothing is renamed unless every temporary file
+    was written."""
+    staged = []
     try:
-        with os.fdopen(fd, "wb") as file:
-            file.write(data)
-        os.chmod(name, 0o644)
-        os.replace(name, path)
+        for path, data in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+            staged.append((name, path))
+            with os.fdopen(fd, "wb") as file:
+                file.write(data)
+            os.chmod(name, 0o644)
+        for name, path in staged:
+            os.replace(name, path)
     except BaseException as original:
-        try:
-            os.unlink(name)
-        except FileNotFoundError:
-            pass
-        except OSError as cleanup:
-            raise ToolError(f"atomic write failed: {original}; cannot remove temporary file {name}: {cleanup}") from original
+        for name, _ in staged:
+            try:
+                os.unlink(name)
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup:
+                raise ToolError(f"atomic write failed: {original}; cannot remove temporary file "
+                                f"{name}: {cleanup}") from original
         raise
 
 
 def generate(upstream, cxx):
-    """Build the whole fixture in memory. Returns (fixture bytes, data rows)."""
+    """Build both fixtures in memory. Returns (sender bytes, reader bytes, sender rows, reader rows)."""
     sources = read_sources(upstream)
     with tempfile.TemporaryDirectory(prefix="upstream-tlv-") as tmp:
         scratch = Path(tmp)
         write_extractions(sources, scratch)
-        body, cxx_version, cxxflags = compile_and_run(scratch, cxx)
+        body, reader_body, cxx_version, cxxflags = compile_and_run(scratch, cxx)
     check_probe(body)
     rows = validate_body(body)
-    return build_fixture(body, cxx, cxx_version, cxxflags), rows
+    reader_rows = validate_reader_body(reader_body)
+    return (build_fixture(body, cxx, cxx_version, cxxflags),
+            build_reader_fixture(reader_body, cxx, cxx_version, cxxflags), rows, reader_rows)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", type=Path, default=ROOT.parent / "unified-wifi-mesh")
-    parser.add_argument("--out", type=Path, default=FIXTURE)
+    parser.add_argument("--out", type=Path, default=FIXTURE, help="sender fixture")
+    parser.add_argument("--reader-out", type=Path, default=READER_FIXTURE, help="reader fixture")
     parser.add_argument("--cxx", default="c++")
     parser.add_argument("--check", action="store_true",
-                        help="rebuild in memory and compare the whole fixture; write nothing")
+                        help="rebuild in memory and compare both fixtures; write nothing")
     args = parser.parse_args(argv)
     try:
-        data, rows = generate(args.upstream, args.cxx)
+        data, reader_data, rows, reader_rows = generate(args.upstream, args.cxx)
         if args.check:
-            if args.out.read_bytes() != data:
-                raise ContentError(f"fixture differs: {args.out}")
+            stale = [str(path) for path, expected in ((args.out, data), (args.reader_out, reader_data))
+                     if path.read_bytes() != expected]
+            if stale:
+                raise ContentError(f"fixture differs: {', '.join(stale)}")
         else:
-            write_atomically(args.out, data)
-        print(f"ok: {len(rows)} rows")
+            write_all_atomically([(args.out, data), (args.reader_out, reader_data)])
+        print(f"ok: {len(rows)} sender rows, {len(reader_rows)} reader rows")
         return 0
     except (ContentError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

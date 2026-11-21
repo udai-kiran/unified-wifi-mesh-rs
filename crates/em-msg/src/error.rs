@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Error types for framing, building and TLV body decoding and encoding.
+//! Error types for framing, building, TLV body decoding and encoding, and the field readers.
 
 use core::fmt;
 
@@ -195,6 +195,85 @@ impl fmt::Display for EncodeError {
 }
 
 impl std::error::Error for EncodeError {}
+
+/// A field reader (note 0009 D6, [`readers`](crate::readers)) could not read its field.
+///
+/// `Ok(None)` from a reader is upstream's "not found". This error is for a frame or a value
+/// that upstream either rejects through its own check or reads past the end of. Callers match
+/// on the kind, never on message text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReaderError {
+    /// The TLV area is malformed; the walk stopped at the first framing error.
+    Framing(FramingError),
+    /// The value is shorter than the read needs, where upstream would read past it.
+    ValueTooShort {
+        /// Type of the TLV whose value is too short.
+        tlv_type: TlvType,
+        /// Number of octets the read needs, counted from the start of the value.
+        needed: usize,
+        /// Length of the value.
+        found: usize,
+    },
+    /// The length of the value is rejected by upstream's own check, or is not the exact length
+    /// the reader requires.
+    InvalidLength {
+        /// Type of the TLV whose value has the wrong length.
+        tlv_type: TlvType,
+        /// Length of the value.
+        len: usize,
+    },
+    /// A field of the value is rejected by upstream's own check.
+    ValueOutOfRange {
+        /// Type of the TLV whose value is rejected.
+        tlv_type: TlvType,
+        /// The field value.
+        value: u8,
+    },
+}
+
+impl From<FramingError> for ReaderError {
+    fn from(error: FramingError) -> Self {
+        Self::Framing(error)
+    }
+}
+
+impl fmt::Display for ReaderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Framing(error) => write!(f, "the TLV area is malformed: {error}"),
+            Self::ValueTooShort {
+                tlv_type,
+                needed,
+                found,
+            } => write!(
+                f,
+                "the value of TLV type 0x{:02X} is too short: {needed} octets needed, {found} found",
+                tlv_type.0
+            ),
+            Self::InvalidLength { tlv_type, len } => write!(
+                f,
+                "the value of TLV type 0x{:02X} has the invalid length {len}",
+                tlv_type.0
+            ),
+            Self::ValueOutOfRange { tlv_type, value } => write!(
+                f,
+                "the field value {value} in TLV type 0x{:02X} is out of range",
+                tlv_type.0
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReaderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Framing(error) => Some(error),
+            Self::ValueTooShort { .. }
+            | Self::InvalidLength { .. }
+            | Self::ValueOutOfRange { .. } => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

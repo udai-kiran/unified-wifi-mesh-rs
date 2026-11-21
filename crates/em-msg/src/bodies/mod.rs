@@ -10,7 +10,9 @@
 //! bodies, in the `channel` submodule, the CAC, anticipated channel, spatial reuse and
 //! spectrum inquiry bodies, in the `cac` submodule, the metrics bodies, in the `metrics`
 //! submodule, the steering, client association control, backhaul steering and code bodies,
-//! in the `steering` submodule, and the policy and `QoS` bodies, in the `policy` submodule.
+//! in the `steering` submodule, the policy and `QoS` bodies, in the `policy` submodule, the
+//! BSS configuration and Wi-Fi 7 MLD bodies, in the `mld` submodule, and the DPP, security and
+//! encapsulation bodies, in the `security` submodule.
 //! Other bodies come in later batches.
 //!
 //! A body decodes from [`Tlv::value`](crate::Tlv::value) and encodes to the bytes that
@@ -30,7 +32,9 @@ mod channel;
 mod ieee1905;
 mod linkmetric;
 mod metrics;
+mod mld;
 mod policy;
+mod security;
 mod steering;
 
 pub use autoconfig::{
@@ -68,11 +72,24 @@ pub use metrics::{
     StaMacAddress, UnassociatedQueryChannel, UnassociatedStaLinkMetricsQuery,
     UnassociatedStaLinkMetricsResponse, UnassociatedStaMetrics, Wifi6TidQueueSize,
 };
+pub use mld::{
+    AffiliatedAp, AffiliatedApMetrics, AffiliatedBsta, AffiliatedSta, AffiliatedStaMetrics,
+    AgentApMldConfiguration, ApMld, AssociatedStaMldConfigurationReport,
+    BackhaulStaMldConfiguration, BssConfigurationReport, BssConfigurationReportBss,
+    BssConfigurationReportRadio, BssConfigurationRequest, BssConfigurationResponse, EhtOperations,
+    EhtOperationsBss, EhtOperationsRadio, MldModes, MldStructure, TidToLinkMapping,
+    TidToLinkMappingPolicy, TidToLinkScope,
+};
 pub use policy::{
     BackhaulBssConfiguration, Default8021QSettings, DscpMappingTable, MetricReportingPolicy,
     QosManagementDescriptor, QosManagementPolicy, RadioMetricReportingPolicy, RadioSteeringPolicy,
     ServicePrioritizationRule, SteeringPolicy, TrafficSeparationPolicy, TrafficSeparationSsid,
     UnsuccessfulAssociationPolicy,
+};
+pub use security::{
+    AkmSuite, AkmSuiteCapabilities, Counter48, DppBootstrappingUriNotification, DppCceIndication,
+    DppChirpValue, DppMessage, EncryptedPayload, Ieee1905EncapDpp, Ieee1905EncapEapol,
+    Ieee1905LayerSecurityCapability, Mic, SourceInfo, Tunneled, TunneledMessageType,
 };
 pub use steering::{
     AssociationStatusEntry, AssociationStatusNotification, BackhaulSteeringRequest,

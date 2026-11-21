@@ -1,25 +1,78 @@
 #!/usr/bin/env python3
-"""List every Rust test named in crates/em-dm/tests/data/upstream_test_map.tsv that does not exist.
+"""List every Rust test named in a crate's upstream_test_map.tsv that does not exist.
 
-The existing tests are read from `cargo test -p em-dm --lib -- --list`. A row whose
-disposition is `rust:<module path>` names a test by its module path inside the crate
-(for example `model::tests::sta::find_sta_valid_match`). Rows with a skip reason are not
-checked.
+Two crates have a map: em-dm (crates/em-dm/tests/data/upstream_test_map.tsv) and em-msg
+(crates/em-msg/tests/data/upstream_test_map.tsv). The existing tests are read from
+`cargo test -p <crate> --locked --lib -- --list`. A row whose disposition is
+`rust:<module path>` names a test by its module path inside the crate (for example
+`model::tests::sta::find_sta_valid_match`). Rows with a skip reason are not checked.
 
-Exit status: 0 if every named test exists, 1 if some are missing, 2 on a usage or I/O error.
+For em-msg the `intentional-difference:<id>` tags of the map must also match the tags written
+in crates/em-msg/src/readers.rs: a tag without a row, or a row whose tag is not in the source,
+is an error. The em-msg map is also checked for its shape: every disposition is `rust:<path>` or
+`skip:<reason>`, each of the 15 upstream reader rows appears exactly once, the two `not ported: no
+production caller` rows keep that disposition and the other 13 are `rust:`, a row with an
+intentional-difference tag has a `rust:` disposition, the tag is written inside the body of the
+readers.rs test that the row names, and every (tag, test) pair in readers.rs has its own row.
+
+Exit status: 0 if every named test exists, the tags agree and the em-msg map passes its shape
+rules, 1 if not, 2 on a usage or I/O error.
 """
 
+from collections import Counter
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MAP = ROOT / "crates/em-dm/tests/data/upstream_test_map.tsv"
+TAG_PREFIX = "intentional-difference:"
+TAG_PATTERN = re.compile(r"intentional-difference:([A-Za-z0-9_-]+)")
+
+NOT_PORTED = "skip:not ported: no production caller"
+
+# The upstream em_msg.cpp readers of the em-msg map, with the disposition the two unported ones
+# must keep (note 0009 D6, A10). None means the row must have a `rust:` disposition.
+EXPECTED_READER_ROWS = {
+    "get_tlv(em_tlv_t*)": NOT_PORTED,
+    "get_client_mac_info": NOT_PORTED,
+    "get_al_mac_address": None,
+    "get_supported_service": None,
+    "parse_profile_tlv": None,
+    "get_profile": None,
+    "get_sta_mac": None,
+    "get_bss_id": None,
+    "get_radio_id": None,
+    "get_freq_band": None,
+    "get_profile_type": None,
+    "get_tlv(em_tlv_type_t)": None,
+    "get_tlv(buffer)": None,
+    "get_first_tlv": None,
+    "get_next_tlv": None,
+}
+
+# One entry per crate with a map. tag_source is the Rust file whose comments carry the
+# intentional-difference tags, or None when the map is not checked against the source. shape
+# turns on the em-msg map rules.
+CRATES = [
+    {
+        "name": "em-dm",
+        "map": ROOT / "crates/em-dm/tests/data/upstream_test_map.tsv",
+        "tag_source": None,
+        "shape": False,
+    },
+    {
+        "name": "em-msg",
+        "map": ROOT / "crates/em-msg/tests/data/upstream_test_map.tsv",
+        "tag_source": ROOT / "crates/em-msg/src/readers.rs",
+        "shape": True,
+    },
+]
 
 
-def listed_tests():
+def listed_tests(crate):
     result = subprocess.run(
-        ["cargo", "test", "-p", "em-dm", "--locked", "--lib", "--", "--list"],
+        ["cargo", "test", "-p", crate, "--locked", "--lib", "--", "--list"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -35,27 +88,146 @@ def listed_tests():
     }
 
 
-def named_tests():
-    rows = [line for line in MAP.read_text().splitlines() if not line.startswith("#")]
-    header, body = rows[0].split("\t"), rows[1:]
-    column = header.index("disposition")
+def map_rows(map_path):
+    """The map's data rows as dicts keyed by the header columns."""
+    lines = [line for line in Path(map_path).read_text().splitlines() if not line.startswith("#")]
+    header = lines[0].split("\t")
+    return [dict(zip(header, line.split("\t"))) for line in lines[1:]]
+
+
+def named_tests(map_path):
     named = {}
-    for line in body:
-        fields = line.split("\t")
-        disposition = fields[column]
+    for row in map_rows(map_path):
+        disposition = row["disposition"]
         if disposition.startswith("rust:"):
-            named.setdefault(disposition[len("rust:"):], []).append(fields[0])
+            named.setdefault(disposition[len("rust:"):], []).append(row["test"])
     return named
 
 
+def mapped_tags(map_path):
+    tags = set()
+    for row in map_rows(map_path):
+        if row["tag"].startswith(TAG_PREFIX):
+            tags.add(row["tag"][len(TAG_PREFIX):])
+    return tags
+
+
+def source_tags(source_path):
+    return set(TAG_PATTERN.findall(Path(source_path).read_text()))
+
+
+def test_body(source_text, test_path):
+    """The text of the test named by a module path in the source, or None if it is not there.
+
+    The tests of readers.rs sit one level deep in `mod tests`, so a body runs from `    fn <name>(`
+    to the next line that is exactly `    }`.
+    """
+    name = test_path.rsplit("::", 1)[-1]
+    start = re.search(rf"^    fn {re.escape(name)}\(", source_text, re.MULTILINE)
+    if start is None:
+        return None
+    end = source_text.find("\n    }\n", start.end())
+    if end == -1:
+        return None
+    return source_text[start.start():end]
+
+
+def map_shape_problems(map_path, tag_source):
+    """Rules for the em-msg map beyond the existence of the tests; returns the messages."""
+    messages = []
+    rows = map_rows(map_path)
+    source_text = Path(tag_source).read_text()
+    for row in rows:
+        disposition = row["disposition"]
+        is_rust = disposition.startswith("rust:") and len(disposition) > len("rust:")
+        is_skip = disposition.startswith("skip:") and len(disposition) > len("skip:")
+        if not is_rust and not is_skip:
+            messages.append(f"disposition is neither rust:<path> nor skip:<reason>: {row['test']} ({disposition})")
+    reader_names = Counter(row["test"] for row in rows if row["scope"] == "reader")
+    for name, count in sorted(reader_names.items()):
+        if count > 1:
+            messages.append(f"reader row appears {count} times: {name}")
+    reader_rows = {row["test"]: row for row in rows if row["scope"] == "reader"}
+    for name, required in EXPECTED_READER_ROWS.items():
+        row = reader_rows.get(name)
+        if row is None:
+            messages.append(f"upstream reader row missing: {name}")
+        elif required is not None and row["disposition"] != required:
+            messages.append(f"reader row {name} must be '{required}', not '{row['disposition']}'")
+        elif required is None and not row["disposition"].startswith("rust:"):
+            messages.append(f"ported reader row {name} must be rust:, not '{row['disposition']}'")
+    for row in rows:
+        if not row["tag"].startswith(TAG_PREFIX):
+            continue
+        disposition = row["disposition"]
+        if not disposition.startswith("rust:"):
+            messages.append(f"tagged row is not a rust: reference: {row['test']} ({disposition})")
+            continue
+        test_path = disposition[len("rust:"):]
+        body = test_body(source_text, test_path)
+        if body is None:
+            messages.append(f"tagged row {row['test']} names a test not found in {Path(tag_source).name}: {test_path}")
+        elif row["tag"][len(TAG_PREFIX):] not in TAG_PATTERN.findall(body):
+            messages.append(f"tag {row['tag']} is not inside the body of {test_path} (row {row['test']})")
+    return messages
+
+
+def tag_pair_problems(map_path, tag_source):
+    """One message for each (tag, test) pair of the source that has no row of its own."""
+    source_text = Path(tag_source).read_text()
+    in_source = set()
+    for match in re.finditer(r"^    fn (\w+)\(", source_text, re.MULTILINE):
+        body = test_body(source_text, match.group(1))
+        if body is not None:
+            in_source.update((tag, match.group(1)) for tag in TAG_PATTERN.findall(body))
+    in_map = set()
+    for row in map_rows(map_path):
+        if row["tag"].startswith(TAG_PREFIX) and row["disposition"].startswith("rust:"):
+            in_map.add((row["tag"][len(TAG_PREFIX):], row["disposition"].rsplit("::", 1)[-1]))
+    return [f"tag {tag} in test {test} has no map row" for tag, test in sorted(in_source - in_map)]
+
+
+def check_crate(name, map_path, tag_source, existing):
+    """Print the problems of one crate and return how many there were."""
+    named = named_tests(map_path)
+    missing = {test: rows for test, rows in named.items() if test not in existing}
+    for test, rows in sorted(missing.items()):
+        print(f"missing: {test} (upstream tests: {', '.join(rows)})")
+    print(f"{name}: {len(named)} distinct Rust tests named, {len(missing)} missing")
+    problems = len(missing)
+    if tag_source is not None:
+        in_source = source_tags(tag_source)
+        in_map = mapped_tags(map_path)
+        for tag in sorted(in_source - in_map):
+            print(f"tag without a map row: {tag}")
+        for tag in sorted(in_map - in_source):
+            print(f"map row with a tag absent from {Path(tag_source).name}: {tag}")
+        print(
+            f"{name}: {len(in_source)} tags in {Path(tag_source).name}, "
+            f"{len(in_source - in_map)} without a row, {len(in_map - in_source)} rows with an unknown tag"
+        )
+        problems += len(in_source - in_map) + len(in_map - in_source)
+    return problems
+
+
+def check_shape(name, map_path, tag_source):
+    """Print the shape problems of the em-msg map and return how many there were."""
+    messages = map_shape_problems(map_path, tag_source) + tag_pair_problems(map_path, tag_source)
+    for message in messages:
+        print(message)
+    print(f"{name}: {len(messages)} map shape problems")
+    return len(messages)
+
+
 def main():
-    existing = listed_tests()
-    named = named_tests()
-    missing = {name: rows for name, rows in named.items() if name not in existing}
-    for name, rows in sorted(missing.items()):
-        print(f"missing: {name} (upstream tests: {', '.join(rows)})")
-    print(f"{len(named)} distinct Rust tests named, {len(missing)} missing")
-    return 1 if missing else 0
+    problems = 0
+    for crate in CRATES:
+        problems += check_crate(
+            crate["name"], crate["map"], crate["tag_source"], listed_tests(crate["name"])
+        )
+        if crate.get("shape"):
+            problems += check_shape(crate["name"], crate["map"], crate["tag_source"])
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

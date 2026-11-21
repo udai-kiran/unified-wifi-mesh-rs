@@ -484,6 +484,99 @@ tlvLength. The existing framing reads all 16 bits, as upstream does.
   Fresh rule. Upstream's only 0x9B sender always writes one target (`em_steering.cpp:488-493`). A
   lenient 0x9B decoder accepts that form and drops the target list, which the spec leaves unused
   in opportunity mode. 0xC3 has no production sender, so it has no lenient form.
+- **A9 (2026-11-20, B10-B12 plans; user decisions):**
+  - 0xE6 TID-to-Link Mapping Policy: no lenient form for upstream's fixed 19-octet mapping records
+    without TID-to-Link entries (`em_configuration.cpp:1687-1690`, audit row 18).
+  - 0xD3 DPP Chirp Value: a lenient decoder accepts upstream's 2-octet big-endian Hash Length
+    (`ec_util.cpp:337`, `:356-358`; upstream's reader also expects 2 octets). The strict decoder and the
+    encoder keep the spec's 1 octet (0008 D8).
+  - WSC attributes (D5 audit, `b12/wsc-audit.md` in the tracking folder): Encryption Type Flags and
+    Configuration Methods are big-endian `u16`. Upstream copies them from host-order fields that nothing
+    sets (`em_configuration.cpp:3425`, `:3446`), so it always sends `00 00`. Association State, Device
+    Password ID and Configuration Error are big-endian `u16`. Upstream sets length 2 but copies no value
+    octets (`sizeof(val[0])`, `:3539-3542` and siblings), and the port names that as an intentional
+    difference. The Comcast haul-type Vendor Extension in the Encrypted Settings is written with
+    upstream's 11-octet length (5 meaningful octets, then 6 zeros, `:5917-5924`) and read when it has 5
+    or more octets.
+- **A10 (2026-11-21, B13 plan review; user decisions):**
+  - **TLV walker (added to D6).** `get_first_tlv` and `get_next_tlv` (`em_msg.cpp:424-480`) were missing
+    from D6, but four production loops use them, on five call paths (`em_capability.cpp:1214-1230`, called
+    twice by `handle_bsta_cap_report`; `em_configuration.cpp:5141-5242`, `:5570-5612`, `:5748-5776`).
+    `readers.rs` adds an offset-addressed first/next pair that keeps "first TLV failed" separate from
+    "walk ended". Each caller's pre-checks and return codes stay in `em-core`.
+  - **Zero-length stop kept (user decision).** As upstream, the walker ends at any zero-length TLV,
+    including a normal End of Message. Known upstream consequences, named in the docs and tests: an empty
+    Backhaul STA MLD Configuration TLV hides the EHT Operations TLV after it
+    (`em_configuration.cpp:3771-3777`), and an empty first TLV in a Backhaul STA Capability Report makes
+    both single-TLV lookups fail, so Client Info is not processed (`em_capability.cpp:1242-1255`).
+    `TlvIter` remains the non-stopping walk if `em-core` later decides to fix this.
+  - **Intentional difference.** `get_next_tlv` holds the TLV size in a `uint16_t` (`em_msg.cpp:466`), which
+    wraps for lengths 0xFFFD to 0xFFFF. The port computes it without wrapping, so a walk always advances
+    or ends.
+  - **Channel Scan Request with 0 radios (user decision; clarifies D6).** In `radio_id`, the exact
+    2-octet value with `Num_Radio` = 0 (spec-valid, §17.2.39) returns `Ok(None)`. Any other value shorter
+    than 9 octets returns `ReaderError`. Both match upstream's `false`.
+  - **Vector mapping.** An upstream `false` is `Ok(None)`, except for a pinned list of cases that are
+    `Err`: the four malformed Profile values or lengths and `supported-service-9`. Outputs are compared
+    only on `true`. `find_tlv` is compared by the position of its value slice.
+    This mapping covers the well-formed vector corpus only. Outside it, D6's rule applies: a value too short
+    for the read, or rejected by upstream's own check, is a `ReaderError` (for example a short `sta_mac`
+    value, or a Supported Service value whose length is not `1 + num`).
+  - **Walker and End of Message.** Like `get_first_tlv`, the walker does not look at the type, so an End of
+    Message with a non-zero length is returned as a TLV. It stops only at a zero-length TLV.
+
+- **A11 (2026-11-21, B13 coverage review):** The 35 remaining `em-msg` rows of
+  `em_base-coverage.md` (33 `planned`, 2 `partly ported`) are resolved against the pinned sources and
+  the crates. `em-msg` now owns 194 of the 365 rows and none is `planned`; 25 rows moved: 9 to
+  `em-dm`, 2 to `em-cmd`, 6 to `em-agent`, 7 to `em-core` and 1 to `do not port`.
+  - **Ported, status only (6).** `em_tlv_t` (`Tlv`), `em_cmdu_t` (`CmduHeader`),
+    `em_tlv_requirement_t` (`tables::Requirement`), `em_op_class_t` (`BasicOperatingClass`),
+    `em_assoc_sta_traffic_stats_t` (`AssociatedStaTrafficStats`), `em_1905_mac_addr_t` (`MacAddress`).
+  - **Not needed (3, reason in the row).** `em_attrib_t` (defined but unused at the pin; `WscAttrIter`
+    reads the attribute header) and `em_cac_method_type_t` (no upstream code names an enumerator;
+    `CacMethod::method` is a raw `u8`) stay `em-msg` rows. `em_attrib_id_t` is only the parameter type
+    of the stub `commit_config` overload (`dm_easy_mesh.cpp:346-349`). That overload is `em-dm`'s and
+    is recorded there as not ported, but the row cannot be `em-dm`: `tools/gen-dm-inventory` requires
+    every `em-dm` row to have a classification row, so it is `do not port`. This corrects the
+    Context sentence that the pair is "used only by `commit_config`": `em_attrib_t` is not used at all.
+  - **Moved to `em-dm`, already there (9).** `em_mlo_policy_t` (`MloPolicy`), `em_scanner_type_t`
+    (`ScannerType`), `em_scan_result_id_t` (`ScanResultId`), `em_neighbor_t` (`Neighbor`),
+    `em_scan_result_t` (`ScanResult`), `em_alarm_samples_t` (`AlarmSamples`), `em_link_report_t`
+    (`LinkReport`), `em_link_stats_alarm_cfg_t` (`LinkStatsAlarmCfg`), `em_client_filters_cfg_t`
+    (`ClientFiltersCfg`). All have rows in `dm_type_classification.tsv` with owner `em-dm` and the same line.
+  - **Moved to `em-cmd` (2).** `em_scan_params_t` (aliased by `em_cmd_scan_params_t`,
+    `em_base.h:3510`) and `em_vendor_policy_t` (member of `em_policy_cfg_params_t`, `em_base.h:2196`).
+  - **Moved to `em-agent` (6).** The three `em_unassoc_work_*` types (work list for the OneWifi subdoc,
+    `em_agent.cpp:893-944`) and the three `em_80211_btm_*`/neighbor report types (BTM Request frame
+    built for OneWifi, `dm_easy_mesh_agent.cpp:820-860`).
+  - **Moved to `em-core` (7), tracked, not "not needed".** Vendor formats and flags with their
+    consumers (D5): `em_vendor_airties_tlv_type_t`, `em_assoc_sta_vendor_link_metrics_t`,
+    `em_assoc_vendor_link_metrics_t` (unused at the pin; named only in a comment at
+    `em_base.h:1301`), `em_radio_capability_vendor_t`, `em_radio_metrics_t`,
+    `em_radio_device_metrics_vendor_t` and `em_mlo_mode_bitmap_t` (`em_configuration.cpp:224-326`).
+  - **D5 narrowed.** D5 lists the vendor extension with the `vendor_ext_attr_id_t` sub-elements as
+    typed attributes of `em-msg`. Only sub-id 0x01 (`HaulTypeExtension`, B12) is. Sub-ids 0x02, 0x04
+    and 0x05 are used only in `em_policy_cfg.cpp` (the Vendor Specific policy TLV) and 0x03 and 0x06
+    only in `em_metrics.cpp`, so they are `em-core`'s. The `vendor_ext_attr_id_t` row stays an `em-msg` row, marked ported for 0x01 and
+    pointing to `em-core` for the rest, because `dm_type_classification.tsv` records `em-msg` as its
+    owner and `tools/gen-dm-inventory` checks that against the coverage table.
+  - **`em_wsc_msg_type_t`.** Ported: `WSC_M1` (4) and `WSC_M2` (5) and `wsc_msg_type`, which returns
+    the raw octet. Upstream compares only with `em_wsc_msg_type_m1` and `_m2` (`em_msg.cpp:1198`,
+    `em_configuration.cpp:2956`, `:3330`, `:4613`, `:4675`, `:6549`, `:6553`) and returns `_none`
+    when no Message Type is found. The other 13 values are not named anywhere, so they are not needed.
+  - **Closing criterion corrected.** The final sentence of Acceptance criteria says the 219 rows are
+    "ported, moved (the 4 non-wire rows) or marked not needed". The count was wrong: 25 rows moved, as
+    listed above. The criterion reads: of the 219 `em-msg` rows, 194 stay `em-msg` (ported or not
+    needed with a reason) and 25 moved, with each destination named in its row.
+- **A12 (2026-11-21, B10-B13 review round 1):** two A9 points are stated exactly.
+  - The Comcast haul-type Vendor Extension needs its fifth octet only for sub-id 0x01. A 4-octet value with
+    another sub-id is ignored (`Ok(None)`), as upstream reads `val[4]` only for 0x01
+    (`em_configuration.cpp:4914-4919`). A 3-octet value, and sub-id 0x01 with no haul octet, stay errors.
+  - The lenient 0xD3 decoder reads upstream's Hash Length as a full big-endian `u16`, because the Proxy Agent
+    forwards the length of a received attribute (`ec_pa_configurator.cpp:54`). A hash above 255 octets
+    decodes leniently and cannot be re-encoded (`CountTooLarge`); the strict form keeps its 1-octet length.
+  - **SSID lengths stay raw (user decision).** The 0xE0 body keeps SSID lengths above the spec's 32 octets, like
+    the other SSID bodies. Enforcing the limit is the consumer's.
 
 ### Errata
 

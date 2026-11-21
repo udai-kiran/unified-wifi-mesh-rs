@@ -72,7 +72,9 @@ fn group_text(group: &str) -> &'static str {
         "ieee1905" => include_str!("../tests/data/bodies/ieee1905.tsv"),
         "linkmetric" => include_str!("../tests/data/bodies/linkmetric.tsv"),
         "metrics" => include_str!("../tests/data/bodies/metrics.tsv"),
+        "mld" => include_str!("../tests/data/bodies/mld.tsv"),
         "policy" => include_str!("../tests/data/bodies/policy.tsv"),
+        "security" => include_str!("../tests/data/bodies/security.tsv"),
         "steering" => include_str!("../tests/data/bodies/steering.tsv"),
         _ => panic!("unknown body fixture group {group:?}"),
     }
