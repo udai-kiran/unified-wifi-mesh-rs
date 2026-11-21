@@ -488,6 +488,36 @@ async fn fragment_out_of_order_is_dropped_and_id_zero_resyncs() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn continuation_from_another_peer_is_dropped_and_the_session_goes_on() {
+    // intentional-difference:continuation-mac
+    // Upstream keeps the first fragment's addresses and never compares later ones
+    // (`al_service_access_point.cpp:267-278`), and it throws on B0 as out of order
+    // (`:267-268`). Without the check this client would join B0 and A1, since B0 starts
+    // a new set. Here A1 is dropped with B0's set (3 fragments counted: A0 abandoned,
+    // B0 and A1 dropped).
+    let (_service, mut session, mut client) = registered(Role::Agent).await;
+    let other_peer = [0x02, 0, 0, 0, 0, 0x03];
+
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, [1, 0, 0], b"a0"))
+        .await;
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, other_peer, [1, 0, 0], b"b0"))
+        .await;
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, [1, 1, 1], b"a1"))
+        .await;
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, UNFRAGMENTED, b"whole"))
+        .await;
+    // nothing was delivered before the unfragmented frame
+    expect_received(&mut client, sdu(SERVICE_MAC, PEER_MAC, b"whole")).await;
+
+    assert_eq!(client.counters.borrow().registrations, 1);
+    assert_eq!(client.counters.borrow().dropped_receive_fragments, 3);
+}
+
+#[tokio::test(start_paused = true)]
 async fn oversize_frame_is_skipped_and_the_stream_stays_in_step() {
     // intentional-difference:oversize-skipped
     // Upstream throws on a length above `SOCKET_MTU - 4` before reading the body

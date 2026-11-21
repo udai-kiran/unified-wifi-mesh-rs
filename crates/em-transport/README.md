@@ -33,6 +33,10 @@ No `unsafe`, no clones.
 - Receive errors keep the session: an oversize frame is skipped by its length, a fragment out of order
   or an unfinished set is dropped (fragment id 0 or an unfragmented frame starts anew), a frame too
   short for an SDU header is dropped.
+- A continuation fragment (id above 0) must carry the addresses of the set it joins, or it and the set
+  are dropped (0011 A8). This only separates SDUs from different peers: two fragmented SDUs from the
+  same peer have identical addresses and the frame has no message id, so interleaved sets still join
+  wrongly.
 - The `received` channel carries only SDUs. When the role actor does not read, up to 256 wait in the actor
   beyond the channel's 64; when the queue is full the oldest is dropped and counted.
 - A failed write ends the session without reading further (0011 A7). Every received frame not yet read,
@@ -90,7 +94,7 @@ receiver (0011 A5 stop path).
 
 Tests tagged `intentional-difference:<id>` pin the places where this client differs from upstream's:
 `agent-rejection-fatal`, `retry-connect`, `split-response`, `zero-al-mac`, `reconnect-after-disconnect`,
-`fragment-resync`, `oversize-skipped`, `bad-header-dropped`.
+`fragment-resync`, `continuation-mac`, `oversize-skipped`, `bad-header-dropped`.
 
 Every wait is bounded. `bounded` fails a test after 60 s of paused time, and `join_within` after its
 own limit (5 s for the six real-time tests). A watchdog thread aborts the test process when a

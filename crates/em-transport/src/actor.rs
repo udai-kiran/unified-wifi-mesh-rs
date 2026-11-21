@@ -417,7 +417,9 @@ fn handle_frame(
 
     let ReassemblyStep { sdu, dropped } = reassembler.push(sdu_frame);
     if dropped > 0 {
-        tracing::warn!("{dropped} fragment(s) dropped: out of order or incomplete set");
+        tracing::warn!(
+            "{dropped} fragment(s) dropped: out of order, address mismatch or incomplete set"
+        );
         count(counters, |c| c.dropped_receive_fragments += dropped);
     }
     let Some(sdu) = sdu else {

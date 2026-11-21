@@ -402,6 +402,32 @@ On x86_64 with Docker:
   - **Recorded limit corrected (S0-A7-ADV-01).** A session that ends on a failed write stops reading, so every
     received frame not yet read, in the socket or the frame reader's buffer, is lost and not counted.
     Reassembled SDUs already in the actor's queue are counted in `dropped_receive_stopped`.
+- **A8 (2026-11-21, S0 final review; user decision "make the fragment MAC check the first small change before
+  S1"; revised after plan review):** a continuation fragment must carry the addresses of the set it joins.
+  - **Why.** `ieee1905-rs` takes its write lock per fragment and handles each CMDU in its own task
+    (`ieee1905-core/src/al_sap.rs:411-439`, `cmdu_observer.rs:69`). A reassembled CMDU has no second size check
+    (`cmdu_handler.rs:79`, `87-110`), so two SDUs above 65 517 octets can interleave on the data socket. With
+    `A0, B0, A1`, B's id-0 frame starts a new set and A's fragment 1 matches the expected id, so the client would
+    deliver B's first part joined to A's last part. Read from the source, not reproduced.
+    This corrects the "Interleaving" paragraph in Context, which says the service's deliveries are never
+    fragmented in practice: a reassembled CMDU can exceed 65 517 octets.
+  - **Decision.** A fragment with id above 0 whose `local` or `remote` differs from the set in progress is
+    handled in the same branch as a fragment out of order (D3 step 6): that fragment and the set are dropped,
+    adding 2 to `dropped_receive_fragments`, the session goes on, and the next id-0 or unfragmented frame starts
+    a new SDU. **Intentional difference** (`continuation-mac`): upstream keeps the first fragment's addresses
+    and never compares later ones (`al_service_access_point.cpp:267-278`). Every fragment of a valid set
+    carries the same addresses (`al_sap.rs:417-418`), so the check drops no valid traffic.
+  - **Limits.**
+    - **The check only separates SDUs from different peers.** `local` is always the service's one AL MAC, so
+      only `remote` can differ. The service reassembles per `(source, MID)` (`cmdu_reassembler.rs:52`), so two
+      large CMDUs from the **same** peer are concurrent SDUs with identical addresses. `A0, B0, A1` then still
+      delivers **one corrupted SDU**: the AL-SAP frame has no message id to tell them apart. It is counted in
+      `sdus_received` like any other. The only trace is the 1 added to `dropped_receive_fragments` for A's
+      abandoned set, which looks like any other abandoned set, so no counter identifies the corruption. An Agent's large messages come mostly from its one Controller, so this check may rarely help there.
+    - The set that is interrupted is lost, and both are lost when their continuations alternate. A set that
+      finishes uninterrupted is delivered. `dropped_receive_fragments` counts rejected frames and abandoned
+      sets, not lost SDUs. The spec lets a sender send another request
+      or notification with a new MID but does not require it (EasyMesh 15.1), so recovery depends on the sender.
 
 ## Errata
 

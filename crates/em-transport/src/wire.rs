@@ -192,6 +192,12 @@ struct PartialSdu {
 /// Upstream throws on a fragment out of order (`al_service_access_point.cpp:267-268`).
 /// Here the bad fragment and the set in progress are dropped, and the session goes
 /// on: a frame with fragment id 0, or an unfragmented one, starts a new SDU.
+///
+/// A continuation fragment (id above 0) must also carry the same `local` and `remote`
+/// as the set it joins, or it is dropped like an out-of-order one (0011 A8,
+/// `continuation-mac`). Upstream never compares them. The check only separates SDUs
+/// from different peers. Two fragmented SDUs from the same peer carry identical
+/// addresses, and `A0 B0 A1` still joins B0 with A1: the frame has no message id.
 #[derive(Debug, Default)]
 pub(crate) struct Reassembler {
     current: Option<PartialSdu>,
@@ -231,7 +237,10 @@ impl Reassembler {
                 dropped: dropped + 1,
             };
         };
-        if u16::from(frame.fragment_id) != partial.next_id {
+        let continues_the_set = u16::from(frame.fragment_id) == partial.next_id
+            && frame.local == partial.local
+            && frame.remote == partial.remote;
+        if !continues_the_set {
             self.current = None;
             return ReassemblyStep {
                 sdu: None,
@@ -411,6 +420,95 @@ mod tests {
         joiner.push(fragment(1, 0, 0, b"12"));
         let done = joiner.push(fragment(1, 1, 1, b"3"));
         assert_eq!(done.sdu, Some(sdu(b"123".to_vec())));
+    }
+
+    /// A fragment of `fragment(..)`'s shape with other addresses.
+    fn fragment_from(
+        local: MacAddr,
+        remote: MacAddr,
+        is_last: u8,
+        id: u8,
+        payload: &[u8],
+    ) -> SduFrame {
+        SduFrame {
+            local,
+            remote,
+            ..fragment(1, is_last, id, payload)
+        }
+    }
+
+    const OTHER_MAC: MacAddr = MacAddr::new([0x02, 0, 0, 0, 0, 0x0c]);
+
+    #[test]
+    fn continuation_with_a_different_local_drops_the_set() {
+        // intentional-difference:continuation-mac
+        let mut joiner = Reassembler::default();
+        joiner.push(fragment(1, 0, 0, b"ab"));
+        let bad = joiner.push(fragment_from(OTHER_MAC, REMOTE, 0, 1, b"cd"));
+        assert_eq!(
+            bad,
+            ReassemblyStep {
+                sdu: None,
+                dropped: 2
+            }
+        );
+        // the set is gone, so the right fragment after it has nothing to join
+        let stray = joiner.push(fragment(1, 1, 2, b"ef"));
+        assert_eq!(stray.dropped, 1);
+        assert_eq!(stray.sdu, None);
+    }
+
+    #[test]
+    fn continuation_with_a_different_remote_drops_the_set() {
+        // intentional-difference:continuation-mac
+        let mut joiner = Reassembler::default();
+        joiner.push(fragment(1, 0, 0, b"ab"));
+        let bad = joiner.push(fragment_from(LOCAL, OTHER_MAC, 0, 1, b"cd"));
+        assert_eq!(
+            bad,
+            ReassemblyStep {
+                sdu: None,
+                dropped: 2
+            }
+        );
+        // a new set starts at id 0 as usual
+        joiner.push(fragment(1, 0, 0, b"12"));
+        let done = joiner.push(fragment(1, 1, 1, b"3"));
+        assert_eq!(done.sdu, Some(sdu(b"123".to_vec())));
+    }
+
+    #[test]
+    fn interleaved_peers_a0_b0_a1_deliver_nothing() {
+        // intentional-difference:continuation-mac
+        // A's fragment 1 carries the expected id and the last flag, but B's set is open.
+        let mut joiner = Reassembler::default();
+        let a0 = joiner.push(fragment(1, 0, 0, b"a0"));
+        let b0 = joiner.push(fragment_from(LOCAL, OTHER_MAC, 0, 0, b"b0"));
+        let a1 = joiner.push(fragment(1, 1, 1, b"a1"));
+        assert_eq!(a0.dropped, 0);
+        assert_eq!(b0.dropped, 1);
+        assert_eq!(
+            a1,
+            ReassemblyStep {
+                sdu: None,
+                dropped: 2
+            }
+        );
+        assert_eq!(a0.sdu, None);
+        assert_eq!(b0.sdu, None);
+    }
+
+    #[test]
+    fn known_limit_same_address_a0_b0_a1_still_joins_b0_with_a1() {
+        // The check cannot tell two SDUs from one peer apart: the frame has no message id
+        // (0011 A8, "Limits"). This pins the limit, not a wanted behaviour.
+        let mut joiner = Reassembler::default();
+        joiner.push(fragment(1, 0, 0, b"a0"));
+        let b0 = joiner.push(fragment(1, 0, 0, b"b0"));
+        assert_eq!(b0.dropped, 1);
+        let a1 = joiner.push(fragment(1, 1, 1, b"a1"));
+        assert_eq!(a1.sdu, Some(sdu(b"b0a1".to_vec())));
+        assert_eq!(a1.dropped, 0);
     }
 
     #[test]
