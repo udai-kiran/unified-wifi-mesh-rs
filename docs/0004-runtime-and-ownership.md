@@ -103,6 +103,9 @@ This rule is **binding for all code, including tests and examples**:
 > **Amended by [0002](0002-cmd-core-orch.md) D9 (2026-11-19):** the role actor in `em-ctrl` /
 > `em-agent` owns the single frame sender and the receiver of frames. `em-core` is a library of
 > handlers that the role actor calls. Read "`em-core`" below as "the role actor".
+>
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D2 (2026-11-21):** the transport is an AL-SAP
+> client of `ieee1905-rs`, run as a separate process. The raw `AF_PACKET` path is deferred.
 
 `em-transport` is an actor, or a pair of tasks, that owns the socket: the raw `AF_PACKET` socket
 or the AL-SAP UNIX sockets to `ieee1905-rs`.

@@ -233,6 +233,10 @@ There are 42 subclasses plus the base: 43.
 
 ### D1. One role actor per process; engines are synchronous (user decision)
 
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D4 (2026-11-21):** over AL-SAP there is no
+> send-completion event. The 500 ms delay before EAPOL 1 starts when the frame is written to the data
+> socket.
+
 Each process runs one role actor, in `em-ctrl` or `em-agent`.
 
 **What it owns:**
@@ -376,6 +380,9 @@ Appendix A lists all 43 classes with their command variant, plan variants, role 
 kinds.
 
 ### D4. Orchestration semantics
+
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D4 and D8 (2026-11-21):** "M2's send
+> succeeded" (internal fix 3) means the socket write succeeded, and a resend uses a new MID.
 
 **Kept**, because peers can observe them:
 - **Plans and stages.** Each command's plans (Appendix A), including the analyze-time variants.
@@ -611,6 +618,9 @@ The user accepted the recommendations:
 6. **Database I/O synchronous in the role actor** (rev 4), at upstream's points (D1).
 
 ### D11. Porting order
+
+> **Replaced by [0010](0010-vertical-slices-and-transport.md) D1 (2026-11-21):** the port proceeds in
+> vertical slices S0 to S8. The dependency graph of D2 is unchanged.
 
 Each crate gets its own scope note:
 1. `em-cmd`: command types, plan variants, candidate rules, status.

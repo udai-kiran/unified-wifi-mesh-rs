@@ -7,7 +7,10 @@ Status values: `not started` · `in progress` · `ported` (builds and has tests)
 
 ## Components
 
-Listed in the planned porting order (bottom-up). The order can change; record why when it does.
+Listed in dependency order. From 2026-11-21 the work proceeds in vertical slices (note
+[0010](docs/0010-vertical-slices-and-transport.md) D1): S0 transport and Docker harness, S1 discovery, S2 onboarding,
+S3 topology, S4 channel selection, S5 metrics, S6 steering, S7 Easy Connect and security, S8 remaining
+commands. Each slice grows the crates it needs.
 
 | # | Crate | Upstream source | Depends on | Status | Notes |
 |---|---|---|---|---|---|
@@ -90,6 +93,7 @@ Listed in the planned porting order (bottom-up). The order can change; record wh
 | 2026-11-21 | em-msg low review findings fixed (user decision) | Five fixes. (1) The Vendor Extension encoder checks the combined length (vendor id plus data) before writing, with no temporary copy; an oversized value writes nothing. (2) The reader-vector harness (`tools/upstream-tlv-vectors/vectors.cpp`) writes each reader's output into a real object of its own type, pre-filled with `ff`; both fixtures are byte-identical to before. (3) `tools/check-test-map` checks the em-msg map's shape: invalid dispositions, a missing one of the 15 reader rows, a changed `not ported` row, a tagged row that is not `rust:`, and a tag outside the body of its mapped test. (4) A named walker test for an End of Message TLV with a non-zero length (`readers.rs`, note 0009 A10). (5) `upstream_reader_vectors.rs` gains a found-count assertion. Also a user decision: an SSID longer than 32 octets in 0xE0 stays raw (0009 A12). em-msg 1447 unit tests on stable and 1.85.0; workspace 2317; Python tools 481. Review round 2 pending |
 | 2026-11-21 | em-msg B10-B13 review round 2; em-msg ported | Correctness SHIP. Codex: one medium and three low. The medium (a truncated End of Message in `radio_id` gives `Ok(None)`) is not a parity defect: upstream also returns `false`, and `TlvIter` documents that it does not check that length. Adversarial: no product-code failure; three confirmed gaps in `tools/check-test-map` (a ported reader changed to `skip:`, a duplicate reader row, a removed second row of a shared tag). Fixed by user decision after the two-round limit, with 4 new Python tests and each damaged map shown to exit 1. **That checker fix had no third review round.** em-msg 1447 unit tests, workspace 2317, stable and 1.85.0; Python 485; clippy, fmt, rustdoc, `check-test-map`, `regen --check`, `check-body-fixtures --check` and `gen-dm-inventory --check` pass |
 | 2026-11-21 | em-utils Codex audit | No correctness defect. Five low findings, all confirmed: a reverse-lookup test above `u16::MAX` added (118 800 MHz gives class 183, channel 29); upstream cites corrected in the README and `hex.rs` (two of those found by the coordinator); two cites in note 0003 corrected by erratum E1. Not added: a 4 GiB hex dump test (the code has no 32-bit length to truncate). em-utils 27 tests on stable and 1.85.0 |
+| 2026-11-21 | Design note [0010: vertical slices and the AL-SAP transport](docs/0010-vertical-slices-and-transport.md) | **accepted** (rev 2; plan review: 16 findings, the main ones checked against `ieee1905-rs` @ `a644322` and the specs; not re-reviewed after the fixes). User decisions: AL-SAP to `ieee1905-rs` as an external process; parity rule for engines; duplicate filter on multicast types only, after security; a platform fake for S0 to S2; a minimal `em-easyconnect` boundary crate; Docker on x86_64 as the first test platform, ARM later. Amends 0002 D1, D4, D11 and 0004 R6 |
 
 ## Open follow-ups
 
