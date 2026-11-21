@@ -1,0 +1,52 @@
+# S0 harness (docs/0011 D4). Run from anywhere: docker compose -f docker/compose.yaml ...
+x-node: &node
+  image: em-s0-node:latest
+  init: true # reaps the ieee1905 processes the checks kill
+  cap_add: [NET_RAW, NET_ADMIN]
+
+services:
+  node1:
+    <<: *node
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: em-s0-node1
+    hostname: node1
+    mac_address: "02:42:c0:a8:65:02"
+    environment:
+      ROLE: agent
+    networks:
+      s0net:
+        ipv4_address: 192.168.101.2
+
+  node2:
+    <<: *node
+    container_name: em-s0-node2
+    hostname: node2
+    mac_address: "02:42:c0:a8:65:03"
+    environment:
+      ROLE: controller
+    networks:
+      s0net:
+        ipv4_address: 192.168.101.3
+
+  # Third node for S3 (relay). Not started by run-s0.sh.
+  node3:
+    <<: *node
+    profiles: [relay]
+    container_name: em-s0-node3
+    hostname: node3
+    mac_address: "02:42:c0:a8:65:04"
+    environment:
+      ROLE: agent
+    networks:
+      s0net:
+        ipv4_address: 192.168.101.4
+
+networks:
+  s0net:
+    name: em-s0-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.101.0/24
