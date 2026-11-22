@@ -99,6 +99,8 @@ Each row gets a test tagged `intentional-difference:<id>`.
 
 ### D2. Agent
 
+> **Amended by [0013](0013-s2-onboarding.md) D5 (2026-11-22):** the until-found reset also covers `wsc_m2_pending`, so `dev_init`'s 10 s cancel is unreachable in S2 flows; a radio that waits more than 10 s for its M2 restarts discovery under the same `dev_init`.
+
 - The AL MAC comes from AL-SAP registration. The platform fake (D4) supplies the radios. The agent submits
   `dev_init`, whose chain creates the AL node and one node per radio, as upstream.
 - Searching follows upstream (gate, states, resend on the proto tick, new MID), with one **intentional
@@ -182,6 +184,8 @@ later decision for the role crates.
 
 ### D8. Docker exit checks for S1
 
+> **Amended by [0013](0013-s2-onboarding.md) D4 and D5 (2026-11-22):** a second `dev_init` is allowed only for the D4 recovery (the `onewifi_cb` or renew timeout restart); check 6a still expects exactly one in an S1 run.
+
 `em-agent` runs in node 1 (radios 2.4 GHz and 5 GHz) and `em-ctrl` in node 2, in place of the probe. Each role
 process runs under the entrypoint's supervisor, which can stop and restart it with new arguments while
 `ieee1905-rs` keeps running (an `exec`ed role process would take the container, and the service, down with it).
@@ -228,6 +232,8 @@ process runs under the entrypoint's supervisor, which can stop and restart it wi
   `&mut task` for at most 1 s, then aborts it (0011 A7), and exits 0.
 
 ### D10. Interfaces between the crates (rev 4; fixed before any brief starts)
+
+> **Amended by [0013](0013-s2-onboarding.md) D3 (2026-11-22):** role effects are applied per candidate through `OrchRole::apply` with a request buffer drained after the pass, and the readiness hooks can emit effects. This closes the S1 follow-up on effects applied after the pass.
 
 Shared keys and command types live in `em-cmd`, so `em-orch` and `em-core` both see them without depending on
 each other (0002 D2). The graph stays acyclic: `em-orch` → `em-cmd`; `em-core` → `em-cmd`, `em-msg`,

@@ -3,7 +3,7 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status:** `em-types`, `em-utils`, `em-crypto` and `em-msg` are ported (`em-msg`: framing, validation, all TLV bodies, the typed WSC attributes and the field readers); `em-dm` is ported (records, enums, models and operations done); `em-transport` is done as slice S0 (AL-SAP client and Docker harness; review pending); S1 (controller discovery over AP-Autoconfiguration Search and Response) is implemented with minimal `em-cmd`, `em-orch`, `em-easyconnect`, `em-core`, `em-agent` and `em-ctrl` (review pending); the others have not been started. Progress is
+> **Status:** `em-types`, `em-utils`, `em-crypto` and `em-msg` are ported (`em-msg`: framing, validation, all TLV bodies, the typed WSC attributes and the field readers); `em-dm` is ported (records, enums, models and operations done); `em-transport` is done as slice S0 (AL-SAP client and Docker harness; review pending); S1 (controller discovery) and S2 (onboarding through WSC M1/M2 to `topo_synchronized`) are implemented with minimal `em-cmd`, `em-orch`, `em-easyconnect`, `em-core`, `em-db`, `em-agent` and `em-ctrl`; the others have not been started. Progress is
 > tracked in [STATUS.md](STATUS.md).
 
 ## Porting base
@@ -57,9 +57,10 @@ crates/
 docs/              design notes and porting decisions
 ```
 
-The S1 crates `em-easyconnect`, `em-cmd`, `em-orch`, `em-core`, `em-agent` and `em-ctrl` implement only
-what controller discovery needs (note [0012](docs/0012-s1-discovery.md) D1). The rest of each upstream
-source is not ported yet, and `em-db` has no crate yet.
+The slice crates `em-easyconnect`, `em-cmd`, `em-orch`, `em-core`, `em-db`, `em-agent` and `em-ctrl`
+implement only what controller discovery and onboarding need (notes [0012](docs/0012-s1-discovery.md) D1,
+[0013](docs/0013-s2-onboarding.md) D1). The rest of each upstream source is not ported yet; `em-db` holds only
+the reset-file loader.
 
 ## License
 

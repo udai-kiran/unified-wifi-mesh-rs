@@ -48,11 +48,29 @@ async fn main() -> ExitCode {
     tracing::info!(
         control = %args.control.display(),
         data = %args.data.display(),
+        reset_file = %args.reset_file.display(),
+        drop_first_m2 = args.drop_first_m2,
         "em-ctrl starting"
     );
+    // intentional-difference:reset-file-required
+    // Upstream logs a missing file and continues with no SSIDs
+    // (`dm_easy_mesh_ctrl.cpp:10855-10858`), after which it can onboard nothing (0013 D2).
+    let networks = match em_db::load_reset_file(&args.reset_file) {
+        Ok(networks) => networks,
+        Err(error) => {
+            tracing::error!(%error, "the reset file is required, em-ctrl cannot start");
+            return ExitCode::FAILURE;
+        }
+    };
+    tracing::info!(rows = networks.len(), "reset file loaded");
+    if args.drop_first_m2 {
+        tracing::warn!("test switch --test-drop-first-m2 is on: the first M2 will not be sent");
+    }
     let config = CtrlConfig {
         control_path: args.control,
         data_path: args.data,
+        networks,
+        drop_first_m2: args.drop_first_m2,
     };
     match run(config, stop).await {
         Ok(()) => ExitCode::SUCCESS,

@@ -1,33 +1,69 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Synchronous controller role core for slice S1 (design note 0012 D3, D9, D10).
+//! Synchronous controller role core for slices S1 and S2 (design notes 0012 D3, D9, D10
+//! and 0013 D2, D3, D7).
 //!
-//! [`CtrlCore`] routes a Search, lets the AL node answer it and keeps the in-memory
-//! peer model. It is driven by explicit inputs and has no sockets and no runtime; the tokio
+//! [`CtrlCore`] routes a Search, lets the AL node answer it, keeps the in-memory peer
+//! model, answers each M1 with M2 and drives `em_config` until the agent's Topology
+//! Response. It is driven by explicit inputs and has no sockets and no runtime; the tokio
 //! role actor ([`run`]) moves inputs in and frames out.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use em_cmd::{NoCommands, NodeKey, NodeKind};
+use em_cmd::{CommandType, CommandView, NoCommands, NodeKey, NodeKind, OrchState};
 use em_core::configuration::{self, SearchRoute};
 use em_core::{CtrlState, EngineCtx, MsgIdCounter, Node, NodeTable, Output, Outputs};
+use em_crypto::rand::OsRandom;
+use em_dm::NetworkSsidInfo;
 use em_msg::{CmduHeader, readers};
+use em_orch::{Orchestrator, RoleEffect};
 use em_types::{MacAddr, MsgType};
+
+use crate::networks::Networks;
+use crate::rules::{CtrlNodes, CtrlRules};
 
 mod actor;
 pub mod cli;
+mod networks;
 mod pending;
+mod rules;
+mod s2;
 
 pub use actor::{ActorError, CtrlConfig, run};
 
-/// The most peer models the core keeps. Upstream keeps them without limit; S2
-/// replaces the map with the database (0012 D3, rev 7).
+/// The most peer models the core keeps. Upstream keeps them without limit. S2 keeps
+/// the map in memory and persists nothing (0012 D3, 0013 D2).
 const MAX_PEER_MODELS: usize = 256;
 
 /// The profile of the controller itself, given to its AL node (0012 D3).
 const CONTROLLER_PROFILE: u8 = 3;
+
+/// Idle time after which a node's proto tick fires (`em.cpp:644-680`).
+const PROTO_IDLE: Duration = Duration::from_secs(1);
+/// Idle time after which the orchestrator ticks (`EM_ORCH_TICK`, 250 ms).
+const ORCH_IDLE: Duration = Duration::from_millis(250);
+
+/// The proto tick deadline of one radio node.
+#[derive(Debug, Clone, Copy)]
+struct NodeDeadline {
+    key: NodeKey,
+    due: Instant,
+}
+
+/// What the core does with each M2 it builds (0013 D3, D10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum M2Handoff {
+    /// Hand the M2 to the transport.
+    Deliver,
+    /// The test switch: the first M2's hand-off is a no-op that reports success, so the
+    /// controller behaves as after a write that the network then loses.
+    DropNext,
+    /// A hand-off that fails, to test that no output is applied.
+    #[cfg(test)]
+    Fail,
+}
 
 /// A CMDU for the role actor to send; the actor adds the local AL MAC and session (0012 D9).
 #[derive(Debug, PartialEq, Eq)]
@@ -72,38 +108,58 @@ pub struct PeerModel {
 
 /// The controller's protocol state and peer models.
 pub struct CtrlCore {
-    nodes: NodeTable<CtrlState>,
+    orch: Orchestrator<CtrlRules>,
+    rules: CtrlRules,
+    nodes: CtrlNodes,
     msg_ids: MsgIdCounter,
     /// Recorded at the first registration and fixed for the life of the process.
     al_mac: Option<MacAddr>,
+    registered: bool,
     models: HashMap<MacAddr, PeerModel>,
     /// AL MACs of `models`, oldest creation first. Updates do not reorder it.
     model_order: VecDeque<MacAddr>,
-}
-
-impl Default for CtrlCore {
-    fn default() -> Self {
-        Self::new()
-    }
+    networks: Networks,
+    random: OsRandom,
+    m2_handoff: M2Handoff,
+    proto_deadlines: Vec<NodeDeadline>,
+    orch_deadline: Option<Instant>,
+    /// Frames produced by the current input, taken by its entry point.
+    outbox: Vec<Frame>,
 }
 
 impl CtrlCore {
     /// Creates a core that has not yet registered.
+    ///
+    /// `networks` is the reset file's `NetworkSSIDList` (0013 D2). With `drop_first_m2` the
+    /// first M2's hand-off is replaced by a no-op, the test-only switch of 0013 D10.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(networks: Vec<Box<NetworkSsidInfo>>, drop_first_m2: bool) -> Self {
         Self {
-            nodes: NodeTable::new(),
+            orch: Orchestrator::new(),
+            rules: CtrlRules,
+            nodes: CtrlNodes::default(),
             msg_ids: MsgIdCounter::new(),
             al_mac: None,
+            registered: false,
             models: HashMap::new(),
             model_order: VecDeque::new(),
+            networks: Networks::new(networks),
+            random: OsRandom,
+            m2_handoff: if drop_first_m2 {
+                M2Handoff::DropNext
+            } else {
+                M2Handoff::Deliver
+            },
+            proto_deadlines: Vec::new(),
+            orch_deadline: None,
+            outbox: Vec::new(),
         }
     }
 
     /// The node table, for logging and tests.
     #[must_use]
     pub const fn nodes(&self) -> &NodeTable<CtrlState> {
-        &self.nodes
+        &self.nodes.table
     }
 
     /// The model of the agent with this AL MAC, if a Search created one.
@@ -126,26 +182,35 @@ impl CtrlCore {
                 recorded,
                 new: al_mac,
             }),
-            Some(_) => Ok(()),
+            Some(_) => {
+                self.registered = true;
+                Ok(())
+            }
             None => {
                 self.al_mac = Some(al_mac);
                 let key = NodeKey {
                     mac: al_mac,
                     kind: NodeKind::Al,
                 };
-                self.nodes.insert(Node::new(
+                self.nodes.table.insert(Node::new(
                     key,
                     CtrlState::Unconfigured,
                     CONTROLLER_PROFILE,
                     None,
                 ));
+                self.registered = true;
                 Ok(())
             }
         }
     }
 
-    /// A CMDU arrived from `remote`. Only an AP-Autoconfiguration Search is
-    /// handled in S1 (`em_ctrl.cpp:1197-1238`).
+    /// The transport lost its registration. No proto tick runs until the next one.
+    pub fn unregistered(&mut self) {
+        self.registered = false;
+    }
+
+    /// A CMDU arrived from `remote`. The controller handles a Search, an M1 and a Topology
+    /// Response (`em_ctrl.cpp:1197-1270`, `em_configuration.cpp:6553-6622`).
     pub fn received(&mut self, remote: MacAddr, cmdu: &[u8], now: Instant) -> Vec<Frame> {
         let msg_type = match CmduHeader::parse(cmdu) {
             Ok((header, _)) => header.msg_type,
@@ -154,23 +219,61 @@ impl CtrlCore {
                 return Vec::new();
             }
         };
-        if msg_type != MsgType::AP_AUTOCONFIGURATION_SEARCH {
-            tracing::debug!(?msg_type, %remote, "ignoring CMDU not handled in S1");
-            return Vec::new();
+        match msg_type {
+            MsgType::AP_AUTOCONFIGURATION_SEARCH => self.handle_search(cmdu, now),
+            MsgType::AP_AUTOCONFIGURATION_WSC => self.handle_wsc(remote, cmdu, now),
+            MsgType::TOPOLOGY_RESPONSE => self.handle_topology_response(remote, cmdu, now),
+            _ => {
+                tracing::debug!(?msg_type, %remote, "ignoring CMDU the controller does not handle");
+            }
         }
-        self.handle_search(cmdu, now)
+        std::mem::take(&mut self.outbox)
     }
 
-    fn handle_search(&mut self, cmdu: &[u8], now: Instant) -> Vec<Frame> {
+    /// Runs whatever is due at `now`: an orchestrator pass, then the proto tick of each due
+    /// radio node. While unregistered no proto tick runs.
+    pub fn tick(&mut self, now: Instant) -> Vec<Frame> {
+        if self.orch_deadline.is_some_and(|due| due <= now) {
+            self.run_pass(now, true);
+        }
+        if self.registered {
+            let due_nodes: Vec<NodeKey> = self
+                .proto_deadlines
+                .iter()
+                .filter(|deadline| deadline.due <= now)
+                .map(|deadline| deadline.key)
+                .collect();
+            for key in due_nodes {
+                self.dispatch_proto_tick(key, now);
+            }
+        }
+        std::mem::take(&mut self.outbox)
+    }
+
+    /// The earliest instant at which [`Self::tick`] has work, if any.
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Instant> {
+        let proto = if self.registered {
+            self.proto_deadlines
+                .iter()
+                .map(|deadline| deadline.due)
+                .min()
+        } else {
+            None
+        };
+        [self.orch_deadline, proto].into_iter().flatten().min()
+    }
+
+    fn handle_search(&mut self, cmdu: &[u8], now: Instant) {
         let Some(al_mac) = self.al_mac else {
             tracing::warn!("dropping Search received before the first registration");
-            return Vec::new();
+            return;
         };
         let route = match configuration::route_search(cmdu) {
             Ok(route) => route,
             Err(error) => {
                 tracing::warn!(%error, "Search could not be routed");
-                return Vec::new();
+                return;
             }
         };
         let mut out = Outputs::new();
@@ -179,7 +282,7 @@ impl CtrlCore {
             kind: NodeKind::Al,
         };
         let mut ctx = EngineCtx {
-            nodes: &mut self.nodes,
+            nodes: &mut self.nodes.table,
             key,
             commands: &NoCommands,
             msg_ids: &mut self.msg_ids,
@@ -189,12 +292,11 @@ impl CtrlCore {
         if let Err(error) = configuration::handle_search(&mut ctx, cmdu) {
             tracing::warn!(%error, agent = %route.al_mac, "Search rejected");
         }
-        let frames = collect_frames(out);
+        self.outbox.extend(collect_frames(out));
         // Upstream requests the model commit in routing, before the handler runs,
         // so it happens whatever the handler did. It is applied after the
         // handler's frames are handed over (0012 D3).
         self.commit_peer(&route);
-        frames
     }
 
     fn commit_peer(&mut self, route: &SearchRoute) {
@@ -220,14 +322,64 @@ impl CtrlCore {
             );
         }
     }
-}
 
-impl CtrlCore {
     fn evict_oldest_model(&mut self) {
         if let Some(oldest) = self.model_order.pop_front() {
             self.models.remove(&oldest);
             tracing::info!(agent = %oldest, "peer model evicted, the table is full");
         }
+    }
+
+    /// Activation and readiness after an event; restarts the idle orchestrator deadline.
+    fn run_event_pass(&mut self, now: Instant) {
+        self.run_pass(now, false);
+    }
+
+    fn run_pass(&mut self, now: Instant, timer: bool) {
+        let mut out = Vec::new();
+        if timer {
+            self.orch
+                .tick(&mut self.rules, &mut self.nodes, now, &mut out);
+        } else {
+            self.orch
+                .on_event(&mut self.rules, &mut self.nodes, now, &mut out);
+        }
+        self.drain_orch_out(out, now);
+        self.orch_deadline = Some(now + ORCH_IDLE);
+    }
+
+    fn drain_orch_out(&mut self, requests: Vec<RoleEffect<CtrlState>>, now: Instant) {
+        for request in requests {
+            match request {
+                RoleEffect::RestartProto(key) => self.restart_proto_deadline(key, now),
+                RoleEffect::Renew(key) => self.send_renew(key),
+                RoleEffect::CreateNode { .. } | RoleEffect::SetState(_, _) => {
+                    unreachable!("node effects are applied by the role")
+                }
+            }
+        }
+    }
+
+    fn restart_proto_deadline(&mut self, key: NodeKey, now: Instant) {
+        let due = now + PROTO_IDLE;
+        match self
+            .proto_deadlines
+            .iter_mut()
+            .find(|deadline| deadline.key == key)
+        {
+            Some(deadline) => deadline.due = due,
+            None => self.proto_deadlines.push(NodeDeadline { key, due }),
+        }
+    }
+
+    /// Whether `em_config` is executing on the node: upstream handles a node's state only
+    /// while its orchestration state is `Progress` (`em.cpp:538-546`).
+    fn em_config_in_progress(&self, key: NodeKey) -> bool {
+        self.orch.orch_state(key) == OrchState::Progress
+            && self
+                .orch
+                .active(key)
+                .is_some_and(|active| active.kind == CommandType::EmConfig)
     }
 }
 
@@ -251,5 +403,7 @@ fn log_response_sent(cmdu: &[u8]) {
     tracing::info!(?band, mid = header.msg_id, ?profile, "Response sent");
 }
 
+#[cfg(test)]
+mod s2_tests;
 #[cfg(test)]
 mod tests;

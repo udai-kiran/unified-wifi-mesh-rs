@@ -60,6 +60,8 @@ reading the code.
 
 ### D1. Deliver in vertical slices
 
+> **Amended by [0013](0013-s2-onboarding.md) D2 and D10 (2026-11-22):** in S2 the minimum `em-db` is an in-memory store seeded from a reset file (`--reset-file`, default `/nvram/Reset.json`), and the S2 exit checks include a lost-M2 run.
+
 Each slice ends with a controller and agent that **run** and complete one more protocol flow.
 Crates grow only as far as the slice needs. Each slice still gets a scope note, parity cites, golden
 data where it applies, reviews and a `STATUS.md` entry.

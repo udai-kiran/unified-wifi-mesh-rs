@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! S1 AP-Autoconfiguration Search and Response builders, routing, and handlers.
+//! S1 AP-Autoconfiguration Search and Response builders, routing, and handlers, and the
+//! S2 Renew builder and reader.
 //! All CMDUs start at the 1905 header; the transport supplies the remote AL MAC.
 
 use std::fmt;
@@ -161,6 +162,59 @@ fn build_response_for_peer(
             early_ap_capability: true,
         });
     builder.finish()
+}
+
+/// Builds the controller's AP-Autoconfiguration Renew (`em_configuration.cpp:850-926`).
+///
+/// It carries the controller's AL MAC, Supported Role Registrar and the radio's band, and is
+/// unicast, so the relay indicator is clear.
+///
+/// # Errors
+///
+/// Returns an encoding or message-budget error.
+pub fn build_renew(
+    controller_al_mac: MacAddr,
+    band: FreqBand,
+    msg_id: u16,
+) -> Result<Vec<u8>, BuildError> {
+    let mut builder = MsgBuilder::new(
+        &header(MsgType::AP_AUTOCONFIGURATION_RENEW, msg_id, false),
+        RAW_BUDGET,
+    );
+    builder
+        .body(&AlMacAddress {
+            mac: controller_al_mac,
+        })
+        .body(&SupportedRole(RoleValue {
+            role: Role::REGISTRAR,
+        }))
+        .body(&SupportedFreqBand(FrequencyBand { band }));
+    builder.finish()
+}
+
+/// What an agent needs from a Renew to pick its radio (`src/agent/em_agent.cpp:2400-2420`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenewRoute {
+    /// The AL MAC TLV, which names the controller.
+    pub al_mac: MacAddr,
+    /// The band of the radio to renew.
+    pub band: FreqBand,
+}
+
+/// Reads a Renew's band and AL MAC and validates it at profile 2
+/// (`em_configuration.cpp:6486-6497`, `em_agent.cpp:2400-2420`).
+///
+/// # Errors
+///
+/// Returns an error for a malformed header, a missing or unreadable band or AL MAC, or a
+/// failed validation.
+pub fn route_renew(cmdu: &[u8]) -> Result<RenewRoute, Error> {
+    let (_, area) = message_area(cmdu, MsgType::AP_AUTOCONFIGURATION_RENEW)?;
+    validate(cmdu, ProfileType::MULTI_AP_PROFILE_2)?;
+    let band = readers::freq_band(area)?.ok_or(Error::MissingTlv(TlvType::SUPPORTED_FREQ_BAND))?;
+    let al_mac =
+        readers::al_mac_address(area)?.ok_or(Error::MissingTlv(TlvType::AL_MAC_ADDRESS))?;
+    Ok(RenewRoute { al_mac, band })
 }
 
 fn message_area(cmdu: &[u8], expected: MsgType) -> Result<(CmduHeader, &[u8]), Error> {
@@ -345,9 +399,9 @@ pub fn agent_proto_tick(ctx: &mut EngineCtx<'_, AgentState>) -> Result<(), Error
 }
 
 /// Handles a Response for an agent radio. The MID is deliberately not matched:
-/// upstream accepts any MID (`em_configuration.cpp:6284-6391`). S1 records the
-/// controller and enters WSC M2 pending without sending M1. A Response that
-/// arrives in any other state is ignored.
+/// upstream accepts any MID (`em_configuration.cpp:6284-6391`). It records the
+/// controller and enters WSC M2 pending. It sends no M1: the agent core sends M1 once
+/// the radio has moved (0013 D4). A Response that arrives in any other state is ignored.
 ///
 /// # Errors
 ///

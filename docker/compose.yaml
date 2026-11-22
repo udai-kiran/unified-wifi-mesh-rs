@@ -1,6 +1,6 @@
-# S0 and S1 harness (docs/0011 D4, 0012 D8). Run from anywhere: docker compose -f docker/compose.yaml ...
-# HARNESS_MODE selects what the entrypoint runs: s0 (the probe, default) or s1 (role processes
-# started by run-s1.sh). The image and the nodes are the same.
+# S0, S1 and S2 harness (docs/0011 D4, 0012 D8, 0013 D10). Run from anywhere: docker compose -f docker/compose.yaml ...
+# HARNESS_MODE selects what the entrypoint runs: s0 (the probe, default), s1 (role processes
+# started by run-s1.sh) or s2 (the same supervisors, started by run-s2.sh). The image and the nodes are the same.
 x-node: &node
   image: em-s0-node:latest
   init: true # reaps the ieee1905 processes the checks kill

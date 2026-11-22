@@ -12,7 +12,11 @@ publish = false
 em-types = { path = "../em-types" }
 em-msg = { path = "../em-msg" }
 em-cmd = { path = "../em-cmd" }
+em-orch = { path = "../em-orch" }
 em-core = { path = "../em-core" }
+em-crypto = { path = "../em-crypto" }
+em-dm = { path = "../em-dm" }
+em-db = { path = "../em-db" }
 em-transport = { path = "../em-transport" }
 tokio = { version = "1.54.1", default-features = false, features = ["rt-multi-thread", "signal", "macros", "time", "sync"] }
 tracing = { version = "0.1.44", default-features = false }

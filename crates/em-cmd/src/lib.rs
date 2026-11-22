@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared command types and the read-only orchestration view for S1.
+//! Shared command types and the read-only orchestration view for S1 and S2.
 //!
 //! The command is owned once per chain; consumers borrow it through
 //! [`CommandView`]. See design note 0012 D10.
@@ -16,7 +16,7 @@ pub struct NodeKey {
     pub kind: NodeKind,
 }
 
-/// The two node kinds used in S1.
+/// The two node kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     /// 1905 AL interface.
@@ -29,11 +29,17 @@ pub enum NodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChainId(pub u64);
 
-/// The command kinds supported by S1.
+/// The command kinds supported through S2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandType {
     /// Initialize an agent's device and radio nodes.
     DevInit,
+    /// Confirm platform BSS configuration.
+    OneWifiCb,
+    /// Restart autoconfiguration on a radio.
+    CfgRenew,
+    /// Configure a controller radio after WSC.
+    EmConfig,
 }
 
 /// Per-node orchestration state.
@@ -54,13 +60,21 @@ pub enum OrchState {
     Fini,
 }
 
-/// Orchestration operations in the S1 device initialization plan.
+/// Orchestration operations in the S1 and S2 command plans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OrchOp {
     /// Create the agent's AL node.
     AlInsert,
     /// Create the agent's radio nodes.
     EmInsert,
+    /// Confirm `OneWifi` configuration.
+    OwconfigCnf,
+    /// Transmit configuration renewal.
+    TxCfgRenew,
+    /// Pre-process deletion of a radio's BSS records.
+    BssDelete,
+    /// Synchronize the topology.
+    TopoSync,
 }
 
 /// Command result codes, corresponding to `inc/em_base.h:3694-3704`.
@@ -113,11 +127,50 @@ pub struct RadioSpec {
     pub band: FreqBand,
 }
 
+/// Platform-confirmed radios for one device (0013 D4).
+///
+/// Upstream chooses the radio named by the first BSS in its callback
+/// (`src/orch/em_orch_agent.cpp:397-405`). S2 submits one callback for the
+/// device, carrying all its candidate radios instead.
+#[derive(Debug, PartialEq, Eq)]
+pub struct OneWifiCb {
+    /// Radio nodes to consider, in platform order.
+    pub radios: Vec<NodeKey>,
+}
+
+/// The radio selected for an agent configuration renewal.
+///
+/// Upstream matches the command model's radio to a candidate
+/// (`src/orch/em_orch_agent.cpp:347-353`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CfgRenew {
+    /// Radio to renew.
+    pub radio: NodeKey,
+}
+
+/// Controller inputs for the BSS-delete and topology-sync stages.
+///
+/// Upstream uses the radio and agent AL addresses for BSS deletion and the
+/// radio for candidate selection (`src/orch/em_orch_ctrl.cpp:530-545,593-599`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmConfig {
+    /// Radio being configured.
+    pub radio: NodeKey,
+    /// Agent AL address identifying the device's data model.
+    pub agent_al: MacAddr,
+}
+
 /// An immutable command owned by an orchestration chain.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     /// Initialize the agent's device and radios.
     DevInit(DevInit),
+    /// Confirm a device's platform configuration.
+    OneWifiCb(OneWifiCb),
+    /// Renew configuration for one agent radio.
+    CfgRenew(CfgRenew),
+    /// Configure one controller radio.
+    EmConfig(EmConfig),
 }
 
 impl Command {
@@ -126,13 +179,19 @@ impl Command {
     pub const fn kind(&self) -> CommandType {
         match self {
             Self::DevInit(_) => CommandType::DevInit,
+            Self::OneWifiCb(_) => CommandType::OneWifiCb,
+            Self::CfgRenew(_) => CommandType::CfgRenew,
+            Self::EmConfig(_) => CommandType::EmConfig,
         }
     }
 
     /// Returns the ordered plan, including stages that only pre-process.
     ///
     /// `src/cmd/em_cmd_dev_init.cpp:46-51` specifies AL insert without
-    /// submission followed by radio insert with submission.
+    /// submission followed by radio insert with submission. The S2 plans use
+    /// `src/cmd/em_cmd_onewifi_cb.cpp:47-50`,
+    /// `src/cmd/em_cmd_cfg_renew.cpp:38-41`, and the first two stages of
+    /// `src/cmd/em_cmd_em_config.cpp:47-52` (0013 D3).
     #[must_use]
     pub const fn plan(&self) -> &'static [PlanStage] {
         match self {
@@ -143,6 +202,24 @@ impl Command {
                 },
                 PlanStage {
                     op: OrchOp::EmInsert,
+                    submit: true,
+                },
+            ],
+            Self::OneWifiCb(_) => &[PlanStage {
+                op: OrchOp::OwconfigCnf,
+                submit: true,
+            }],
+            Self::CfgRenew(_) => &[PlanStage {
+                op: OrchOp::TxCfgRenew,
+                submit: true,
+            }],
+            Self::EmConfig(_) => &[
+                PlanStage {
+                    op: OrchOp::BssDelete,
+                    submit: false,
+                },
+                PlanStage {
+                    op: OrchOp::TopoSync,
                     submit: true,
                 },
             ],
@@ -194,8 +271,8 @@ mod tests {
     use em_types::MacAddr;
 
     use super::{
-        ChainId, Command, CommandType, CommandView, DevInit, NoCommands, NodeKey, NodeKind, OrchOp,
-        OrchState, PlanStage,
+        CfgRenew, ChainId, Command, CommandType, CommandView, DevInit, EmConfig, NoCommands,
+        NodeKey, NodeKind, OneWifiCb, OrchOp, OrchState, PlanStage,
     };
 
     #[test]
@@ -218,6 +295,55 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn s2_plans_match_upstream_stages_in_scope() {
+        let radio = NodeKey {
+            mac: MacAddr::ZERO,
+            kind: NodeKind::Radio,
+        };
+        let cases = [
+            (
+                Command::OneWifiCb(OneWifiCb {
+                    radios: vec![radio],
+                }),
+                CommandType::OneWifiCb,
+                vec![PlanStage {
+                    op: OrchOp::OwconfigCnf,
+                    submit: true,
+                }],
+            ),
+            (
+                Command::CfgRenew(CfgRenew { radio }),
+                CommandType::CfgRenew,
+                vec![PlanStage {
+                    op: OrchOp::TxCfgRenew,
+                    submit: true,
+                }],
+            ),
+            (
+                Command::EmConfig(EmConfig {
+                    radio,
+                    agent_al: MacAddr::ZERO,
+                }),
+                CommandType::EmConfig,
+                vec![
+                    PlanStage {
+                        op: OrchOp::BssDelete,
+                        submit: false,
+                    },
+                    PlanStage {
+                        op: OrchOp::TopoSync,
+                        submit: true,
+                    },
+                ],
+            ),
+        ];
+        for (command, kind, stages) in cases {
+            assert_eq!(command.kind(), kind);
+            assert_eq!(command.plan(), stages);
+        }
     }
 
     #[test]

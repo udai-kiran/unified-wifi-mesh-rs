@@ -4,10 +4,11 @@
 //! and its frames out to `em-transport`. All protocol logic is in the core.
 
 use std::fmt;
-use std::future::Future;
+use std::future::{self, Future};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use em_dm::NetworkSsidInfo;
 use em_transport::{
     LinkState, OutboundSdu, Role, Sdu, Transport, TransportConfig, TransportError, TransportTask,
     spawn,
@@ -30,6 +31,10 @@ pub struct CtrlConfig {
     pub control_path: PathBuf,
     /// AL-SAP data socket path.
     pub data_path: PathBuf,
+    /// The reset file's `NetworkSSIDList` (0013 D2).
+    pub networks: Vec<Box<NetworkSsidInfo>>,
+    /// The test-only switch that drops the first M2's hand-off (0013 D10).
+    pub drop_first_m2: bool,
 }
 
 /// Why the actor ended other than by a stop request. The process exits 1.
@@ -107,6 +112,7 @@ impl Actor {
             }
             self.al_mac = Some(al_mac);
         } else {
+            self.core.unregistered();
             tracing::info!(session = current.session, "link lost, waiting to register");
         }
         Ok(current)
@@ -115,6 +121,13 @@ impl Actor {
     fn handle_received(&mut self, sdu: &Sdu) -> Result<(), ActorError> {
         let session = self.sync_link()?.session;
         let frames = self.core.received(sdu.remote, &sdu.cmdu, now());
+        self.queue(session, frames);
+        Ok(())
+    }
+
+    fn handle_deadline(&mut self) -> Result<(), ActorError> {
+        let session = self.sync_link()?.session;
+        let frames = self.core.tick(now());
         self.queue(session, frames);
         Ok(())
     }
@@ -146,6 +159,13 @@ impl Actor {
         if let Some(sdu) = self.pending.pop() {
             permit.send(sdu);
         }
+    }
+}
+
+async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => future::pending().await,
     }
 }
 
@@ -189,7 +209,7 @@ pub async fn run(config: CtrlConfig, stop: impl Future<Output = ()>) -> Result<(
         Role::Controller,
     ));
     let mut actor = Actor {
-        core: CtrlCore::new(),
+        core: CtrlCore::new(config.networks, config.drop_first_m2),
         link,
         seen: LinkState::default(),
         al_mac: None,
@@ -198,6 +218,10 @@ pub async fn run(config: CtrlConfig, stop: impl Future<Output = ()>) -> Result<(
     tokio::pin!(stop);
 
     loop {
+        let deadline = actor
+            .core
+            .next_deadline()
+            .map(tokio::time::Instant::from_std);
         let has_pending = !actor.pending.is_empty();
         tokio::select! {
             () = &mut stop => break,
@@ -212,6 +236,7 @@ pub async fn run(config: CtrlConfig, stop: impl Future<Output = ()>) -> Result<(
                 }
                 Err(_) => return Err(transport_ended(&mut task).await),
             },
+            () = sleep_until_deadline(deadline) => actor.handle_deadline()?,
             permit = sdus.reserve(), if has_pending => match permit {
                 Ok(permit) => actor.send_next(permit),
                 Err(_) => return Err(transport_ended(&mut task).await),
@@ -269,7 +294,7 @@ mod tests {
 
     fn actor_with(link: watch::Receiver<LinkState>) -> Actor {
         Actor {
-            core: CtrlCore::new(),
+            core: CtrlCore::new(Vec::new(), false),
             link,
             seen: LinkState::default(),
             al_mac: None,

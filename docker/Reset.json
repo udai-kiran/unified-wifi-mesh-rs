@@ -1,0 +1,37 @@
+{
+    "wfa-dataelements:Reset": {
+        "ID": "OneWifiMesh",
+        "NumberOfDevices": 1,
+        "NetworkSSIDList": [{
+                "SSID": "docker-fronthaul",
+                "PassPhrase": "test-fronthaul-wpa2",
+                "Band": ["2.4", "5"],
+                "Enable": true,
+                "AKMsAllowed": ["psk"],
+                "AdvertisementEnabled": true,
+                "MFPConfig": "Disabled",
+                "HaulType": ["Fronthaul"],
+                "AuthType": "WPA2 Personal"
+            }, {
+                "SSID": "docker-backhaul",
+                "Passphrase": "test-backhaul-sae",
+                "Band": ["2.4", "5"],
+                "Enable": true,
+                "AKMsAllowed": ["sae"],
+                "AdvertisementEnabled": true,
+                "MFPConfig": "Required",
+                "HaulType": ["Backhaul"],
+                "AuthType": "WPA3 Personal"
+            }, {
+                "SSID": "docker-fronthaul-unused",
+                "PassPhrase": "test-unused-wpa3",
+                "Band": ["2.4", "5"],
+                "Enable": true,
+                "AKMsAllowed": ["sae"],
+                "AdvertisementEnabled": true,
+                "MFPConfig": "Required",
+                "HaulType": ["Fronthaul"],
+                "AuthType": "WPA3 Personal"
+            }]
+    }
+}

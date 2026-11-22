@@ -9,7 +9,11 @@ use std::time::Duration;
 use em_agent::platform::FakePlatform;
 use em_agent::{ActorError, AgentConfig, run};
 use em_cmd::RadioSpec;
+use em_core::MsgIdCounter;
 use em_core::configuration::build_response;
+use em_core::topology::{build_query, parse_response};
+use em_core::wsc::{AUTH_WPA2_PERSONAL, Identity, NetworkSsid, build_m2, parse_m1};
+use em_crypto::rand::OsRandom;
 use em_msg::{CmduHeader, readers};
 use em_transport::TransportError;
 use em_types::{FreqBand, MacAddr, MsgType};
@@ -116,7 +120,10 @@ async fn a_response_per_radio_stops_the_searches() {
         session.write_sdu(AL_MAC, CONTROLLER, &response).await;
     }
 
-    // Both radios moved on; five seconds of virtual time bring no further Search.
+    // Both radios moved on and sent their M1; five seconds of virtual time (less than the
+    // 10 s wait for an M2) bring no further Search.
+    read_m1(&mut session).await;
+    read_m1(&mut session).await;
     let next = tokio::time::timeout(Duration::from_secs(5), session.read_sdu()).await;
     assert!(next.is_err(), "a Search was sent after the Responses");
 
@@ -186,4 +193,85 @@ async fn the_stop_path_ends_within_a_second() {
         "stopping took {:?}",
         stopped_at.elapsed()
     );
+}
+
+/// Reads SDUs until an M1 arrives and returns its CMDU.
+async fn read_m1(session: &mut ServiceSession) -> Vec<u8> {
+    loop {
+        let sdu = session.read_sdu().await;
+        if CmduHeader::parse(&sdu.cmdu).unwrap().0.msg_type == MsgType::AP_AUTOCONFIGURATION_WSC {
+            assert_eq!(sdu.remote, CONTROLLER);
+            return sdu.cmdu;
+        }
+    }
+}
+
+fn m2_for(m1_cmdu: &[u8]) -> Vec<u8> {
+    let m1 = parse_m1(m1_cmdu).unwrap();
+    let rows = [NetworkSsid {
+        enabled: true,
+        ssid: b"actor-net",
+        network_key: b"actor-pass",
+        bands: &[FreqBand::BAND_2_4_GHZ, FreqBand::BAND_5_GHZ],
+        haul_types: &[0],
+        authentication_type: AUTH_WPA2_PERSONAL,
+    }];
+    let identity = Identity {
+        uuid: [3; 16],
+        manufacturer: b"controller",
+        model: b"model",
+        serial: b"1",
+        primary_device_type: [0, 6, 0, 0x50, 0xf2, 4, 0, 1],
+    };
+    build_m2(
+        &m1,
+        &identity,
+        &rows,
+        &mut MsgIdCounter::new(),
+        &mut OsRandom,
+    )
+    .unwrap()
+    .cmdu
+}
+
+/// An M2 per radio reaches the platform, which confirms once; the actor then answers the
+/// controller's Topology Query (0013 D4).
+#[tokio::test(start_paused = true)]
+async fn m2s_and_a_query_complete_onboarding_through_the_platform_channel() {
+    let service = FakeService::new();
+    let running = start(&service);
+    let mut session = service.accept_and_respond(AL_MAC, SUCCESS).await;
+    expect_both_bands(&mut session).await;
+
+    for band in [FreqBand::BAND_2_4_GHZ, FreqBand::BAND_5_GHZ] {
+        let response = build_response(band, 3, 1).unwrap();
+        session.write_sdu(AL_MAC, CONTROLLER, &response).await;
+    }
+    for _ in 0..2 {
+        let m1 = read_m1(&mut session).await;
+        session.write_sdu(AL_MAC, CONTROLLER, &m2_for(&m1)).await;
+    }
+
+    // Queries before the confirmation are not answered; the controller repeats them.
+    let mut ids = MsgIdCounter::new();
+    let mut answer = None;
+    for _ in 0..20 {
+        let query = build_query(&mut ids).unwrap();
+        session.write_sdu(AL_MAC, CONTROLLER, &query).await;
+        if let Ok(sdu) = tokio::time::timeout(Duration::from_secs(1), session.read_sdu()).await {
+            answer = Some((query, sdu));
+            break;
+        }
+    }
+    let (query, sdu) = answer.expect("the Topology Query was never answered");
+    assert_eq!(sdu.remote, CONTROLLER);
+    assert_eq!(sdu.local, AL_MAC);
+    let (header, _) = CmduHeader::parse(&sdu.cmdu).unwrap();
+    assert_eq!(header.msg_type, MsgType::TOPOLOGY_RESPONSE);
+    assert_eq!(header.msg_id, CmduHeader::parse(&query).unwrap().0.msg_id);
+    let parsed = parse_response(&sdu.cmdu, &[b"actor-net"], 3).unwrap();
+    assert_eq!(parsed.operational_bss.radios.len(), 2);
+
+    running.stop.send(()).unwrap();
+    assert!(finished(running.handle).await.is_ok());
 }

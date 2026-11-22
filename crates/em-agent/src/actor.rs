@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The tokio role actor of the agent (0012 D9): moves inputs into [`AgentCore`]
-//! and its frames out to `em-transport`. All protocol logic is in the core.
+//! and its frames out to `em-transport`. It also passes the platform's confirmations
+//! in and the configurations of accepted M2s out to the [`Platform`]. All protocol
+//! logic is in the core.
 
 use std::fmt;
 use std::future::{self, Future};
@@ -18,7 +20,7 @@ use tokio::sync::watch;
 use tokio::task::JoinError;
 
 use crate::pending::PendingFrames;
-use crate::platform::Platform;
+use crate::platform::{Confirmation, Platform};
 use crate::{AgentCore, AlMacChanged, Frame};
 
 /// How long to wait for the transport task after a stop, before aborting it (0011 A7).
@@ -75,8 +77,9 @@ fn now() -> Instant {
 }
 
 /// The actor's state outside the transport's channels.
-struct Actor {
+struct Actor<P: Platform> {
     core: AgentCore,
+    platform: P,
     link: watch::Receiver<LinkState>,
     /// The link state the core has been told about.
     seen: LinkState,
@@ -85,7 +88,7 @@ struct Actor {
     pending: PendingFrames,
 }
 
-impl Actor {
+impl<P: Platform> Actor<P> {
     /// Tells the core about a link change. Called before every handler, because
     /// the `link` arm of the `select!` can lose the race against a received SDU
     /// of the new session (0011 A5).
@@ -120,7 +123,23 @@ impl Actor {
         let session = self.sync_link()?.session;
         let frames = self.core.received(sdu.remote, &sdu.cmdu, now());
         self.queue(session, frames);
+        self.apply_platform_requests();
         Ok(())
+    }
+
+    /// The platform confirmed every radio's configuration (0013 D4).
+    fn handle_confirmation(&mut self, confirmation: Confirmation) -> Result<(), ActorError> {
+        self.sync_link()?;
+        self.core.platform_confirmed(confirmation.bss, now());
+        Ok(())
+    }
+
+    /// Hands the configurations of accepted M2s to the platform.
+    fn apply_platform_requests(&mut self) {
+        for request in self.core.take_platform_requests() {
+            self.platform
+                .apply_radio_config(request.radio, &request.bss);
+        }
     }
 
     fn handle_deadline(&mut self) -> Result<(), ActorError> {
@@ -196,7 +215,7 @@ async fn transport_ended(task: &mut TransportTask) -> ActorError {
 /// [`ActorError`] when the actor ends without a stop request.
 pub async fn run(
     config: AgentConfig,
-    platform: impl Platform,
+    mut platform: impl Platform,
     stop: impl Future<Output = ()>,
 ) -> Result<(), ActorError> {
     let Transport {
@@ -210,8 +229,10 @@ pub async fn run(
         config.data_path,
         Role::Agent,
     ));
+    let mut confirmations = platform.confirmations();
     let mut actor = Actor {
         core: AgentCore::new(config.profile, platform.radios()),
+        platform,
         link,
         seen: LinkState::default(),
         al_mac: None,
@@ -238,6 +259,7 @@ pub async fn run(
                 }
                 Err(_) => return Err(transport_ended(&mut task).await),
             },
+            Some(confirmation) = confirmations.recv() => actor.handle_confirmation(confirmation)?,
             () = sleep_until_deadline(deadline) => actor.handle_deadline()?,
             permit = sdus.reserve(), if has_pending => match permit {
                 Ok(permit) => actor.send_next(permit),
@@ -282,6 +304,7 @@ mod tests {
 
     use super::Actor;
     use crate::pending::PendingFrames;
+    use crate::platform::FakePlatform;
     use crate::{AgentCore, PROTO_IDLE};
 
     const AL_MAC: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 2]);
@@ -293,15 +316,14 @@ mod tests {
         }
     }
 
-    fn actor_with(link: watch::Receiver<LinkState>) -> Actor {
+    fn actor_with(link: watch::Receiver<LinkState>) -> Actor<FakePlatform> {
+        let radios = vec![RadioSpec {
+            ruid: MacAddr::new([2, 0, 0, 0, 1, 1]),
+            band: FreqBand::BAND_5_GHZ,
+        }];
         Actor {
-            core: AgentCore::new(
-                2,
-                vec![RadioSpec {
-                    ruid: MacAddr::new([2, 0, 0, 0, 1, 1]),
-                    band: FreqBand::BAND_5_GHZ,
-                }],
-            ),
+            core: AgentCore::new(2, Vec::from(radios.as_slice())),
+            platform: FakePlatform::new(radios),
             link,
             seen: LinkState::default(),
             al_mac: None,

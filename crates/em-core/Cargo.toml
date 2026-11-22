@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 em-types = { path = "../em-types" }
 em-msg = { path = "../em-msg" }
+em-crypto = { path = "../em-crypto" }
 em-cmd = { path = "../em-cmd" }
 em-easyconnect = { path = "../em-easyconnect" }
 tracing = { version = "0.1.44", default-features = false }

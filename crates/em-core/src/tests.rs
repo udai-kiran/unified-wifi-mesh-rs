@@ -857,3 +857,21 @@ fn upstream_parity_controller_response_services_follow_peer() {
         assert_eq!(receiving_agent.state(), AgentState::WscM2Pending);
     }
 }
+
+#[test]
+fn renew_round_trips_and_validates() {
+    let renew = configuration::build_renew(CONTROLLER, BAND, 9).unwrap();
+    validate(&renew, ProfileType::MULTI_AP_PROFILE_3).unwrap();
+    let (header, _) = CmduHeader::parse(&renew).unwrap();
+    assert_eq!(header.msg_type, MsgType::AP_AUTOCONFIGURATION_RENEW);
+    assert_eq!(header.msg_id, 9);
+    assert!(!header.relay);
+    let route = configuration::route_renew(&renew).unwrap();
+    assert_eq!(route.al_mac, CONTROLLER);
+    assert_eq!(route.band, BAND);
+    for len in 0..renew.len() {
+        assert!(configuration::route_renew(&renew[..len]).is_err());
+    }
+    let search = configuration::build_search(AGENT, BAND, 3, 1).unwrap();
+    assert!(configuration::route_renew(&search).is_err());
+}

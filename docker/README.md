@@ -1,8 +1,8 @@
-# Docker harness (S0 and S1)
+# Docker harness (S0, S1 and S2)
 
-Two harnesses share one image, one compose file and two nodes: S0 (below, `run-s0.sh`) and S1 (section
-"S1 harness", `run-s1.sh`). `HARNESS_MODE` in the compose file selects what the entrypoint runs; the scripts
-set it.
+Three harnesses share one image, one compose file and two nodes: S0 (below, `run-s0.sh`), S1 (section
+"S1 harness", `run-s1.sh`) and S2 (section "S2 harness", `run-s2.sh`). `HARNESS_MODE` in the compose file selects
+what the entrypoint runs (`s0`, `s1` or `s2`); the scripts set it.
 
 # S0 Docker harness
 
@@ -79,7 +79,7 @@ the role process (`em-agent` for `ROLE=agent`, `em-ctrl` for `ROLE=controller`).
 the container. `role-ctl` (this directory's `role-ctl.sh`, installed in the image) tells the loop what to do through
 state files in `/var/log/s0`: `role.args` (the arguments), `role.stop` (present while the process is meant to be
 down), `role.stopped` (the supervisor's acknowledgement of `role.stop`) and `role.pid`. After the entrypoint has
-removed any old `role.args`, `role.pid`, `role.stopped` and `role.ready` and created `role.stop`, it writes the marker `role.ready` in the same directory; `run-s1.sh` waits for it on each
+removed any old `role.args`, `role.pid`, `role.stopped` and `role.ready` and created `role.stop`, it writes the marker `role.ready` in the same directory; `run-s1.sh` and `run-s2.sh` wait for it on each
 node (at most 30 s, otherwise check 1 fails) before the first `role-ctl start`. Use it with `docker exec`:
 
 ```sh
@@ -135,8 +135,110 @@ anchor to line numbers. `ieee1905-rs` keeps logging to `ieee1905.log`.
 
 The script restarts `em-agent` twice, once with `--profile 2` (check 4) and once with the default profile (6b).
 
+## S2 harness
+
+`run-s2.sh` runs the Docker exit checks of `docs/0013-s2-onboarding.md` D10 with the real binaries: `em-agent`
+(node 1, two radios) and `em-ctrl` (node 2) over the real `ieee1905-rs`, from discovery through M1, M2, the
+platform confirmation and the Topology Query and Response to `topo_synchronized`. Check 7 of D10 (workspace
+checks) is cargo, not this script.
+
+```sh
+docker/run-s2.sh              # gating run: checks 1, 2, 3, 4 and 6 (about 6 minutes)
+docker/run-s2.sh --eviction   # check 5, evidence only (about 5 minutes)
+KEEP=1 docker/run-s2.sh       # leave the containers up afterwards
+```
+
+`HARNESS_MODE=s2` uses the same role supervisor and `role-ctl` as S1. The controller is started with
+`role-ctl start --reset-file /nvram/Reset.json`, plus `--test-drop-first-m2` in the lost-M2 runs.
+
+### The reset file
+
+`docker/Reset.json` is installed in the image as `/nvram/Reset.json`, where `em-ctrl` reads it by default
+(`--reset-file` overrides the path). It holds test passphrases only and three rows: the first Fronthaul row
+(`docker-fronthaul`, `WPA2 Personal`, so the PSK rule of EasyMesh 7.1 holds), a Backhaul row (`docker-backhaul`,
+`WPA3 Personal`, SAE) and a second Fronthaul row (`docker-fronthaul-unused`) that the controller must not use,
+because it takes the first row of each haul type. Both bands are in every row, so each radio gets two BSSs (and the
+controller's M2 carries `m2s=2`), four in total.
+
+### The test switch
+
+`em-ctrl --test-drop-first-m2` is test-only. The first M2 is built and recorded as sent (the controller moves to
+`wsc_m2_sent` and submits `em_config`, as after a write the network then loses), but it is never handed to the
+transport. The controller logs `M2 dropped by test switch`; the next M2 is sent normally. The agent never gets the
+first M2, so its radio waits in `wsc_m2_pending`, and after more than 10 s restarts discovery (0013 D5).
+
+### Checks (gating run)
+
+The script reads the roles' own log lines and takes every time from the log timestamps. A check fails when a log
+cannot be read, when a line it needs is missing, or when a count is wrong (each check needs both radios), so none
+passes because nothing was logged.
+
+1. **M1.** For each radio: one `radio found controller`, then one `M1 sent` after it, with a MID that no Search or
+   Response of the run used and `mac=` equal to the agent's AL MAC (node 1). The controller logs one `radio node
+   created` for the radio and that agent.
+2. **M2.** For each radio: the controller's `M2 sent` follows the M1 by no more than 1 s (log times), has `m2s=2`
+   and a MID different from the M1's; the agent's `M2 accepted` has the same MID and `bss=2`; and the fake platform
+   logs `platform applied a radio configuration` with `bss=2` after that. No `M2 rejected` or `M2 dropped by test
+   switch`.
+3. **Confirmation and Topology.** One `platform confirmed` (`bss=4`) after both radios' platform lines, one
+   `onewifi_cb submitted` after it, the agent answers a Topology Query only after that (Queries before it go
+   unanswered by design), and the controller logs `Topology Response handled` within 5 s of `onewifi_cb submitted`
+   (the D9 limit: that line is when the last radio reaches `onewifi_bssconfig_ind`, because the command moves every
+   radio at once and the agent answers only when every radio is there). Both radios log `topo_synchronized` on the
+   agent and on the controller after that. No `ssid mismatch`, `em_config cancelled`, `renew sent`,
+   `restart discovery`, `onewifi_cb cancelled` or `dev_init cancelled`. The agent does not log the
+   `onewifi_bssconfig_ind` state itself, so that state is read from the lines above.
+4. **Lost M2** (second run, fresh containers, `--test-drop-first-m2`). One `M2 dropped by test switch`; the radio of
+   the next `M2 sent` logs `restart discovery` (reason `no M2 within 10 s of M1`) more than 10 s and at most 14 s
+   after its first `M1 sent` (the code restarts at 11 to 12.5 s on a 1 s tick); it sends exactly two M1s and has one
+   `M2 accepted`, after the restart; both radios log `topo_synchronized` on both roles after the restart; exactly
+   one `dev_init submitted` in the agent log; no other `restart discovery`, `onewifi_cb cancelled`, `em_config
+   cancelled` or `renew sent`.
+6. **ieee1905-rs restarts.** After the normal run, for the controller's and then the agent's node: baseline line
+   numbers, kill `ieee1905-rs` (the loop restarts it), wait for `new session, same AL MAC`, wait 10 s. After the
+   baseline neither role may log a Search, `radio found controller`, `controller found`, M1, M2, `platform
+   confirmed`, `onewifi_cb`, `dev_init`, `restart discovery`, `em_config cancelled`, `renew sent`, a start or a
+   rejection; the `ieee1905` pid changed and both role pids did not. That the radios stay `topo_synchronized` is read
+   from the absence of every line that would move them (there is no state dump).
+
+The script ends with the `INFO D9` lines (below). It exits non-zero if a check fails and then prints the last 30
+lines of every log.
+
+### D9 stall times
+
+The role actor runs the cryptography on its own task, so the time of the handlers is the stall. The roles log it:
+`build_us` on the agent's `M1 sent` (the DH key pair), `check_us` on the agent's `M2 accepted` (shared secret, KDF,
+AES-CBC decrypt, for one M2) and `build_us` on the controller's `M2 sent` (the DH key pair, shared secret, KDF and AES
+encryption of every M2 of one M1). Both modes print the longest and the median of each as `INFO D9` lines, over the
+runs of that invocation. These are release builds in a container on the host's CPU. One measurement on x86_64 in
+release builds gave a longest agent `M1` build of about 2.8 ms, an agent `M2` check of about
+4.0 ms per M2 and a controller `M2` build of about 9.0 ms.
+
+### Check 5: the eviction run (`--eviction`, evidence only)
+
+It never runs in the gating mode and its result does not decide a pass. The controller starts with
+`--test-drop-first-m2`. When `M2 dropped by test switch` appears, the script installs a `tc clsact` egress filter in
+the controller's container on `eth0` that drops ether types 0x893A (1905) and 0x88CC (LLDP, as D10 says) for 70 s,
+then removes it. The agent's `ieee1905-rs` then stops hearing the controller and evicts it after its 60 s unseen
+limit. The run waits until both radios are `topo_synchronized` on both roles (at most 240 s after the block) and
+prints:
+
+- the timeline of both role logs, of the agent node's `ieee1905` log (`Removing node due to timeout` is the eviction,
+  `Inserted node from Discovery` the relearning) and of the block, in seconds from its installation (the once-a-second
+  Searches and Topology Queries are summarised by count and first and last time);
+- the `tc -s filter show` statistics from just before the removal (dropped packet counts prove the filter acted);
+- the eight points of D10 check 5's prediction as yes or no (restart discovery after the lost M2; the controller's
+  40 s `em_config` cancel and both renews inside the block; the eviction; the `onewifi_cb` timeout (an `onewifi_cb cancelled` line and a `restart discovery`
+  line with reason `onewifi_cb timeout`, both after the block) and a second
+  `dev_init`; both radios `topo_synchronized` on both roles after the block), and a `RESULT 5` line.
+
+It exits 0 when it could run (a prediction that did not hold is a result, not a failure) and 1 when it could not
+(for example, the filter could not be installed).
+
 ## Layout
 
+- `Reset.json`: the S2 controller's reset file, installed as `/nvram/Reset.json`. `run-s2.sh`: the S2 harness.
+  The runtime image also holds `iproute2` (`tc`, for the eviction run).
 - `Dockerfile`: stage A builds `ieee1905-rs` at commit `a6443225db82f7e8aed1c29644d2ed0b947b4d6e`, fetched by
   hash and verified with `git rev-parse`, `cargo build --release --locked -p ieee1905` (default features) on
   `rust:1.91`. Stage B builds the probe, `em-agent` and `em-ctrl` on `rust:1.85` (the workspace MSRV) from the
@@ -144,10 +246,10 @@ The script restarts `em-agent` twice, once with `--profile 2` (check 4) and once
   is `debian:bookworm-slim` with both binaries. All three share Debian bookworm, so the glibc matches.
   `Dockerfile.dockerignore` trims the build context.
 - `entrypoint.sh`: runs `ieee1905` in a restart loop (logging to `$LOG_DIR/ieee1905.log`, pid in
-  `ieee1905.pid`), then, in `HARNESS_MODE=s0` (default), execs the probe; in `s1` it runs the role supervisor
+  `ieee1905.pid`), then, in `HARNESS_MODE=s0` (default), execs the probe; in `s1` and `s2` it runs the role supervisor
   described above (it writes `role.ready` after it has created `role.stop`, and `role.stopped` whenever it is idle with `role.stop` present). `role-ctl.sh` is the control script
-  of that supervisor. Environment: `HARNESS_MODE` (`s0`
-  or `s1`), `ROLE` (`agent` or `controller`, required), `IFACE`
+  of that supervisor. Environment: `HARNESS_MODE` (`s0`,
+  `s1` or `s2`), `ROLE` (`agent` or `controller`, required), `IFACE`
   (default `eth0`), `CONTROL_PATH`, `DATA_PATH`, `LOG_DIR` (default `/var/log/s0`) and `FIFO` (default
   `/run/s0/probe.fifo`). The socket defaults are upstream's per role: agent `/tmp/al_control_socket` and
   `/tmp/al_data_socket`, controller `/tmp/al_em_ctrl_control_socket` and `/tmp/al_em_ctrl_data_socket`.

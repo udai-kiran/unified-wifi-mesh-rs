@@ -1,12 +1,12 @@
 #!/bin/bash
 # Runs ieee1905-rs in a restart loop (so the checks can kill it without stopping the container), then
 #   HARNESS_MODE=s0 (default): runs the AL-SAP probe in the foreground (docs/0011 D4);
-#   HARNESS_MODE=s1: runs em-agent or em-ctrl under a second supervisor that docker/role-ctl.sh
-#   (installed as role-ctl) stops, starts and restarts with new arguments (docs/0012 D8).
+#   HARNESS_MODE=s1 or s2: runs em-agent or em-ctrl under a second supervisor that docker/role-ctl.sh
+#   (installed as role-ctl) stops, starts and restarts with new arguments (docs/0012 D8, 0013 D10).
 #
 # Environment:
 #   ROLE          agent | controller (required)
-#   HARNESS_MODE  s0 | s1 (default s0)
+#   HARNESS_MODE  s0 | s1 | s2 (default s0)
 #   IFACE         interface ieee1905-rs forwards on (default eth0)
 #   CONTROL_PATH  AL-SAP control socket (default: upstream's per-role path)
 #   DATA_PATH     AL-SAP data socket    (default: upstream's per-role path)
@@ -54,7 +54,7 @@ supervise_ieee1905() {
 }
 supervise_ieee1905 &
 
-if [ "${HARNESS_MODE:-s0}" = s1 ]; then
+if [ "${HARNESS_MODE:-s0}" = s1 ] || [ "${HARNESS_MODE:-s0}" = s2 ]; then
     case "$ROLE" in
     agent) role_binary=em-agent ;;
     controller) role_binary=em-ctrl ;;
@@ -62,7 +62,7 @@ if [ "${HARNESS_MODE:-s0}" = s1 ]; then
 
     # The role process starts only when role-ctl asks for it, with the arguments it gives. Until then
     # role.stop exists. The log is appended across restarts; the process logs "starting" each time.
-    # role.ready tells run-s1.sh that role-ctl can be used: it is written after role.stop is created.
+    # role.ready tells run-s1.sh and run-s2.sh that role-ctl can be used: it is written after role.stop is created.
     rm -f "$LOG_DIR/role.pid" "$LOG_DIR/role.args" "$LOG_DIR/role.ready" "$LOG_DIR/role.stopped"
     touch "$LOG_DIR/role.stop"
     supervise_role() {

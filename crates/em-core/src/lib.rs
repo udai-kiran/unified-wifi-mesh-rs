@@ -9,6 +9,8 @@ use em_cmd::{CommandView, NodeKey};
 use em_types::{FreqBand, MacAddr};
 
 pub mod configuration;
+pub mod topology;
+pub mod wsc;
 
 /// Agent states used by discovery, with their upstream `em_state_t` values
 /// (`inc/em_base.h:2344-2369`).
@@ -23,7 +25,7 @@ pub enum AgentState {
     Ieee1905Securing = 2,
     /// A Search was handed off and a Response is awaited.
     AutoconfigRspPending = 3,
-    /// A Response was accepted; S1 stops before sending WSC M1.
+    /// A Response was accepted; the agent core then sends WSC M1 (0013 D4).
     WscM2Pending = 4,
     /// WSC M2 was processed.
     WscM2Processed = 5,
@@ -63,7 +65,7 @@ pub enum AgentState {
     LinkQualityReportPending = 22,
 }
 
-/// Controller states needed by S1 (`inc/em_base.h:2371-2373`).
+/// Controller states needed by S1 and S2 (`inc/em_base.h:2371-2373`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum CtrlState {
@@ -71,6 +73,14 @@ pub enum CtrlState {
     Unconfigured = 0x100,
     /// A Response was handed off and WSC M1 is awaited.
     WscM1Pending = 0x101,
+    /// M2 was handed to the transport.
+    WscM2Sent = 0x102,
+    /// Topology synchronization is pending.
+    TopoSyncPending = 0x103,
+    /// The device topology is synchronized.
+    TopoSynchronized = 0x104,
+    /// Configuration timed out.
+    Misconfigured = 0x110,
 }
 
 /// Controller identity learned from a Response.

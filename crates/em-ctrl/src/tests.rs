@@ -14,7 +14,7 @@ const AGENT: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 1]);
 const BAND: FreqBand = FreqBand::BAND_5_GHZ;
 
 fn registered_core() -> CtrlCore {
-    let mut core = CtrlCore::new();
+    let mut core = CtrlCore::new(Vec::new(), false);
     core.registered(CONTROLLER).unwrap();
     core
 }
@@ -70,7 +70,7 @@ fn emplus_search(profile: u8, mid: u16) -> Vec<u8> {
 
 #[test]
 fn the_al_node_is_created_at_the_first_registration() {
-    let mut core = CtrlCore::new();
+    let mut core = CtrlCore::new(Vec::new(), false);
     assert!(core.nodes().iter().next().is_none());
     // A Search before registration finds no AL node: no frame, no model.
     let search = build_search(AGENT, BAND, 3, 1).unwrap();
