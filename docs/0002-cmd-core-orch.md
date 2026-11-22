@@ -337,6 +337,8 @@ fn handle_frame(ctx: &mut EngineCtx<'_>, frame: Frame<'_>);
 
 ### D2. Crates and graph
 
+> **Amended by [0014](0014-init-config-and-al-mac.md) D16 (2026-11-22):** `em-cmd` also carries the local admin protocol used by the new `em-cli` admin client.
+
 > **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** the `OrchRole` hooks return `RoleEffect`s, and `em-orch` owns each node's orchestration state.
 
 | Crate | Contents | Depends on |

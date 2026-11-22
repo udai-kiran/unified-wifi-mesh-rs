@@ -115,6 +115,8 @@ agent has two radios.
 
 ### D2. Controller configuration store (user decisions "In-memory + Reset.json", "serde + serde_json")
 
+> **Amended by [0014](0014-init-config-and-al-mac.md) D2 to D4 (2026-11-22):** `Reset.json` may carry an optional `em-rs:Config` section with device profiles, admission decisions and the base MAC; the read is bounded at 64 KiB in both modes.
+
 - `em-db` gets its first code: a loader for upstream's `Reset.json` shape that returns the NetworkSSIDList rows as
   `em-dm` `NetworkSsidInfo` records, accepting both `PassPhrase` and `Passphrase` as upstream's file uses. New
   dependencies **`serde` (derive) and `serde_json`, in `em-db` only**.
@@ -164,6 +166,8 @@ agent has two radios.
     cancel also resets the type's elapsed time (`em_orch.cpp:205-213`).
 
 ### D4. Agent flow (user decisions "One per device, after all radios", "Port cfg_renew", "Restart discovery" on the `onewifi_cb` timeout)
+
+> **Amended by [0014](0014-init-config-and-al-mac.md) D17 (2026-11-22):** a Renew re-runs WSC on every radio (§7.1), and a `cfg_renew` timeout resets every unfinished radio.
 
 - After a Response (S1) the radio builds M1 (D6), hands it to the transport with a new MID and stays in
   `wsc_m2_pending`. No Early AP Capability Report (D8).
@@ -233,6 +237,8 @@ agent has two radios.
 
 ### D6. M1 and M2 content and checks (user decisions "Spec content + security fixes", "Unique N2", "New MID", "WPA2 + WPA3 Personal")
 
+> **Amended by [0014](0014-init-config-and-al-mac.md) D5 (2026-11-22):** with the port section present, M2 rows come from the device's profile in list order (`m2-row-search` keeps today's rule without it).
+
 Each item is tagged with its upstream cite in its test.
 - **M1:** MAC Address = the agent's AL MAC (`m1-mac-al`); Authentication Type Flags = WPA2-Personal | SAE for S2's
   fake radios (`m1-auth-flags`); the three short attributes with deterministic value 0 instead of uninitialized
@@ -264,6 +270,8 @@ Each item is tagged with its upstream cite in its test.
   lifecycle tests are S2 acceptance tests. Each side has its own DH key pair (`separate-dh-keys`).
 
 ### D7. Controller flow
+
+> **Amended by [0014](0014-init-config-and-al-mac.md) D6, D17 and D18 (2026-11-22):** per-radio SSID check, Query MID set, a fresh M1 supersedes the old exchange, S2-03/04/06/08 hardening, and the controller renew retry (resolving E2).
 
 - **Radio-to-agent link:** each controller radio node records its agent's AL MAC and a per-radio
   `ssid_mismatch` flag; "every radio of the AL" means the radio nodes with that AL MAC, in insertion order

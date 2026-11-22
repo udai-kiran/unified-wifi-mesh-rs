@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Proposed** (rev 8, 2026-11-22), after two rounds of pre-implementation review (plan reviewer and Codex). User decisions and accepted risks are recorded. Open choices 3 and 6 wait for the Stage 1 result. Nothing is implemented |
+| Status | **Accepted** (2026-11-22, user), rev 8 after two rounds of pre-implementation review. Open choices 3 and 6 wait for the Stage 1 result; the 0012 D9 amendment is conditional on Phase C. Not implemented |
 | Date | 2026-11-22 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | 1905 layer | `rdkcentral/ieee1905-rs` @ `a6443225db82f7e8aed1c29644d2ed0b947b4d6e` |
@@ -622,6 +622,7 @@ Until slice S7, a wired deployment needs an isolated management VLAN or MACsec (
 
 ## Revision history
 
+- Accepted by the user (2026-11-22). Amendment pointers added to 0013 D2, D4, D6, D7; 0010 D1; 0002 D2.
 - rev 8 (2026-11-22, round 2 of the pre-implementation review: plan reviewer 10 findings, Codex 17, none critical; this is the last review
   round for this design): section gating split (D18 and the agent change apply in both modes); PSK rule over enabled rows in the file's
   profiles; byte budget for AutoRejected; when approve, revoke and internal saves take effect, and a full-loader check before rename;

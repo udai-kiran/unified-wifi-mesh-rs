@@ -60,6 +60,8 @@ reading the code.
 
 ### D1. Deliver in vertical slices
 
+> **Amended by [0014](0014-init-config-and-al-mac.md) (2026-11-22, user decision):** DPP, 1905 keys and encryption (S7) come **before** S3 to S6, after the admission and per-AP work; the order is in the roadmap recorded in `STATUS.md`.
+
 > **Amended by [0013](0013-s2-onboarding.md) D2 and D10 (2026-11-22):** in S2 the minimum `em-db` is an in-memory store seeded from a reset file (`--reset-file`, default `/nvram/Reset.json`), and the S2 exit checks include a lost-M2 run.
 
 Each slice ends with a controller and agent that **run** and complete one more protocol flow.
