@@ -6,7 +6,7 @@
 //! checks the framing, then the table of the message type, and keeps no state
 //! between calls.
 //!
-//! What it accepts follows upstream (note 0005 D3):
+//! What it accepts generally follows upstream (note 0005 D3):
 //!
 //! - TLVs that are not in the table are accepted.
 //! - Only mandatory rows are length-checked, and only on the first TLV of
@@ -21,7 +21,11 @@
 //! its presence flags or error counter), errors are returned instead of
 //! printed, and no length is subtracted before it is checked. For 26 rows
 //! where upstream's minimum rejects TLVs the spec allows, the minimum is the
-//! spec's ([`crate::spec_min`], note 0008 D8).
+//! spec's ([`crate::spec_min`], note 0008 D8). As decided in note 0012 D6,
+//! the Multi-AP Profile TLV is optional in AP-Autoconfiguration Search, and
+//! the Multi-AP Profile and 1905 Layer Security Capability TLVs are mandatory
+//! in AP-Autoconfiguration Response, at every profile. The underlying
+//! [`TABLES`] remain the upstream rows.
 //!
 //! Stricter checks (length of every instance, length of optional TLVs) are not
 //! done, because upstream's own senders would fail them.
@@ -36,6 +40,25 @@ use crate::spec_min;
 use crate::tables::{Requirement, Row, TABLES, Table, WscKind};
 use crate::tlv::{Tlv, TlvIter};
 use crate::wsc::{WSC_M1, WSC_M2, wsc_msg_type};
+
+// Note 0012 D6: override requirements in validate, keeping TABLES unchanged.
+const REQUIREMENT_OVERRIDES: &[(MsgType, TlvType, Requirement)] = &[
+    (
+        MsgType::AP_AUTOCONFIGURATION_SEARCH,
+        TlvType::MULTI_AP_PROFILE,
+        Requirement::Optional,
+    ),
+    (
+        MsgType::AP_AUTOCONFIGURATION_RESPONSE,
+        TlvType::MULTI_AP_PROFILE,
+        Requirement::Mandatory,
+    ),
+    (
+        MsgType::AP_AUTOCONFIGURATION_RESPONSE,
+        TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY,
+        Requirement::Mandatory,
+    ),
+];
 
 /// What is wrong with a TLV.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +134,8 @@ pub fn validate(cmdu: &[u8], profile: ProfileType) -> Result<(), ValidateError> 
     let mut violations = Vec::new();
     for (index, row) in table.rows.iter().enumerate() {
         let min_len = spec_min::min_len(table, index, row);
-        if let Some(violation) = check_row(row, min_len, tlv_area, profile) {
+        let requirement = row_requirement(header.msg_type, row, profile);
+        if let Some(violation) = check_row(row, min_len, requirement, tlv_area) {
             violations.push(violation);
         }
     }
@@ -138,11 +162,24 @@ fn choose_table(msg_type: MsgType, tlv_area: &[u8]) -> Option<&'static Table> {
         .find(|table| table.msg_type == msg_type && table.wsc == wanted)
 }
 
+/// The D6 override for this message and TLV, or the upstream profile rule.
+fn row_requirement(msg_type: MsgType, row: &Row, profile: ProfileType) -> Requirement {
+    REQUIREMENT_OVERRIDES
+        .iter()
+        .find(|(message, tlv, _)| *message == msg_type && *tlv == row.tlv_type)
+        .map_or_else(|| row.rule.resolve(profile), |entry| entry.2)
+}
+
 /// Checks one row against the first TLV of its type. `min_len` is the length to
 /// check for, which may be lower than `row.min_len` (see [`spec_min`]).
-fn check_row(row: &Row, min_len: u16, tlv_area: &[u8], profile: ProfileType) -> Option<Violation> {
+fn check_row(
+    row: &Row,
+    min_len: u16,
+    requirement: Requirement,
+    tlv_area: &[u8],
+) -> Option<Violation> {
     let found = first_tlv_of_type(tlv_area, row.tlv_type);
-    let kind = match (row.rule.resolve(profile), found) {
+    let kind = match (requirement, found) {
         (Requirement::Mandatory, None) => ViolationKind::Missing,
         (Requirement::Mandatory, Some(tlv)) if 3 + tlv.value.len() < usize::from(min_len) => {
             ViolationKind::TooShort
@@ -249,72 +286,56 @@ mod tests {
 
     #[test]
     fn search_valid_message_passes_at_every_profile() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 forbids Profile through 1; EasyMesh §6.1 permits it.
         for profile in PROFILES {
-            let mut tlvs = search_base();
-            if profile > 1 {
-                tlvs.push(z(TlvType::MULTI_AP_PROFILE, 4));
-            }
+            let tlvs = search_with(vec![z(TlvType::MULTI_AP_PROFILE, 4)]);
             let result = check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &tlvs, profile);
             assert_eq!(result, Ok(()), "profile {profile}");
         }
     }
 
     #[test]
-    fn search_profile_tlv_is_mandatory_above_profile_1() {
-        let missing = violation(
-            TlvType::MULTI_AP_PROFILE,
-            ViolationKind::Missing,
-            SPEC_PROFILE,
-        );
-        for profile in PROFILES {
+    fn search_profile_tlv_can_be_absent_at_every_profile() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 requires Profile above 1; EasyMesh §6.1 covers absence.
+        for profile in u8::MIN..=u8::MAX {
             let result = check(
                 MsgType::AP_AUTOCONFIGURATION_SEARCH,
                 &search_base(),
                 profile,
             );
-            let expected = if profile > 1 {
-                table_error(vec![missing])
-            } else {
-                Ok(())
-            };
-            assert_eq!(result, expected, "profile {profile}");
+            assert_eq!(result, Ok(()), "profile {profile}");
         }
     }
 
     #[test]
-    fn search_profile_tlv_is_not_allowed_up_to_profile_1() {
-        let not_allowed = violation(
-            TlvType::MULTI_AP_PROFILE,
-            ViolationKind::NotAllowed,
-            SPEC_PROFILE,
-        );
+    fn search_profile_tlv_can_be_present_at_every_profile() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 forbids Profile through 1; EasyMesh §6.1 permits it.
         let tlvs = search_with(vec![z(TlvType::MULTI_AP_PROFILE, 4)]);
-        for profile in PROFILES {
-            let result = check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &tlvs, profile);
-            let expected = if profile > 1 {
-                Ok(())
-            } else {
-                table_error(vec![not_allowed])
-            };
-            assert_eq!(result, expected, "profile {profile}");
+        let short = search_with(vec![z(TlvType::MULTI_AP_PROFILE, 3)]);
+        for profile in u8::MIN..=u8::MAX {
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &tlvs, profile),
+                Ok(()),
+                "present, profile {profile}"
+            );
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &short, profile),
+                Ok(()),
+                "optional length, profile {profile}"
+            );
         }
     }
 
     #[test]
     fn search_chirp_value_is_optional_above_profile_2_and_bad_below() {
-        let tlvs = search_with(vec![
-            z(TlvType::MULTI_AP_PROFILE, 4),
-            z(TlvType::DPP_CHIRP_VALUE, 4),
-        ]);
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 requires Profile above 1; EasyMesh §6.1 covers absence.
+        let tlvs = search_with(vec![z(TlvType::DPP_CHIRP_VALUE, 4)]);
         for profile in PROFILES {
             let mut expected_violations = Vec::new();
-            if profile <= 1 {
-                expected_violations.push(violation(
-                    TlvType::MULTI_AP_PROFILE,
-                    ViolationKind::NotAllowed,
-                    SPEC_PROFILE,
-                ));
-            }
             if profile <= 2 {
                 expected_violations.push(violation(
                     TlvType::DPP_CHIRP_VALUE,
@@ -334,6 +355,8 @@ mod tests {
 
     #[test]
     fn search_reports_missing_in_row_order_once_per_row() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 requires Profile above 1; EasyMesh §6.1 covers absence.
         let result = check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &[], 3);
         let expected = table_error(vec![
             violation(TlvType::AL_MAC_ADDRESS, ViolationKind::Missing, SPEC_AL_MAC),
@@ -347,17 +370,14 @@ mod tests {
                 ViolationKind::Missing,
                 SPEC_FREQ_BAND,
             ),
-            violation(
-                TlvType::MULTI_AP_PROFILE,
-                ViolationKind::Missing,
-                SPEC_PROFILE,
-            ),
         ]);
         assert_eq!(result, expected);
     }
 
     #[test]
     fn search_reports_too_short() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 requires Profile above 1; EasyMesh §6.1 makes it optional.
         let tlvs = vec![
             z(TlvType::AL_MAC_ADDRESS, 8),
             z(TlvType::SEARCHED_ROLE, 3),
@@ -376,36 +396,39 @@ mod tests {
                 ViolationKind::TooShort,
                 SPEC_SEARCHED_ROLE,
             ),
-            violation(
-                TlvType::MULTI_AP_PROFILE,
-                ViolationKind::TooShort,
-                SPEC_PROFILE,
-            ),
         ]);
         assert_eq!(result, expected);
     }
 
     #[test]
     fn search_not_allowed_is_reported_for_any_length() {
-        let tlvs = search_with(vec![z(TlvType::MULTI_AP_PROFILE, 3)]);
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 forbids Profile through 1; EasyMesh §6.1 makes it optional.
+        let tlvs = search_with(vec![
+            z(TlvType::MULTI_AP_PROFILE, 3),
+            z(TlvType::DPP_CHIRP_VALUE, 3),
+        ]);
         let result = check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &tlvs, 1);
         let expected = table_error(vec![violation(
-            TlvType::MULTI_AP_PROFILE,
+            TlvType::DPP_CHIRP_VALUE,
             ViolationKind::NotAllowed,
-            SPEC_PROFILE,
+            SPEC_DPP,
         )]);
         assert_eq!(result, expected);
     }
 
     #[test]
     fn search_duplicate_violating_rows_are_reported_once_each_in_row_order() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 forbids Profile through 1; EasyMesh §6.1 makes it optional.
         // Wire order is the reverse of table order: violations follow the table.
         let tlvs = vec![
             z(TlvType::MULTI_AP_PROFILE, 3),
             z(TlvType::MULTI_AP_PROFILE, 3),
+            z(TlvType::SEARCHED_ROLE, 3),
+            z(TlvType::SEARCHED_ROLE, 3),
             z(TlvType::AL_MAC_ADDRESS, 8),
             z(TlvType::AL_MAC_ADDRESS, 8),
-            z(TlvType::SEARCHED_ROLE, 4),
             z(TlvType::AUTOCONFIG_FREQ_BAND, 4),
         ];
         let result = check(MsgType::AP_AUTOCONFIGURATION_SEARCH, &tlvs, 1);
@@ -416,9 +439,9 @@ mod tests {
                 SPEC_AL_MAC,
             ),
             violation(
-                TlvType::MULTI_AP_PROFILE,
-                ViolationKind::NotAllowed,
-                SPEC_PROFILE,
+                TlvType::SEARCHED_ROLE,
+                ViolationKind::TooShort,
+                SPEC_SEARCHED_ROLE,
             ),
         ]);
         assert_eq!(result, expected);
@@ -460,49 +483,128 @@ mod tests {
 
     // AP-Autoconfiguration Response -----------------------------------------
 
+    fn response_base() -> Vec<(TlvType, Vec<u8>)> {
+        vec![
+            z(TlvType::SUPPORTED_ROLE, 4),
+            z(TlvType::SUPPORTED_FREQ_BAND, 4),
+        ]
+    }
+
     #[test]
-    fn response_security_capability_flips_at_profile_3() {
-        for profile in PROFILES {
-            let mut with = vec![
-                z(TlvType::SUPPORTED_ROLE, 4),
-                z(TlvType::SUPPORTED_FREQ_BAND, 4),
-            ];
-            if profile > 1 {
-                with.push(z(TlvType::MULTI_AP_PROFILE, 4));
-            }
-            // Without the security capability TLV.
-            let missing = check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &with, profile);
-            let expected = if profile > 2 {
+    fn response_security_capability_is_required_at_every_profile() {
+        // intentional-difference:response-security-cap-required
+        // Upstream em_msg.cpp:727 forbids Security through 2; EasyMesh §17.1.2 requires it.
+        let mut tlvs = response_base();
+        tlvs.push(z(TlvType::MULTI_AP_PROFILE, 4));
+        for profile in u8::MIN..=u8::MAX {
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
                 table_error(vec![violation(
                     TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY,
                     ViolationKind::Missing,
                     SPEC_SECURITY_CAP,
-                )])
-            } else {
-                Ok(())
-            };
-            assert_eq!(missing, expected, "missing, profile {profile}");
-            // With it.
-            with.push(z(TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY, 6));
-            let present = check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &with, profile);
-            let expected = if profile > 2 {
-                Ok(())
-            } else {
+                )]),
+                "missing, profile {profile}"
+            );
+            tlvs.push(z(TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY, 5));
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
                 table_error(vec![violation(
                     TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY,
-                    ViolationKind::NotAllowed,
+                    ViolationKind::TooShort,
                     SPEC_SECURITY_CAP,
-                )])
-            };
-            assert_eq!(present, expected, "present, profile {profile}");
+                )]),
+                "short, profile {profile}"
+            );
+            tlvs.pop();
+            tlvs.push(z(TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY, 6));
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
+                Ok(()),
+                "present, profile {profile}"
+            );
+            tlvs.pop();
+        }
+    }
+
+    #[test]
+    fn response_profile_tlv_is_required_at_every_profile() {
+        // intentional-difference:response-profile-required
+        // Upstream em_msg.cpp:729 forbids Profile through 1; EasyMesh §17.1.2 requires it.
+        let mut tlvs = response_base();
+        tlvs.push(z(TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY, 6));
+        for profile in u8::MIN..=u8::MAX {
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
+                table_error(vec![violation(
+                    TlvType::MULTI_AP_PROFILE,
+                    ViolationKind::Missing,
+                    SPEC_PROFILE,
+                )]),
+                "missing, profile {profile}"
+            );
+            tlvs.push(z(TlvType::MULTI_AP_PROFILE, 3));
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
+                table_error(vec![violation(
+                    TlvType::MULTI_AP_PROFILE,
+                    ViolationKind::TooShort,
+                    SPEC_PROFILE,
+                )]),
+                "short, profile {profile}"
+            );
+            tlvs.pop();
+            tlvs.push(z(TlvType::MULTI_AP_PROFILE, 4));
+            assert_eq!(
+                check(MsgType::AP_AUTOCONFIGURATION_RESPONSE, &tlvs, profile),
+                Ok(()),
+                "present, profile {profile}"
+            );
+            tlvs.pop();
+        }
+    }
+
+    #[test]
+    fn response_reports_both_missing_requirements_in_row_order() {
+        // intentional-difference:response-security-cap-required
+        // Upstream em_msg.cpp:727 forbids Security through 2; EasyMesh §17.1.2 requires it.
+        // intentional-difference:response-profile-required
+        // Upstream em_msg.cpp:729 forbids Profile through 1; EasyMesh §17.1.2 requires it.
+        for profile in PROFILES {
+            assert_eq!(
+                check(
+                    MsgType::AP_AUTOCONFIGURATION_RESPONSE,
+                    &response_base(),
+                    profile
+                ),
+                table_error(vec![
+                    violation(
+                        TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY,
+                        ViolationKind::Missing,
+                        SPEC_SECURITY_CAP,
+                    ),
+                    violation(
+                        TlvType::MULTI_AP_PROFILE,
+                        ViolationKind::Missing,
+                        SPEC_PROFILE,
+                    ),
+                ]),
+                "profile {profile}"
+            );
         }
     }
 
     #[test]
     fn optional_rows_are_not_length_checked() {
+        // intentional-difference:response-security-cap-required
+        // Upstream em_msg.cpp:727 forbids Security through 2; EasyMesh §17.1.2 requires it.
+        // intentional-difference:response-profile-required
+        // Upstream em_msg.cpp:729 forbids Profile through 1; EasyMesh §17.1.2 requires it.
         let tlvs = vec![
             z(TlvType::SUPPORTED_ROLE, 4),
             z(TlvType::SUPPORTED_FREQ_BAND, 4),
+            z(TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY, 6),
+            z(TlvType::MULTI_AP_PROFILE, 4),
             z(TlvType::SUPPORTED_SERVICE, 3),
             z(TlvType::CONTROLLER_CAPABILITY, 3),
         ];
@@ -883,6 +985,63 @@ mod tests {
     // Other cases ---------------------------------------------------------------------
 
     #[test]
+    fn requirement_overrides_affect_only_the_three_named_rows() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 forbids Profile through 1 and requires it above;
+        // EasyMesh §6.1 covers a Search without Profile.
+        // intentional-difference:response-profile-required
+        // Upstream em_msg.cpp:729 forbids Profile through 1; EasyMesh §17.1.2 requires it.
+        // intentional-difference:response-security-cap-required
+        // Upstream em_msg.cpp:727 forbids Security through 2; EasyMesh §17.1.2 requires it.
+        let expected = [
+            (
+                MsgType::AP_AUTOCONFIGURATION_SEARCH,
+                TlvType::MULTI_AP_PROFILE,
+                Requirement::Optional,
+            ),
+            (
+                MsgType::AP_AUTOCONFIGURATION_RESPONSE,
+                TlvType::MULTI_AP_PROFILE,
+                Requirement::Mandatory,
+            ),
+            (
+                MsgType::AP_AUTOCONFIGURATION_RESPONSE,
+                TlvType::IEEE1905_LAYER_SECURITY_CAPABILITY,
+                Requirement::Mandatory,
+            ),
+        ];
+        assert_eq!(REQUIREMENT_OVERRIDES, expected);
+        for (message, tlv, _) in expected {
+            let count = TABLES
+                .iter()
+                .filter(|table| table.msg_type == message)
+                .flat_map(|table| table.rows)
+                .filter(|row| row.tlv_type == tlv)
+                .count();
+            assert_eq!(count, 1, "{message:?} {tlv:?}");
+        }
+        for table in TABLES {
+            for row in table.rows {
+                let overridden = expected
+                    .iter()
+                    .find(|(message, tlv, _)| *message == table.msg_type && *tlv == row.tlv_type)
+                    .map(|entry| entry.2);
+                for raw_profile in u8::MIN..=u8::MAX {
+                    let profile = ProfileType(raw_profile);
+                    let wanted = overridden.unwrap_or_else(|| row.rule.resolve(profile));
+                    assert_eq!(
+                        row_requirement(table.msg_type, row, profile),
+                        wanted,
+                        "{} {:?} profile {raw_profile}",
+                        table.upstream_name,
+                        row.tlv_type
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn duplicate_rows_are_separate_rows() {
         let mut duplicated = 0;
         for table in TABLES {
@@ -1018,6 +1177,8 @@ mod tests {
 
     #[test]
     fn validate_keeps_no_state_between_calls() {
+        // intentional-difference:search-profile-optional
+        // Upstream em_msg.cpp:719 requires Profile above 1; EasyMesh §6.1 covers absence.
         let good = build(
             MsgType::TOPOLOGY_DISCOVERY,
             &[z(TlvType::AL_MAC_ADDRESS, 9), z(TlvType::MAC_ADDRESS, 9)],
@@ -1037,17 +1198,27 @@ mod tests {
             assert_eq!(validate(&good, ProfileType(1)), Ok(()));
         }
         // The same bytes at another profile are judged afresh.
-        let search = build(MsgType::AP_AUTOCONFIGURATION_SEARCH, &search_base());
-        assert_eq!(validate(&search, ProfileType(1)), Ok(()));
+        let search = build(
+            MsgType::AP_AUTOCONFIGURATION_SEARCH,
+            &search_with(vec![z(TlvType::DPP_CHIRP_VALUE, 4)]),
+        );
         assert_eq!(
-            validate(&search, ProfileType(2)),
+            validate(&search, ProfileType(1)),
             table_error(vec![violation(
-                TlvType::MULTI_AP_PROFILE,
-                ViolationKind::Missing,
-                SPEC_PROFILE
+                TlvType::DPP_CHIRP_VALUE,
+                ViolationKind::NotAllowed,
+                SPEC_DPP
             )])
         );
-        assert_eq!(validate(&search, ProfileType(1)), Ok(()));
+        assert_eq!(validate(&search, ProfileType(3)), Ok(()));
+        assert_eq!(
+            validate(&search, ProfileType(1)),
+            table_error(vec![violation(
+                TlvType::DPP_CHIRP_VALUE,
+                ViolationKind::NotAllowed,
+                SPEC_DPP
+            )])
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # em-ctrl
 
-Controller binary (`onewifi_em_ctrl`): controller manager, network-wide data model, topology, TR-181 / rbus.
+Controller binary (`em-ctrl`). The upstream counterpart `onewifi_em_ctrl` (controller manager, network-wide data model, topology, TR-181 / rbus) is not ported; S1 implements only AP-Autoconfiguration discovery, with an in-memory peer model.
 
 ## Upstream source
 
@@ -11,4 +11,83 @@ Base: `rdkcentral/unified-wifi-mesh` @ `ba4180b`.
 
 ## Status
 
-not started. See [STATUS.md](../../STATUS.md).
+S1 library part (synchronous core, tested without sockets) and the tokio role actor with `main` and the command line implemented. The Docker exit checks are in `docker/run-s1.sh` (0012 D8). See [STATUS.md](../../STATUS.md).
+
+## S1 library part (note 0012 D3, D9, D10)
+
+`CtrlCore` is the synchronous controller role: a `NodeTable<CtrlState>`, the process
+`MsgIdCounter`, `em_cmd::NoCommands` as the command view, and an in-memory map of peer
+models by AL MAC. It has no sockets and no runtime.
+
+- Inputs: `registered(al_mac)` and `received(remote, cmdu, now)`; the output is the
+  `Frame`s to send.
+- The first `registered` creates the AL node with the registered AL MAC (a temporary
+  difference until the database exists). The same AL MAC later changes nothing; a
+  different one returns `AlMacChanged` (fatal for the process).
+- `received` routes a Search (`route_search`), lets the AL node handle it
+  (`handle_search`), then commits the peer model: created with the routed profile (1 when
+  absent, malformed or 4 or more) and `is_emplus_agent` when none exists, otherwise only
+  `is_emplus_agent` is updated. The commit happens whatever the handler did, as upstream
+  requests it in routing.
+- Peer models are capped at 256. When the table is full, a new AL MAC evicts the model
+  created longest ago; an update does not change that order. Upstream keeps them without
+  limit; S2 replaces the map with the database (0012 D3).
+- Log lines for the Docker checks: `peer model created` (agent, profile), `existing peer
+  model` (agent), `Response sent` (band, mid, profile). `em-core` also logs
+  `autoconfiguration Response handed off`; the wording differs on purpose.
+
+## Running (note 0012 D7, D9)
+
+```sh
+cargo run -p em-ctrl --release -- \
+    --control /tmp/al_em_ctrl_control_socket --data /tmp/al_em_ctrl_data_socket
+```
+
+- `--control` and `--data`: the AL-SAP sockets; the defaults are upstream's controller paths
+  (`/tmp/al_em_ctrl_control_socket`, `/tmp/al_em_ctrl_data_socket`).
+- A bad argument prints the usage on stderr and exits 2.
+- Logs go to stdout as plain text; the level comes from `RUST_LOG` (default `info`).
+- SIGTERM or SIGINT: the actor drops its transport channels, waits at most 1 s for the
+  transport task, aborts it, and exits 0. A rejected registration, an ended transport or a
+  changed AL MAC logs an error and exits 1.
+
+### The actor (`src/actor.rs`)
+
+One `select!` loop owns the `CtrlCore` and the transport. Arms: the stop future (`break`,
+then the 1 s stop and exit 0); the transport task ending, `received` closing, `link`
+closing and a failed `reserve()` (each waits at most 1 s for the task and exits 1 with its
+error); a received SDU (fed to the core whatever its session); a link change (`Some` calls
+`registered`, a different AL MAC is fatal; `None` is only logged, since the core has no
+timers to pause); and `sdus.reserve()`, only while frames are pending. The controller core
+has no deadline in S1, so there is no `sleep_until` arm. Every handler first brings the
+core up to date through `sync_link`, which reads `link` once and returns that value,
+because a received SDU can be selected before its link change. Frames are stamped with the
+session of that same value and the recorded AL MAC, and queue in at most 64 pending frames
+(oldest dropped, counted, logged at `warn`).
+
+Log lines the Docker checks can match: `registered` (session, al_mac), `new session, same
+AL MAC`, `link lost, waiting to register`, `peer model created`, `existing peer model`,
+`Response sent`, `pending frames full, dropped the oldest`, `em-ctrl stopped` (error),
+`transport stopped`.
+
+### Tests
+
+`tests/actor.rs` runs the actor against a fake AL-SAP service over UNIX sockets in a
+temporary directory (a trimmed copy of `em-transport`'s test support), in paused time: a
+Search answered with a Response on the live session, and again after a reconnect (so it
+carries the new session), a different AL MAC (fatal), a rejected registration (error
+result) and the stop path (under 1 s).
+
+## Open points
+
+- A Search that arrives before the first registration is dropped without a model, since
+  no AL node exists to handle it (upstream creates the AL node before it can receive).
+- A Search whose AL MAC or band cannot be read is dropped without a model, as upstream's
+  routing returns before the commit.
+- Messages other than a Search are ignored in S1.
+- The stop and "transport ended" waits are 1 s each (0011 A7), both on the virtual clock in
+  tests. The brief names no time for the ended case; the same 1 s is used.
+- Before the transport task is awaited, an ended transport is always an error exit (1),
+  even when the task returned `Ok`: the actor did not ask it to stop.
+- `--help` is not special: it is an unknown option and exits 2.
+- `CtrlConfig` has no reconnect delay: the transport's default of 2 s applies.

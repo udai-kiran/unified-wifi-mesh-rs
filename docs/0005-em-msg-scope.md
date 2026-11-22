@@ -138,6 +138,8 @@ input and never copies TLV values.
 
 ### D3. Behavioural parity rules
 
+> **Amended by [0012](0012-s1-discovery.md) D6 (2026-11-21):** the upstream tables stay as they are, and a requirement override layer in `validate` makes the Search's Multi-AP Profile optional and the Response's Multi-AP Profile and 1905 Layer Security Capability mandatory at every profile.
+
 Default behaviour matches upstream, including what it accepts:
 
 - Wire format identical: header layout, `0x80` / `0x40` flag bits, big-endian lengths, End of

@@ -1,4 +1,4 @@
-# S0 harness image (docs/0011 D4). Build context: the repository root.
+# S0 and S1 harness image (docs/0011 D4, docs/0012 D8). Build context: the repository root.
 #   docker build -f docker/Dockerfile .
 
 # Stage A: ieee1905-rs at a pinned commit, fetched by hash. Needs Rust >= 1.91 (str::floor_char_boundary, 0011 erratum E1).
@@ -14,16 +14,20 @@ RUN git init -q . \
 # Default features only: no rbus, so no clang.
 RUN cargo build --release --locked -p ieee1905
 
-# Stage B: the workspace probe, on the workspace MSRV.
+# Stage B: the workspace binaries, on the workspace MSRV: the S0 probe and the S1 role processes.
 FROM rust:1.85-slim-bookworm AS probe-build
 WORKDIR /work
 COPY . .
 RUN cargo build --release --locked -p em-transport --example alsap_probe
+RUN cargo build --release --locked -p em-agent -p em-ctrl
 
-# Runtime: both binaries plus the supervising entrypoint.
+# Runtime: the binaries plus the supervising entrypoint and the role-process control script.
 FROM debian:bookworm-slim AS runtime
 COPY --from=ieee1905-build /src/target/release/ieee1905 /usr/local/bin/ieee1905
 COPY --from=probe-build /work/target/release/examples/alsap_probe /usr/local/bin/alsap_probe
+COPY --from=probe-build /work/target/release/em-agent /usr/local/bin/em-agent
+COPY --from=probe-build /work/target/release/em-ctrl /usr/local/bin/em-ctrl
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh
+COPY docker/role-ctl.sh /usr/local/bin/role-ctl
+RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/role-ctl
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

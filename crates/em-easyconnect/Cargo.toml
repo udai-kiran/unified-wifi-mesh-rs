@@ -1,0 +1,15 @@
+[package]
+name = "em-easyconnect"
+version = "0.1.0"
+description = "Easy Connect onboarding boundary for the EasyMesh port."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+em-types = { path = "../em-types" }
+
+[lints]
+workspace = true

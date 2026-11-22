@@ -1,4 +1,6 @@
-# S0 harness (docs/0011 D4). Run from anywhere: docker compose -f docker/compose.yaml ...
+# S0 and S1 harness (docs/0011 D4, 0012 D8). Run from anywhere: docker compose -f docker/compose.yaml ...
+# HARNESS_MODE selects what the entrypoint runs: s0 (the probe, default) or s1 (role processes
+# started by run-s1.sh). The image and the nodes are the same.
 x-node: &node
   image: em-s0-node:latest
   init: true # reaps the ieee1905 processes the checks kill
@@ -15,6 +17,7 @@ services:
     mac_address: "02:42:c0:a8:65:02"
     environment:
       ROLE: agent
+      HARNESS_MODE: ${HARNESS_MODE:-s0}
     networks:
       s0net:
         ipv4_address: 192.168.101.2
@@ -26,6 +29,7 @@ services:
     mac_address: "02:42:c0:a8:65:03"
     environment:
       ROLE: controller
+      HARNESS_MODE: ${HARNESS_MODE:-s0}
     networks:
       s0net:
         ipv4_address: 192.168.101.3

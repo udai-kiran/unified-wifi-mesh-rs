@@ -1,0 +1,15 @@
+[package]
+name = "em-cmd"
+version = "0.1.0"
+description = "Command types and orchestration views for the EasyMesh port."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+em-types = { path = "../em-types" }
+
+[lints]
+workspace = true

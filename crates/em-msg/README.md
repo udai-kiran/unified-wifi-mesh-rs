@@ -949,6 +949,10 @@ so it does not check the public body API. Note 0009 (D9) asks each batch for a s
 - 26 mandatory-row minimum lengths are lowered to the spec minimum where upstream rejects
   spec-valid TLVs (`spec_min`, note 0005 D3 and 0008 D8). The upstream tables themselves are kept
   verbatim.
+- A requirement override layer in `validate` keeps the upstream tables and fixture unchanged (note
+  0012 D6). Multi-AP Profile is optional in AP-Autoconfiguration Search at every profile; Multi-AP
+  Profile and 1905 Layer Security Capability are mandatory in Response at every profile
+  (EasyMesh §6.1 and §17.1.2).
 - Field readers (`readers`, note 0009 D6 and A10). Each difference has an id, which is its
   `intentional-difference:<id>` tag in `readers.rs`. The test with that tag is named after the
   upstream behaviour, and the test map lists it.

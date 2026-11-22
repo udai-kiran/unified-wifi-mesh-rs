@@ -233,6 +233,8 @@ There are 42 subclasses plus the base: 43.
 
 ### D1. One role actor per process; engines are synchronous (user decision)
 
+> **Amended by [0012](0012-s1-discovery.md) D10 and D11 (2026-11-21):** deadlines use `sleep_until` without `DelayQueue`, and in S1 the role effects of an orchestrator pass are applied after the whole pass, not after each candidate.
+
 > **Amended by [0010](0010-vertical-slices-and-transport.md) D4 (2026-11-21):** over AL-SAP there is no
 > send-completion event. The 500 ms delay before EAPOL 1 starts when the frame is written to the data
 > socket.
@@ -335,6 +337,8 @@ fn handle_frame(ctx: &mut EngineCtx<'_>, frame: Frame<'_>);
 
 ### D2. Crates and graph
 
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** the `OrchRole` hooks return `RoleEffect`s, and `em-orch` owns each node's orchestration state.
+
 | Crate | Contents | Depends on |
 |---|---|---|
 | `em-cmd` | **Orchestrated command types from every source**: one native struct per command (IPC requests, internal submissions, platform- and engine-originated commands); no pointers and no wire aliases (0001 D7 rule 4). `Command` enum, `Origin` (`Ipc` or `Internal`, data only), status codes (upstream `em_cmd_out_status_t`), `OrchOp` (upstream `dm_orch_type_t`), each command's plan as a fixed set of named `PlanVariant`s (the analyze-time overrides, e.g. `dm_easy_mesh_ctrl.cpp:3582-3637`, choose a variant), and each command's candidate rule. No tokio types. | `em-types`, `em-dm` (value records as parameters) |
@@ -351,6 +355,8 @@ em-dm, em-crypto, em-easyconnect; the role crates depend on all of them.
   is not reproduced.
 
 ### D3. Upstream `em_cmd_t` is split three ways
+
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** nodes store no orchestration state or `OpContext`; `em-orch` owns the state, and handlers read the command and state through `CommandView`.
 
 | Upstream | Rust | Owner |
 |---|---|---|
@@ -383,6 +389,8 @@ kinds.
 
 > **Amended by [0010](0010-vertical-slices-and-transport.md) D4 and D8 (2026-11-21):** "M2's send
 > succeeded" (internal fix 3) means the socket write succeeded, and a resend uses a new MID.
+
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** submission is two-phase: `submit` pre-processes the plan, the role applies the node-creation effects, then `admit` builds the candidates.
 
 **Kept**, because peers can observe them:
 - **Plans and stages.** Each command's plans (Appendix A), including the analyze-time variants.

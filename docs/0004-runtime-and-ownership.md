@@ -76,6 +76,8 @@ This rule is **binding for all code, including tests and examples**:
 
 ### R4. Timers replace `ThreadedTimer`
 
+> **Amended by [0012](0012-s1-discovery.md) D11 (2026-11-21):** S1 uses `sleep_until` on the earliest deadline the core reports, not `tokio_util::time::DelayQueue`.
+
 - **One-shot timers** (`execute_after`) become a `tokio::time::sleep` or `sleep_until` branch in
   the owning actor's `select!`, or a `tokio_util::time::DelayQueue` when an actor needs many keyed
   deadlines.
@@ -89,6 +91,8 @@ This rule is **binding for all code, including tests and examples**:
   `em-easyconnect` notes say which deadlines each actor owns.
 
 ### R5. Logging: `tracing`
+
+> **Amended by [0012](0012-s1-discovery.md) D7 and D11 (2026-11-21):** the `em-agent` and `em-ctrl` binaries install `tracing-subscriber` (plain text on stdout, level from `RUST_LOG`). Libraries still use only the `tracing` facade.
 
 - Library crates emit events through the **`tracing`** facade (`tracing::{debug, info, warn,
   error}`, plus spans for per-node context). They never write files or set up a subscriber.

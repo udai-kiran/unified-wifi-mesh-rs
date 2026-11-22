@@ -205,6 +205,8 @@ records the remaining differences ([tlv-spec-audit.md](tlv-spec-audit.md)).
 
 ### D8. Spec wins wherever it is explicit (decided by the user, 2026-11-19)
 
+> **Applied by [0012](0012-s1-discovery.md) D6 (2026-11-21):** the validation override layer in `validate` makes the Search's Multi-AP Profile optional, and the Response's Multi-AP Profile and 1905 Layer Security Capability mandatory, at every profile.
+
 D7 extends from bits to every point the specification states:
 - field order and size;
 - presence conditions and counts;
