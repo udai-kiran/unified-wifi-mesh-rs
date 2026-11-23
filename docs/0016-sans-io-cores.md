@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5 after four plan reviews and a step-by-step walk. User decisions U1 to U31; open: C7 (deferred) and C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E9 after the Aeneas spike. User decisions U1 to U36; verification workflow in [0017](0017-verification-workflow.md); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |
@@ -209,7 +209,7 @@ Follow-ups this affects:
 - **Clock:** an injected measurement clock (U22); the D9 fields `build_us`, `check_us` stay per M1 or M2 and per radio.
 - **Randomness:** a type parameter (U23). `new` keeps its signature on the production type (`AgentCore<OsRandom>`); tests pass a seeded,
   test-only source in `em-crypto` (no dependency).
-- **Hash maps:** `BTreeMap` where the key is `Ord`, decided per map (U24).
+- **Hash maps:** sorted `Vec<(K, V)>` (U32, E4; U24's `BTreeMap` superseded).
 - **Logging:** `tracing` kept for now; decided after the spike (U25).
 
 ### D6. Blocking work: `Offload` (U5, U7)
@@ -328,7 +328,7 @@ Kept, no difference: the 100 ms linger (U3); the 1 s stop bound (U8); no role in
 | U21 | 2026-11-23 | D5 accepted: the role cores become handlers with unchanged inputs and outputs; link events in order; `PendingFrames` and session stamps removed; harness log lines kept word for word |
 | U22 | 2026-11-23 | C2: an injected measurement clock; the D9 fields `build_us`, `check_us` stay per M1/M2 and per radio |
 | U23 | 2026-11-23 | C3: a type parameter `AgentCore<R: RandomSource>` / `CtrlCore<R>`; `new()` stays on the production type |
-| U24 | 2026-11-23 | C4: `BTreeMap` in cores where the key is `Ord`, decided per map |
+| U24 | 2026-11-23 | C4: `BTreeMap` in cores where the key is `Ord`, decided per map (**superseded by U32, E4**) |
 | U25 | 2026-11-23 | C6: keep `tracing` for now; decide after the Aeneas spike |
 | U26 | 2026-11-23 | D6, D7, D8 accepted: `Offload` with paused role sources, built with its first consumer; model-based tests plus the Aeneas spike first (P0 to P6); the order of work |
 | U27 | 2026-11-23 | C1: `em-event-loop` is its own dependency-free crate (compiler-enforced); the other cores are modules checked by workspace `clippy.toml` bans, allowed by `#[allow]` only in I/O and test modules, after a check that the bans fire on 1.85 clippy |
@@ -336,6 +336,11 @@ Kept, no difference: the 100 ms linger (U3); the 1 s stop bound (U8); no role in
 | U29 | 2026-11-23 | While a job is out, link changes for the role are held and delivered after `JobDone`, collapsed to one `unregistered()` then one `registered()` |
 | U30 | 2026-11-23 | The Aeneas spike runs first, before `em-event-loop` is written |
 | U31 | 2026-11-23 | The EasyMesh policy values live in one `policy` module of `em-transport`, separate from `TransportCore` |
+| U32 | 2026-11-23 | (E4) Maps inside cores are sorted `Vec<(K, V)>`, replacing U24's `BTreeMap` |
+| U33 | 2026-11-23 | (E5) The size cap applies to fragmented sets only |
+| U34 | 2026-11-23 | (E6) An SDU larger than the byte limit is dropped alone, counted; the queue is unchanged |
+| U35 | 2026-11-23 | (E7) `Serve` clears ready and `Deadline` clears the deadline; the caller re-arms them |
+| U36 | 2026-11-23 | C6: logging in proven cores goes through a project macro compiled out under `cfg(aeneas)`; the real `tracing` crate is not probed |
 
 ## Open choices (the user's)
 
@@ -344,9 +349,9 @@ Kept, no difference: the 100 ms linger (U3); the 1 s stop bound (U8); no role in
 | C1 | Enforcement | decided: U27 | — |
 | C2 | Measurement clock | decided: U22 | — |
 | C3 | Random source | decided: U23 | — |
-| C4 | Hash maps in cores | decided: U24 | — |
+| C4 | Hash maps in cores | decided: U32 (E4; was U24) | — |
 | C5 | Counters | decided: U18 | — |
-| C6 | Logging in cores | decided: U25 | — |
+| C6 | Logging in cores | decided: U36 | — |
 | C7 | Crypto offload | when D9 numbers require it | deferred (user) |
 | C8 | Outbound buffer when full while connected | decided: U12 | — |
 | C9 | Where the tokio `Io` implementation lives | decided: U19 | — |
@@ -354,8 +359,39 @@ Kept, no difference: the 100 ms linger (U3); the 1 s stop bound (U8); no role in
 | C12 | Time type in `em-event-loop` | decided: U16 | — |
 | C11 | Later | a `mio`/`epoll` `Io` implementation; Aeneas in CI | after D8 step 2 |
 
+## Errata after the Aeneas spike (2026-11-23)
+
+The spike (D8 step 2; report in the tracking folder, `aeneas-spike/report.md`) proved P0 to P5 on a copy of the
+`Reassembler` (from `b4f8343`) with prototypes of U1 and U2, and P6 on a turn-by-turn `LoopCore` prototype: 39 theorems,
+no `sorry`, only Lean's standard axioms. These errata change the text above where the spike showed it wrong or incomplete.
+
+- **E1 (P1).** P1 holds under two hypotheses: a reassembler state invariant (at most 256 fragments of at most 65 536
+  octets in progress; true for `default`, kept by `push`) and frames of at most 65 536 octets (the frame splitter's limit).
+- **E2 (P2).** P2 is two theorems: a run delivers its concatenation, and every delivery is such a run. "Maximal" is not
+  needed: a run starts at id 0, where `push` restarts.
+- **E3 (P6).** "External actions come out in the order produced" is not a `LoopCore` property (actions live outside it);
+  it moves to the driver and application tests (AC3). P6's "timers never held back" holds when every budget is a count
+  (all of D3b); with `UntilNotReady` it needs the caller to report not ready eventually.
+- **E4 (U24 → U32).** Maps inside cores are sorted `Vec<(K, V)>`, not `BTreeMap`: Aeneas has no `BTreeMap` model, and the
+  maps are small. Deterministic as before.
+- **E5 (U2, D4 → U33).** The 1 MiB cap applies to fragmented sets only; an unfragmented frame is already at most
+  65 536 octets.
+- **E6 (U1 → U34).** A received SDU larger than the byte limit (or any SDU when a limit is 0) is dropped alone and counted
+  in `dropped_receive_overflow`; nothing already queued is dropped for it.
+- **E7 (U28 → U35).** `Serve` clears the source's ready flag and `Deadline` clears the handler's deadline; the caller
+  sets them again when there is more work. This removes the "never reported not ready" loop.
+- **E8 (Rust style for verified cores).** Index loops, not iterator chains (`collect`, `chunks`, `for` over a `Vec`
+  need hand-written specs); `Vec`, not `VecDeque` (or a reviewed list model, as in the spike); small `-> bool` helpers
+  instead of `&&`/`||` with early returns or `if let` joins in long functions; no `match` that yields a comparison inside
+  a long function; counters with invariants, since every `+` is checked. `#[cfg(aeneas)]` variants are allowed and tested
+  both ways. A "no axioms" check runs `#print axioms` per theorem.
+- **E9 (C6, C11 inputs).** Logging: a project macro expanding to `#[cfg(not(aeneas))] { tracing::… }` keeps logging out of
+  the proofs (the real `tracing` crate was not tried). CI cost: about 19 GB of cached image and volume, a pinned Aeneas
+  commit with its own Rust nightly next to the 1.85 MSRV, about 1 minute per proof check. C6 and C11 stay open.
+
 ## Revision history
 
+- errata E1 to E9 (2026-11-23): after the Aeneas spike; U32 to U36.
 - rev 5 (2026-11-23, accepted): the step-by-step walk with the user: step 1 accepted: U9 (name `em-event-loop`), U10 (handler scope); step 2 accepted: U11 (pass order), U12 (outbound buffer); U13 to U15 (general-purpose loop, driver in the crate, all policy in the applications): D2 and D3 split into mechanism (D3) and EasyMesh configuration (D3b); P4 to P6 stated for any policy. Step 3 accepted: U16 to U20 (time type, D4, counters, `Io` in `em-transport`, probe and tests on the loop). Step 4 accepted: U21 to U25 (D5, measurement clock, random type parameter, `BTreeMap`, logging after the spike). Step 5 accepted: U26 (D6 to D8), U27 (enforcement). Walk complete. Final review applied: U28 to U31; deadlines pausable and pauses immediate (from U7); readiness reported by the application for internal sources; the driver rule; leftover "backend" and D3 references fixed; AC3 attribution and the outbound measure.
 - rev 4 (2026-11-23): user decisions U7 (no role input while a job is out) and U8 (1 s stop); plan review of rev 3 applied:
   D3 rewritten as one bounded pass that serves every source and every due deadline each pass (P6); ownership of the queue
