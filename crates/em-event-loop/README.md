@@ -5,6 +5,11 @@ General-purpose turn-by-turn scheduler core in the style of libae. It only answe
 
 **Status:** Rust written and proved (refinement to the frozen step spec, note 0017 D6 step 3); the gates decide from Lean's own checks (note 0017 A1); the async driver is pending (note 0016 D8 step 4).
 
+**The proofs are frozen (note 0017 A2).** `verify/` records what was proved for `LoopCore` at commit `a286628`. It is not part of
+the standard checks and is not maintained. While `src/lib.rs` is unchanged the proofs still hold. If a change to `LoopCore`
+breaks them, delete the proof files (everything under `verify/` except `spec-en.md`) in that change instead of repairing them;
+`spec-en.md` stays the contract, and a rule change needs the user's approval. The Rust tests are the safety net.
+
 ## Owns
 
 - Sources (ready flag, pause flag, per-pass budget) and handlers (one deadline, pause flag), numbered from 0.
@@ -20,8 +25,9 @@ General-purpose turn-by-turn scheduler core in the style of libae. It only answe
 ## Rules for the code
 
 Ids that do not exist panic (S15). No `unsafe`, no `.clone()`, no dependencies. The code follows the Aeneas-friendly
-style of note 0016 erratum E8 (index `while` loops, small `bool` helpers, guarded counters) because it is extracted to
-Lean for the proofs.
+style of note 0016 erratum E8 (index `while` loops, small `bool` helpers, guarded counters) because it was extracted to
+Lean for the proofs. `LoopCore` keeps this style (its proofs are frozen, not dropped); since 0017 A2 it is not
+required for code outside the proofs, such as the driver.
 
 ## Verification
 
@@ -47,8 +53,8 @@ Lean for the proofs.
   spec and the rule statements), and the refinement digest
   `refinement 29 478acf91f57efc22b0a631e1add9447fc5ca938f7a060a6a2046514b5f59c0eb` (`Abstraction.lean` and
   the 29 refinement statements, printed from the elaborated types). The refinement statements were frozen
-  after a blind back-translation that the user accepted on 2026-11-24. A change needs the user's approval and
-  a new back-translation.
+  after a blind back-translation that the user accepted on 2026-11-24. Since 0017 A2 the statements are not
+  changed: if a `LoopCore` change breaks the proofs, the proof files are deleted (see the frozen-proofs note above).
 - Lean commands run through `verify/proofs.sh` (for example `verify/proofs.sh lake env lean CounterExamples.lean`),
   which works on a copy so that no `.lake` folder is written into the repository.
 
