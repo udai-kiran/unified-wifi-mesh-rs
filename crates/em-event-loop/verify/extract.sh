@@ -32,7 +32,8 @@ edition = "2024"
 TOML
 
 cd "$SCRATCH"
-charon cargo --preset=aeneas --dest-file="$SCRATCH/em_event_loop.llbc"
+# The async driver (src/driver.rs, 0016 D8 step 4a) is outside the proofs; Aeneas cannot translate it.
+charon cargo --preset=aeneas --exclude crate::driver --dest-file="$SCRATCH/em_event_loop.llbc"
 rm -rf "${OUT_DIR:?}/$SUBDIR"
 aeneas -backend lean -no-progress-bar -split-files "$SCRATCH/em_event_loop.llbc" \
   -dest "$OUT_DIR" -subdir "/$SUBDIR"

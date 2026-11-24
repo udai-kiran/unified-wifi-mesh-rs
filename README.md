@@ -3,7 +3,7 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status:** `em-types`, `em-utils`, `em-crypto` and `em-msg` are ported (`em-msg`: framing, validation, all TLV bodies, the typed WSC attributes and the field readers); `em-dm` is ported (records, enums, models and operations done); `em-transport` is done as slice S0 (AL-SAP client and Docker harness; review pending); S1 (controller discovery) and S2 (onboarding through WSC M1/M2 to `topo_synchronized`) are implemented with minimal `em-cmd`, `em-orch`, `em-easyconnect`, `em-core`, `em-db`, `em-agent` and `em-ctrl`; `em-event-loop` has its pure core written and proved (the async driver is pending); the others have not been started. Progress is
+> **Status:** `em-types`, `em-utils`, `em-crypto` and `em-msg` are ported (`em-msg`: framing, validation, all TLV bodies, the typed WSC attributes and the field readers); `em-dm` is ported (records, enums, models and operations done); `em-transport` is done as slice S0 (AL-SAP client and Docker harness; review pending); S1 (controller discovery) and S2 (onboarding through WSC M1/M2 to `topo_synchronized`) are implemented with minimal `em-cmd`, `em-orch`, `em-easyconnect`, `em-core`, `em-db`, `em-agent` and `em-ctrl`; `em-event-loop` has its pure core written and proved, and its async driver written (the tokio `Io` is pending); the others have not been started. Progress is
 > tracked in [STATUS.md](STATUS.md).
 
 ## Porting base

@@ -5,8 +5,8 @@
 //! pause flags, budgets, deadlines and a generic time type. It never does the work itself.
 //!
 //! It must not own any `EasyMesh` type, any I/O, any logging, any queue size, drop rule or
-//! timer value (all application policy), or the async driver (added later with its first
-//! consumer).
+//! timer value (all application policy). The async driver [`run`] runs passes against an
+//! [`Io`] and an [`App`] (note 0016 D2, U14).
 //!
 //! One pass: [`LoopCore::begin_pass`] fixes the time `now`, then the application calls
 //! [`LoopCore::next_turn`] until it answers [`Turn::PassDone`]. Sources are served in index
@@ -281,3 +281,11 @@ fn deadline_is_due<T: Ord + Copy>(deadline: Option<T>, now: T) -> bool {
         Some(time) => time <= now,
     }
 }
+
+// The driver sits after `LoopCore` so that the frozen extraction's source positions do not move
+// (note 0017 A2 (c)); `verify/extract.sh` excludes it.
+mod driver;
+#[cfg(test)]
+mod driver_tests;
+
+pub use driver::{App, Io, run};
