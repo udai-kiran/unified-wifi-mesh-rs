@@ -15,13 +15,47 @@ No `unsafe`, no clones.
 | `OutboundSdu { session, sdu }` | An SDU for the actor to send, with the `LinkState::session` it was built for. The role actor copies `link.borrow()` when it builds the SDU; the actor writes it only into that session (0011 A6) | |
 | `LinkState` | `Copy { session: u64, al_mac: Option<MacAddr> }`: a latest value. `session` counts registrations; `al_mac` is `Some` while registered | |
 | `TransportError` | A rejected registration, or a socket error that a reconnect cannot fix | `em_ctrl.cpp:1800-1803` |
-| `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event. `dropped_receive_too_large` counts fragment sets refused over the 1 MiB cap | |
+| `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event. `dropped_receive_too_large` counts fragment sets refused over the 1 MiB cap. `dropped_send_overflow` (0016 U12) is counted only by `TransportCore`: the actor never sets it | |
 | `wire` (private) | Length framing, registration, SDU header, fragment split and join | `al_service_utils.cpp:68-82`, `al_service_access_point.cpp:138-196`, `:224-300` |
-| `policy` (private) | The numbers the mechanisms take as arguments: `RX_SDU_CAP`, 1 MiB (0016 U15, U31) | |
+| `TransportCore`, `TransportPolicy`, `TransportAction`, `TransportOutcome`, `RegistrationStep`, `Frame` | The sync transport core (0016 D4, step 4b-2b); see "TransportCore" below. Nothing uses it yet except its tests: the old actor stays until `em-agent` moves (4c), and the tokio `Io` that drives the core is 4b-3. `Frame` is public because `registration_frame` takes the registration response as one | `actor.rs` (the behaviour it ports) |
+| `policy` (private) | The numbers, in one place (0016 U15, U31): reconnect delay 2 s, received queue 1024 SDUs and 4 MiB, SDU cap 1 MiB, outbound buffer 4 MiB, write stall 5 s, stop write limit 900 ms, linger 100 ms. `TransportPolicy::easymesh()` gathers them; the actor uses `LINGER`, `TransportConfig::new` the reconnect delay | |
+| `transport_core` (private module) | `TransportCore` and its types, built on `FrameSplitter`, `Reassembler`, `ReceivedQueue` and `OutboundBuffer`. Tests in `src/transport_core/tests.rs` | |
 | `frame_reader` (private) | Cancel-safe async frame reader that skips an oversize frame by its length; delegates the byte-to-frame logic to `frame_splitter` | |
-| `frame_splitter` (private) | `FrameSplitter` and `Frame`: sync byte-to-frame logic (`push_bytes`, `next_frame`, `has_frame`). No tokio. Built in 0016 D8 step 4b-2a; `FrameReader` uses it now, `has_frame` is used from 4b-2b | |
-| `received_queue` (private) | `ReceivedQueue`: sync queue of received SDUs with an SDU limit and a byte limit (sum of `cmdu.len()`), drop oldest, an SDU above the byte limit dropped alone (0016 U1, E6, U34). Difference `rx-queue-1024-4mib`. Built in 4b-2a, used from 4b-2b/4c; the actor keeps its own 256-SDU queue | |
-| `outbound_buffer` (private) | `OutboundBuffer`: sync per-session write queue with partial-write tracking, a byte limit, drop oldest not started, and the session-end counts (0016 U12, D3b). Difference `tx-buffer`. Built in 4b-2a, used from 4b-2b/4c; the actor still writes with `send_sdu` | |
+| `frame_splitter` (private) | `FrameSplitter` and `Frame`: sync byte-to-frame logic (`push_bytes`, `next_frame`, `has_frame`). No tokio. Built in 0016 D8 step 4b-2a; `FrameReader` and `TransportCore` use it | |
+| `received_queue` (private) | `ReceivedQueue`: sync queue of received SDUs with an SDU limit and a byte limit (sum of `cmdu.len()`), drop oldest, an SDU above the byte limit dropped alone (0016 U1, E6, U34). Difference `rx-queue-1024-4mib`. Built in 4b-2a, used by `TransportCore`; the actor keeps its own 256-SDU queue | |
+| `outbound_buffer` (private) | `OutboundBuffer`: sync per-session write queue with partial-write tracking, a byte limit, drop oldest not started, and the session-end counts (0016 U12, D3b). Difference `tx-buffer`. Built in 4b-2a, used by `TransportCore`; the actor still writes with `send_sdu` | |
+
+## TransportCore
+
+A synchronous state machine, no tokio, no clock, no I/O (0016 D1). The caller passes `now`
+(`std::time::Instant`), reports what happened on the sockets, and performs the `TransportAction`s that go
+into its `&mut Vec`: `Connect` (start one registration attempt: connect control, connect data, send the
+request, read one framed response), `CloseSession` (close the sockets of the session or attempt) and
+`Finish(TransportOutcome)` (`Stopped`, `Rejected { result }` or `IoFailed { operation }`; the caller keeps
+the original `io::Error` and builds `TransportError::Io` from it).
+
+States: `Disconnected` (reconnect due at a time; `new` starts here, due at once, so the first `tick`
+returns `Connect`), `Registering`, `InSession`, `StopWriting`, `StopLingering`, `Finished`.
+
+| Input | Effect |
+|---|---|
+| `tick(now)` | Acts on every due deadline: the reconnect (`Connect`), the write stall, the stop write limit, the end of the linger. `next_deadline()` is afterwards after `now` |
+| `registration_frame`, `registration_failed(step, kind)` | The verdict of `actor.rs` `register`, `classify_connect` and `classify_registration_io`: retry after `reconnect_delay`, or `Finish(Rejected)` or `Finish(IoFailed)`. A fatal verdict counts the received queue in `dropped_receive_stopped` |
+| `bytes_read`, `read_ready`, `serve_read` | Octets go to the `FrameSplitter` (in a session that is not stopping). One `serve_read` handles one frame as `handle_frame` did, into the `ReceivedQueue`. Frames left in the splitter keep `read_ready` true |
+| `read_ended` | End of file or a read error ends the session |
+| `received_ready`, `take_received` | The role takes SDUs from the received queue |
+| `send` | Written only into the session it was built for; else `dropped_send_disconnected`. Buffer full: `dropped_send_overflow`; more than 256 fragments: `dropped_send_failed` |
+| `write_ready`, `write_chunk`, `wrote`, `write_blocked`, `writable`, `write_failed` | The caller writes `write_chunk` and reports the octets written. `write_ready` is false while the socket is known to be blocked (0016 E10) |
+| `stop` | In a session: written for at most `stop_write_limit`, the rest counted, sockets open for `linger`, then `CloseSession` and `Finish(Stopped)`. Without a session: `Finish(Stopped)` at once. The received queue is counted in `dropped_receive_stopped` at the stop |
+
+One counting rule for every session end (write error, end of file, write stall, stop limit): a partly
+written SDU is `dropped_send_failed`, SDUs not started are `dropped_send_disconnected`, an unfinished
+fragment set is `dropped_receive_fragments`, the splitter starts again. A session that ends on its own then
+clears `link.al_mac`, returns `CloseSession` and reconnects after `reconnect_delay`; the received queue
+survives. Every send is counted once in `sdus_sent`, `dropped_send_failed`, `dropped_send_disconnected` or
+`dropped_send_overflow`, and `sdus_received` is the SDUs taken by the role plus `dropped_receive_overflow`
+plus `dropped_receive_stopped`. After `Finish` every input is ignored; a `send` is only counted. The write
+stall (0016 U4) runs while queued bytes make no progress for `write_stall` in a session.
 
 ## Behaviour in short
 
@@ -92,7 +126,7 @@ anything else without telling the client.
 
 ## Tests
 
-Unit tests cover the wire codec (bytes written out by hand from the field order in
+Unit tests cover `TransportCore` (see below), the wire codec (bytes written out by hand from the field order in
 `ieee1905-rs`'s `sdu_codec.rs`), the frame reader and the drop-oldest queue, and, in `src/actor.rs`, the session
 stamp and the stop path (SDUs are placed in the channel before the session runs, so they do not depend on
 scheduling).
@@ -106,10 +140,24 @@ receiver (0011 A5 stop path).
 Tests tagged `intentional-difference:<id>` pin the places where this client differs from upstream's:
 `agent-rejection-fatal`, `retry-connect`, `split-response`, `zero-al-mac`, `reconnect-after-disconnect`,
 `fragment-resync`, `continuation-mac`, `oversize-skipped`, `bad-header-dropped`, `rx-sdu-cap-1mib`.
-Two more are pinned by the building blocks and are "built, used from 4b-2b/4c": `rx-queue-1024-4mib`
-(`ReceivedQueue`: 1024 SDUs and 4 MiB; the old queue held 256 SDUs, count only) and `tx-buffer`
-(`OutboundBuffer`: 4 MiB, drop the oldest SDU not yet started; the old `PendingFrames` held 64). The
-limits are arguments; the numbers live in `policy` from 4b-2b.
+Four more are pinned by the building blocks and by `TransportCore`, which nothing but its tests uses yet:
+`rx-queue-1024-4mib` (1024 SDUs and 4 MiB; the old queue held 256 SDUs, count only), `tx-buffer` (4 MiB, drop
+the oldest SDU not yet started, `dropped_send_overflow`; the old `PendingFrames` held 64), `rx-sdu-cap-1mib`
+(also through the core) and `tx-write-stall-5s` (the old actor had no write time limit). The limits are
+arguments; the numbers live in `policy`.
+
+`src/transport_core/tests.rs` has 60 tests: scenario tests for every rule above (registration verdict by
+step and error kind, all-zero AL MAC, rejection, session numbering and link, session mismatch, send while not
+registered, outbound overflow, write readiness with `write_blocked`/`writable`, the stall at exactly
+`write_stall` and not 1 ms before, progress resets the stall, each session-end cause with the counting rule,
+reconnect after the delay, the stop in a session (limit, linger, buffer empty early, after a failed write,
+within `stop_write_limit + linger`), the stop without a session, the received queue counted at a stop, inputs
+after `Finish`, `read_ready` gating) and a seeded random test (400 seeds of 200 steps, `test_prng`) that feeds
+random registrations (ok, retry, fatal), byte streams (whole and fragmented SDUs, garbage, oversize), partial
+writes, blocked/writable, sends for current and old sessions, read and write ends, stops and time steps, and
+checks after every step: no panic; no deadline in the past after a tick; `Connect` only without sockets,
+`CloseSession` only with sockets, `Finish` at most once and last; the buffer and queue limits; the receive
+balance; and, once finished, the send balance.
 
 `FrameSplitter`, `ReceivedQueue` and `OutboundBuffer` each have unit tests and a seeded model test
 (`src/test_prng.rs`, xorshift, no dependency) against a plain reference model: random byte streams cut at
@@ -131,7 +179,7 @@ with the encoder's limit as cap), P2' (`A0 B0 A1` from one peer delivers an SDU 
 counter-example), P3 (abandoned set 1, stray 1, broken continuation 2) and P5 (the partial payload never passes
 the cap, a refusal counts once, nothing of the set is delivered).
 
-Test counts: 84 unit tests (`cargo test -p em-transport --lib`) and 66 in `tests/session.rs`.
+Test counts: 144 unit tests (`cargo test -p em-transport --lib`; 60 of them in `transport_core`) and 66 in `tests/session.rs`.
 
 Run `cargo test -p em-transport --locked`, and `cargo +1.85.0 test -p em-transport --locked` for MSRV.
 

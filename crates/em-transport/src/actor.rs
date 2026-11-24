@@ -37,7 +37,7 @@ pub(crate) const RECEIVED_QUEUE_CAPACITY: usize = 256;
 
 /// How long the actor stays in a session after the role actor has gone, so that the last
 /// writes leave (0011, "SDUs just before a close can be lost"; the stop path, A5, A6).
-const LINGER: Duration = Duration::from_millis(100);
+const LINGER: Duration = policy::LINGER;
 
 /// Applies `change` to the counters and tells the watchers.
 fn count(counters: &watch::Sender<TransportCounters>, change: impl FnOnce(&mut TransportCounters)) {

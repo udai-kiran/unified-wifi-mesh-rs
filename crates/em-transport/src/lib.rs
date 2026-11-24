@@ -35,14 +35,12 @@
 mod actor;
 mod frame_reader;
 mod frame_splitter;
-// The three modules below are built in 0016 D8 step 4b-2a and used by `TransportCore` from 4b-2b.
-#[allow(dead_code)]
 mod outbound_buffer;
 mod policy;
-#[allow(dead_code)]
 mod received_queue;
 #[cfg(test)]
 mod test_prng;
+mod transport_core;
 mod wire;
 
 use std::fmt;
@@ -53,6 +51,10 @@ use em_types::MacAddr;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+pub use frame_splitter::Frame;
+pub use transport_core::{
+    RegistrationStep, TransportAction, TransportCore, TransportOutcome, TransportPolicy,
+};
 pub use wire::{MAX_FRAGMENT_PAYLOAD, MAX_SDU_PAYLOAD};
 
 /// Which service type to register as (upstream `al_service_registration_enums.h:7-14`).
@@ -88,7 +90,7 @@ impl TransportConfig {
             control_path,
             data_path,
             role,
-            reconnect_delay: Duration::from_secs(2),
+            reconnect_delay: policy::RECONNECT_DELAY,
         }
     }
 }
@@ -192,6 +194,10 @@ pub struct TransportCounters {
     pub dropped_send_disconnected: u64,
     /// SDUs that need more than 256 fragments, or whose write failed.
     pub dropped_send_failed: u64,
+    /// SDUs dropped because the outbound buffer was full: the oldest SDU not yet started, or the
+    /// new SDU when nothing could be dropped for it. Counted only by `TransportCore`, never by the
+    /// actor (0016 U12, difference `tx-buffer`).
+    pub dropped_send_overflow: u64,
     /// Received SDUs dropped because the received queue was full (the oldest goes first).
     pub dropped_receive_overflow: u64,
     /// Received SDUs still in the actor's queue when it returned, for any reason (0011 A6).
