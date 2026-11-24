@@ -61,11 +61,14 @@ impl ReceivedQueue {
         Some(oldest)
     }
 
+    /// Only the tests read it.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.sdus.len()
     }
 
-    /// The sum of `cmdu.len()` of the queued SDUs.
+    /// The sum of `cmdu.len()` of the queued SDUs. Only the tests read it.
+    #[cfg(test)]
     pub(crate) fn byte_count(&self) -> usize {
         self.bytes
     }

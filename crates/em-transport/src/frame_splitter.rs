@@ -6,14 +6,18 @@ use std::collections::VecDeque;
 
 use crate::wire::{LENGTH_PREFIX_LEN, MAX_FRAME_LEN};
 
-/// One thing cut from the stream.
+/// One thing cut from the stream. Public because `TransportCore::registration_frame` takes the
+/// registration response as one.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Frame {
+pub enum Frame {
     /// A frame body, without its length prefix.
     Complete(Vec<u8>),
-    /// A frame longer than [`MAX_FRAME_LEN`]. Its whole body was received and thrown away,
+    /// A frame longer than 65 536 octets. Its whole body was received and thrown away,
     /// so the stream is at the start of the next frame (0011 D3 step 6).
-    Oversize { length: u32 },
+    Oversize {
+        /// The declared length of the skipped frame.
+        length: u32,
+    },
 }
 
 /// Turns pushed octets into [`Frame`]s.
@@ -93,9 +97,8 @@ impl FrameSplitter {
         }
     }
 
-    /// True exactly when [`FrameSplitter::next_frame`] would return a frame. Used from 4b-2b
-    /// (the loop keeps the read source ready while frames are left, 0016 D3b).
-    #[allow(dead_code)]
+    /// True exactly when [`FrameSplitter::next_frame`] would return a frame (the loop keeps the
+    /// read source ready while frames are left, 0016 D3b).
     pub(crate) fn has_frame(&self) -> bool {
         !self.ready.is_empty()
     }

@@ -146,7 +146,8 @@ impl OutboundBuffer {
         AdvanceOutcome { sdus_sent: 1 }
     }
 
-    /// True if the oldest SDU is partly written.
+    /// True if the oldest SDU is partly written. Only the tests read it.
+    #[cfg(test)]
     pub(crate) fn has_started(&self) -> bool {
         self.is_oldest_started()
     }
@@ -169,7 +170,9 @@ impl OutboundBuffer {
         self.queue.is_empty()
     }
 
-    /// The octets stored: the sum of the encoded frame lengths of the queued SDUs.
+    /// The octets stored: the sum of the encoded frame lengths of the queued SDUs. Only the
+    /// tests read it.
+    #[cfg(test)]
     pub(crate) fn byte_count(&self) -> usize {
         self.bytes
     }
