@@ -3,7 +3,7 @@
 A Rust port of [rdkcentral/unified-wifi-mesh](https://github.com/rdkcentral/unified-wifi-mesh),
 the RDK Wi-Fi EasyMesh **Controller** and **Agent**.
 
-> **Status:** `em-types`, `em-utils` and `em-crypto` are ported; `em-msg` is in progress (framing, validation and the TLV body reader/writer done); `em-dm` is in progress (records and enums done); the others have not been started. Progress is
+> **Status:** `em-types`, `em-utils`, `em-crypto` and `em-msg` are ported (`em-msg`: framing, validation, all TLV bodies, the typed WSC attributes and the field readers); `em-dm` is ported (records, enums, models and operations done); `em-transport` is done as slice S0 (AL-SAP client and Docker harness; review pending); S1 (controller discovery) and S2 (onboarding through WSC M1/M2 to `topo_synchronized`) are implemented with minimal `em-cmd`, `em-orch`, `em-easyconnect`, `em-core`, `em-db`, `em-agent` and `em-ctrl`; `em-event-loop` has its pure core written and proved (the async driver is pending); the others have not been started. Progress is
 > tracked in [STATUS.md](STATUS.md).
 
 ## Porting base
@@ -31,9 +31,9 @@ Every component README names the upstream files it ports, at this commit.
     Ownership is moved or borrowed instead.
 - **Async on tokio, as actors.** Each stateful component is a task that owns its state and talks
   to the others only through channels. Pure data and logic crates stay synchronous.
-- **Transport-agnostic core.** IEEE 1905 transport sits behind a trait so the core can run either
-  on raw sockets or over AL-SAP to
-  [rdkcentral/ieee1905-rs](https://github.com/rdkcentral/ieee1905-rs).
+- **AL-SAP transport.** The 1905 layer is [rdkcentral/ieee1905-rs](https://github.com/rdkcentral/ieee1905-rs),
+  run as a separate process; the port talks to it over AL-SAP (docs/0010 D2). A raw-socket backend is
+  deferred.
 
 ## Layout
 
@@ -46,7 +46,7 @@ crates/
   em-crypto/       1905 / AES-SIV / key-derivation crypto        (src/util_crypto, src/em/crypto)
   em-dm/           EasyMesh data model                           (src/dm)
   em-db/           SQLite persistence (controller)               (src/db)
-  em-transport/    1905 transport: raw socket + AL-SAP client    (src/em/em.cpp socket code, src/al-sap)
+  em-transport/    AL-SAP client to ieee1905-rs                  (src/al-sap, see docs/0011)
   em-easyconnect/  DPP / Wi-Fi Easy Connect                      (src/em/prov/easyconnect)
   em-cmd/          management requests, commands, IPC execution  (src/cmd)
   em-core/         protocol engine: em_t + per-area handlers     (src/em)
@@ -56,6 +56,11 @@ crates/
   em-cli/          CLI backend                                   (src/cli C++ glue)
 docs/              design notes and porting decisions
 ```
+
+The slice crates `em-easyconnect`, `em-cmd`, `em-orch`, `em-core`, `em-db`, `em-agent` and `em-ctrl`
+implement only what controller discovery and onboarding need (notes [0012](docs/0012-s1-discovery.md) D1,
+[0013](docs/0013-s2-onboarding.md) D1). The rest of each upstream source is not ported yet; `em-db` holds only
+the reset-file loader.
 
 ## License
 

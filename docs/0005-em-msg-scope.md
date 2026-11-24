@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-18, user), rev 2 after two review rounds plus round-2 wording fixes |
+| Status | **Accepted** (2026-11-18, user), rev 2 after two review rounds plus round-2 wording fixes. Amendment A1 (2026-11-20, note 0009) |
 | Date | 2026-11-18 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-msg`; boundaries with `em-transport` (Ethernet header, size budgets) and `em-core` (TLV bodies, profile policy) |
@@ -138,6 +138,8 @@ input and never copies TLV values.
 
 ### D3. Behavioural parity rules
 
+> **Amended by [0012](0012-s1-discovery.md) D6 (2026-11-21):** the upstream tables stay as they are, and a requirement override layer in `validate` makes the Search's Multi-AP Profile optional and the Response's Multi-AP Profile and 1905 Layer Security Capability mandatory at every profile.
+
 Default behaviour matches upstream, including what it accepts:
 
 - Wire format identical: header layout, `0x80` / `0x40` flag bits, big-endian lengths, End of
@@ -216,6 +218,27 @@ Resolved (2026-11-18, user: yes to all three):
    ≥ 4 (`em_msg.cpp:131-151`); some handlers then fall back to profile 1. 0001 A1 notes the spec
    says to assume our own profile. This is receive policy, so it moves to `em-core` with the
    reader. Accepted.
+
+## Amendments
+
+### A1 (2026-11-20, note 0009): TLV bodies and field readers now, not per consumer
+
+The user chose to complete `em-msg` before its consumers exist. [0009](0009-tlv-bodies.md)
+replaces D1 decision 2 and the "later" row of the D1 table:
+- every TLV body, the WSC plain attributes and the field readers with production callers are
+  ported in `em-msg` now (0009 D1, D6);
+- two readers with no production caller (`get_tlv(em_tlv_t*)`, `get_client_mac_info`) are not
+  ported;
+- receive *policy* (including the Profile fallback, D5.3) stays in `em-core`.
+
+D3 changes in one place. 0009 D3 (audit line 321; user decision) has the encoder write a
+2-octet Link Metric Query for "all neighbors". Batch B02 therefore:
+- lowers that row's minimum from 11 to 5 in `spec_min.rs`, with an explicit zero case;
+- raises the override count from 25 to 26;
+- removes Link Metric Query from D3's "Not lowered" list.
+
+The count of `em_base.h` rows assigned to `em-msg` is 219, not 216 (three wire-only types moved
+from `em-dm` on 2026-11-19).
 
 ## Acceptance criteria (Steps 1 and 2)
 

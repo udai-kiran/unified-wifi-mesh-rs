@@ -1,0 +1,85 @@
+# linkmetric group, build A (note 0009 D7.1, B02). Builder A, 2026-11-20.
+# Sources: IEEE 1905.1 through the usp-spec MCP server (doc ieee1905): §6.4 (TLV header; no byte-order statement),
+#   §6.4.10 Table 6-16, §6.4.11 Tables 6-17/6-18, §6.4.12 Tables 6-19/6-20, §6.4.13 Table 6-21,
+#   §6.4.19 Table 6-27, §6.4.20 Table 6-28, §6.4.7 Tables 6-12/6-13 (media types, 802.11 info).
+#   TLV codes from the tables (8, 9, 10, 12, 18, 19) match em-types codes.rs:249-253, 259-260.
+# Audit rows (docs/data/tlv-spec-audit.tsv lines): 319-321 (0x08), 322-324 (0x09), 325-327 (0x0a), 328 (0x0c),
+#   343 (0x12), 344 (0x13); all port_rule SPEC (321 answered in note 0009 D3). Note 0009 D2 (raw reserved
+#   values, zero counts), D3 line 321, D4 (2-octet query is a spec form, no lenient forms in this group).
+# Wire layouts (hex = tlvValue only; multi-octet integers big-endian, as B01 and audit 322 for 1905.1):
+#   0x08: [0] selector, then either [1] metrics (2 octets total, selector 0 only) or [1..7) neighbor AL MAC,
+#         [7] metrics (8 octets, any selector; the MAC is kept as found when the selector is 0). D3 line 321.
+#         Selector 0x02-0xff and metrics 0x03-0xff are reserved and carried raw (D2).
+#   0x09: [0..6) local AL MAC, [6..12) neighbor AL MAC, then links x 29 octets, no count octet (audit 323):
+#         local if MAC(6), neighbor if MAC(6), intfType(2), IEEE802.1BridgeFlag(1), packetErrors(4),
+#         transmittedPackets(4), macThroughputCapacity(2), linkAvailability(2), phyRate(2) (Tables 6-17/6-18).
+#   0x0a: [0..6) local AL MAC, [6..12) neighbor AL MAC, then links x 23 octets, no count octet (audit 326):
+#         local if MAC(6), neighbor if MAC(6), intfType(2), packetErrors(4), packetsReceived(4), rssi(1) (Tables 6-19/6-20).
+#   0x0c: [0] result code; exactly 1 octet (Table 6-21). 0x00 Invalid neighbor, 0x01-0xff reserved, carried raw (D2).
+#   0x12: [0] n, then n x { intfType(2), k(1), media-specific info(k) } (Table 6-27); n may be 0 (table: "can be 0").
+#         Info is raw bytes sized by k; media type vs k is not checked by the codec (D2). 802.11 info per Table 6-13.
+#   0x13: [0..6) AL ID, [6..8) MID, [8..14) transmitting-interface MAC, [14..20) new-device interface MAC; exactly 20
+#         (Table 6-28).
+# Field notes: links/media are list lengths; for 0x09/0x0a links is not on the wire. m0_info_len overrides k.
+#   `trailing`/`partial` are extra raw bytes appended after the listed fields. A field given as hex: where the case
+#   normally takes a MAC/integer is a cut field (raw bytes as written); a listed entry field that is left out
+#   (missing-rssi, missing-info-length) is absent from the bytes. Counters are decimal; codes are 0x-hex.
+# Choices: (1) zero-links (0x09, 0x0a) is kind=invalid, error=InvalidLength: Tables 6-17/6-19 say "n can be one or more" (spec explicit, note 0009 D8); corrected by the coordinator 2026-11-20 (the D2 zero-count rule covers count fields that may be 0, not these).
+#   (2) Every cut field, partial entry or overstated count/length is error=Truncated, as in B01.
+#   (3) 0x08 with a non-zero selector and 2 octets (specific-without-mac, selector-reserved-without-mac) is
+#   Truncated: D3 line 321 accepts 2 octets only with selector 0. (4) 0x08 encoder: the 2-octet form for selector 0
+#   without a MAC, 8 octets whenever a neighbor MAC is present (D3 line 321).
+# bridge-reserved (0x02), link-availability-over-100 (101), metrics/selector/result reserved values and
+#   media-80211-info-empty are spec cases: raw values carried as found (D2).
+tlv	case	fields	hex
+0x08	golden	selector=0x01;neighbor=0266778899aa;metrics=0x02	010266778899aa02
+0x08	all-neighbors	selector=0x00;metrics=0x00	0000
+0x08	all-neighbors-rx	selector=0x00;metrics=0x01	0001
+0x08	all-neighbors-with-mac	selector=0x00;neighbor=0266778899aa;metrics=0x01	000266778899aa01
+0x08	specific-tx	selector=0x01;neighbor=02bbccddeeff;metrics=0x00	0102bbccddeeff00
+0x08	metrics-reserved	selector=0x00;metrics=0x03	0003
+0x08	metrics-reserved-specific	selector=0x01;neighbor=0266778899aa;metrics=0xff	010266778899aaff
+0x08	selector-reserved	selector=0x02;neighbor=0266778899aa;metrics=0x02	020266778899aa02
+0x08	specific-without-mac	selector=0x01;metrics=0x02;kind=invalid;error=Truncated	0102
+0x08	selector-reserved-without-mac	selector=0x02;metrics=0x02;kind=invalid;error=Truncated	0202
+0x08	empty	kind=invalid;error=Truncated	-
+0x08	selector-only	selector=0x00;kind=invalid;error=Truncated	00
+0x08	cut-mac	selector=0x01;neighbor=hex:0266778899;kind=invalid;error=Truncated	010266778899
+0x08	trailing-bytes	selector=0x01;neighbor=0266778899aa;metrics=0x02;trailing=hex:a5;kind=invalid;error=TrailingBytes	010266778899aa02a5
+0x09	golden	local_al=021122334455;neighbor_al=0266778899aa;links=2;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0001;l0_bridge=0;l0_packet_errors=16909060;l0_tx_packets=305419896;l0_mac_throughput=940;l0_link_availability=87;l0_phy_rate=1000;l1_local_if=02a0b1c2d3e2;l1_neighbor_if=7a6b5c4d3e2f;l1_media=0x0105;l1_bridge=1;l1_packet_errors=258;l1_tx_packets=716950749;l1_mac_throughput=866;l1_link_availability=100;l1_phy_rate=65535	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b000100010203041234567803ac005703e802a0b1c2d3e27a6b5c4d3e2f010501000001022abbccdd03620064ffff
+0x09	one-link	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0001;l0_bridge=0;l0_packet_errors=16909060;l0_tx_packets=305419896;l0_mac_throughput=940;l0_link_availability=87;l0_phy_rate=1000	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b000100010203041234567803ac005703e8
+0x09	zero-links	local_al=021122334455;neighbor_al=0266778899aa;links=0;kind=invalid;error=InvalidLength	0211223344550266778899aa
+0x09	bridge-reserved	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0001;l0_bridge=2;l0_packet_errors=0;l0_tx_packets=0;l0_mac_throughput=100;l0_link_availability=50;l0_phy_rate=100	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b0001020000000000000000006400320064
+0x09	link-availability-over-100	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0001;l0_bridge=0;l0_packet_errors=0;l0_tx_packets=0;l0_mac_throughput=100;l0_link_availability=101;l0_phy_rate=100	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b0001000000000000000000006400650064
+0x09	empty	kind=invalid;error=Truncated	-
+0x09	cut-local-al	local_al=hex:0211223344;kind=invalid;error=Truncated	0211223344
+0x09	cut-neighbor-al	local_al=021122334455;neighbor_al=hex:0266778899;kind=invalid;error=Truncated	0211223344550266778899
+0x09	partial-link	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0001;l0_bridge=0;l0_packet_errors=16909060;l0_tx_packets=305419896;l0_mac_throughput=940;l0_link_availability=87;l0_phy_rate=1000;partial=hex:02a0b1c2d3e27a6b5c4d3e2f0105010000;kind=invalid;error=Truncated	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b000100010203041234567803ac005703e802a0b1c2d3e27a6b5c4d3e2f0105010000
+0x09	cut-phy-rate	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e2;l0_neighbor_if=7a6b5c4d3e2f;l0_media=0x0105;l0_bridge=1;l0_packet_errors=258;l0_tx_packets=716950749;l0_mac_throughput=866;l0_link_availability=100;l0_phy_rate=hex:ff;kind=invalid;error=Truncated	0211223344550266778899aa02a0b1c2d3e27a6b5c4d3e2f010501000001022abbccdd03620064ff
+0x0a	golden	local_al=021122334455;neighbor_al=0266778899aa;links=2;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0104;l0_packet_errors=66051;l0_packets_received=168496141;l0_rssi=60;l1_local_if=02a0b1c2d3e2;l1_neighbor_if=7a6b5c4d3e2f;l1_media=0x0000;l1_packet_errors=1024;l1_packets_received=1193046;l1_rssi=255	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b0104000102030a0b0c0d3c02a0b1c2d3e27a6b5c4d3e2f00000000040000123456ff
+0x0a	one-link	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0104;l0_packet_errors=66051;l0_packets_received=168496141;l0_rssi=60	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b0104000102030a0b0c0d3c
+0x0a	zero-links	local_al=021122334455;neighbor_al=0266778899aa;links=0;kind=invalid;error=InvalidLength	0211223344550266778899aa
+0x0a	empty	kind=invalid;error=Truncated	-
+0x0a	cut-neighbor-al	local_al=021122334455;neighbor_al=hex:0266778899;kind=invalid;error=Truncated	0211223344550266778899
+0x0a	partial-link	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e1;l0_neighbor_if=3c1d2e3f4a5b;l0_media=0x0104;l0_packet_errors=66051;l0_packets_received=168496141;l0_rssi=60;partial=hex:02a0b1c2d3e27a6b5c4d3e2f0000;kind=invalid;error=Truncated	0211223344550266778899aa02a0b1c2d3e13c1d2e3f4a5b0104000102030a0b0c0d3c02a0b1c2d3e27a6b5c4d3e2f0000
+0x0a	missing-rssi	local_al=021122334455;neighbor_al=0266778899aa;links=1;l0_local_if=02a0b1c2d3e2;l0_neighbor_if=7a6b5c4d3e2f;l0_media=0x0000;l0_packet_errors=1024;l0_packets_received=1193046;kind=invalid;error=Truncated	0211223344550266778899aa02a0b1c2d3e27a6b5c4d3e2f00000000040000123456
+0x0c	golden	result=0x00	00
+0x0c	result-reserved	result=0x01	01
+0x0c	result-reserved-ff	result=0xff	ff
+0x0c	empty	kind=invalid;error=Truncated	-
+0x0c	trailing-bytes	result=0x00;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0x12	golden	media=2;m0_media=0x0104;m0_info=hex:02f0e1d2c3b440022a9b;m1_media=0x0001;m1_info=hex:	0201040a02f0e1d2c3b440022a9b000100
+0x12	zero-media	media=0	00
+0x12	info-absent-ethernet	media=1;m0_media=0x0001;m0_info=hex:	01000100
+0x12	media-80211-info-empty	media=1;m0_media=0x0105;m0_info=hex:	01010500
+0x12	empty	kind=invalid;error=Truncated	-
+0x12	count-overstates	media=2;m0_media=0x0001;m0_info=hex:;kind=invalid;error=Truncated	02000100
+0x12	cut-media-type	media=1;m0_media=hex:01;kind=invalid;error=Truncated	0101
+0x12	missing-info-length	media=1;m0_media=0x0104;kind=invalid;error=Truncated	010104
+0x12	info-length-overstates	media=1;m0_media=0x0104;m0_info_len=10;m0_info=hex:02f0e1d2c3b4;kind=invalid;error=Truncated	0101040a02f0e1d2c3b4
+0x12	trailing-bytes	media=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0x13	golden	al_id=021122334455;mid=6699;tx_if_mac=02a0b1c2d3e1;new_if_mac=3c1d2e3f4a5b	0211223344551a2b02a0b1c2d3e13c1d2e3f4a5b
+0x13	empty	kind=invalid;error=Truncated	-
+0x13	cut-mid	al_id=021122334455;mid=hex:1a;kind=invalid;error=Truncated	0211223344551a
+0x13	cut-new-if-mac	al_id=021122334455;mid=6699;tx_if_mac=02a0b1c2d3e1;new_if_mac=hex:3c1d2e3f4a;kind=invalid;error=Truncated	0211223344551a2b02a0b1c2d3e13c1d2e3f4a
+0x13	trailing-bytes	al_id=021122334455;mid=6699;tx_if_mac=02a0b1c2d3e1;new_if_mac=3c1d2e3f4a5b;trailing=hex:a5;kind=invalid;error=TrailingBytes	0211223344551a2b02a0b1c2d3e13c1d2e3f4a5ba5

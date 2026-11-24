@@ -223,3 +223,12 @@ upstream instead of by a generator.
    shared vocabulary type.
 2. **Resolved (2026-11-18, user):** note 0004 was written first: async on tokio, no `.clone()`
    (including `Arc`), no `unsafe`.
+
+## Errata
+
+- **E1 (2026-11-21, Codex audit of `em-utils`):** two upstream cites at `ba4180b` are corrected here; the text
+  above is left as written.
+  - D2, `hex`: upstream's empty-buffer branch is `util.cpp:230-234`, and the message is printed at `:231`
+    (the note says `:226-230`).
+  - D5, `split_by_delim`: the EasyConnect URI parser checks its token counts at `ec_util.cpp:771` (at least
+    one part) and `:779` (each part is exactly a key and a value). The note's `:768` only trims the URI.

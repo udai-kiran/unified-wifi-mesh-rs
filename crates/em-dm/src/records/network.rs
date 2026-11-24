@@ -92,3 +92,32 @@ record! {
         pub vid: u16 = Map::field("vid"),
     }
 }
+
+/// An interface with no name, a zero MAC and media type 0: the zeroed C `em_interface_t`.
+///
+/// `em_types::Interface` has no `Default`, so the zeroed records of the model build it here.
+#[must_use]
+pub fn zeroed_interface() -> Interface {
+    Interface {
+        name: None,
+        mac: MacAddr::ZERO,
+        media: MediaType(0),
+    }
+}
+
+impl NetworkInfo {
+    /// The zeroed C record with `id` set: what upstream's `memset` and `init()` leave.
+    #[must_use]
+    pub fn zeroed(id: Text<LONG_STRING_CAP>) -> Self {
+        Self {
+            id,
+            num_of_devices: 0,
+            timestamp: CStrBytes::default(),
+            ctrl_id: zeroed_interface(),
+            mscs_disallowed_sta: BoundedVec::new(),
+            scs_disallowed_sta: BoundedVec::new(),
+            colocated_agent_id: zeroed_interface(),
+            media: MediaType(0),
+        }
+    }
+}

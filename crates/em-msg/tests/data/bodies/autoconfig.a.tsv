@@ -1,0 +1,200 @@
+# autoconfig group, build A (note 0009 D7.1, B03). Builder A, 2026-11-20.
+# Sources: EasyMesh through the usp-spec MCP server (doc easymesh): §3.1.2 Conventions (byte/bit order per [2] =
+#   IEEE 1905.1, i.e. multi-octet integers big-endian), §2 References, §17.2.1 Table 23, §17.2.2 Table 24,
+#   §17.2.3 Table 25, §17.2.4 Table 26, §17.2.5 Table 27, §17.2.47 Table 69, §17.2.51 Table 73 (Profile-2 Error
+#   Code), §17.2.74 Table 96 (BSSID), §17.2.77 Table 99 (Agent List). IEEE 1905.1 (doc ieee1905): §6.4.14
+#   Table 6-22, §6.4.15 Table 6-23, §6.4.16 Table 6-24, §6.4.17 Table 6-25, §6.4.18 Table 6-26.
+#   Vendor 0xF2: pinned upstream ba4180b inc/em_base.h:1616-1632 (structs), src/em/config/em_configuration.cpp:1532-1575
+#   (sender create_vendor_operational_bss_tlv, type at :1546), :1604-1648 (handle_ap_vendor_operational_bss), :2443-2448
+#   (receiver dispatch), :1847 (added to Topology Response). Lenient Profile form: em_configuration.cpp:3614
+#   (add_tlv ... sizeof(em_profile_type_t)), receiver em_msg.cpp:131-150 (accepts 1 or 4 octets, reads value[0]).
+#   TLV codes checked against the tables and em-types codes.rs:254-258 (0x0d-0x11), 261-265 (0x80-0x84),
+#   312 (0xb3), 317 (0xb8), 321 (0xbc), 346 (0xd5), 364 (0xf2, vendor).
+# Audit rows (docs/data/tlv-spec-audit.tsv lines): 25-28 (0x80), 29 (0x81), 30-31 (0x82), 32-36 (0x83), 37 (0x84),
+#   163-168 (0xb3), 181-182 (0xbc), 226-227 (0xb8), 237-238 (0xd5), 329-330 (0x0d), 331-333 (0x0e), 334-335 (0x0f),
+#   336-338 (0x10), 339-342 (0x11). 0xf2 has no audit row (upstream's own TLV). Note 0009 D1 (0xf2 in scope),
+#   D2 (raw reserved values, zero counts), D3 lines 337/340, D4 (Profile 4-octet lenient form; SSID length counting
+#   a NUL is a spec form), D5 (WSC body = attribute list as bytes), D6 rule in D3 (host-order fields little-endian).
+# Wire layouts (hex = tlvValue only; EasyMesh/1905.1 multi-octet integers big-endian per EasyMesh §3.1.2):
+#   0x80/0x81: [0] k = Num_Service, then k x service(1). k may be 0 (D2; no "one or more"). Values 0x02-0xff (0x80),
+#         0x01-0xff (0x81) reserved, carried raw (audit 26 EM+ 0xa0/0xa1). k > 8 is valid (audit 27 SPEC).
+#   0x82: [0..6) RUID; exactly 6 (Table 25; audit 31 SPEC).   0xb8: [0..6) BSSID; exactly 6 (Table 96; audit 227).
+#   0x83: [0] Num_Radio, then per radio { RUID(6), Num_BSS(1), Num_BSS x { AP_MAC(6), SSID Length n(1), SSID(n) } }.
+#         Num_Radio and Num_BSS may be 0 (Table 26 "if Num_BSS = 0, these fields are omitted"; audit 35). The SSID is
+#         n raw octets; the table sets no maximum and no terminator. An SSID whose last octet is 0x00 (upstream's
+#         strlen+1, audit 33) is a spec case (D4), including 33 octets for a 32-character SSID.
+#   0x84: [0] Num_BSS, then per BSS { AP_MAC(6), Num_Client(2, BE), Num_Client x { STA_MAC(6), Assoc_time(2, BE) } }.
+#         Num_BSS and Num_Client may be 0. Assoc_time 0xffff ("65,535 or higher") carried raw.
+#   0xb3: [0] Multi-AP Profile; exactly 1 (Table 69; audits 164/165 SPEC). 0x00 and 0x04-0xff reserved, carried raw (D2).
+#         Lenient (D4): 4 octets = profile octet + 3 octets (upstream LE enum, 0N 00 00 00), normalised to the profile octet.
+#   0xbc: [0] Reason_Code, then conditional: BSSID(6) iff reason 0x07/0x08/0x0e; Service Prioritization Rule ID(4, BE)
+#         iff 0x01/0x02; QMID(2, BE) iff 0x0b; nothing for any other value (incl. reserved). Table 73; audits 181/182.
+#   0xd5: [0] Num_Agent, then Num_Agent x { AL MAC(6), Multi-AP Profile(1), Security(1) } (Table 99; audit 238:
+#         length = 1 + 8*Num_Agent). Num_Agent may be 0. Reserved profile/security values carried raw.
+#   0x0d/0x0f: [0] role; exactly 1. 0x01-0xff reserved, raw.  0x0e/0x10: [0] band; exactly 1. 0x03 (6 GHz, EasyMesh
+#         Table 15 per audit 332/333; reserved per 1905.1 Tables 6-23/6-25, D3 line 337) and 0x04-0xff raw.
+#   0x11: n octets = the WSC attribute list, any n including 0 (Table 6-26; D3 line 340, D5). Not walked by the body.
+#   0xf2: [0] radios_num, then per radio { ruid(6), bss_num(1), bss_num x { bssid(6), haultype(2, LE), vap_mode(2, LE) } }
+#         (em_base.h:1616-1632, packed; upstream writes unsigned short in host order, D6 -> little-endian). Counts may be 0
+#         (sender writes get_num_radios() and bss_num starting at 0, em_configuration.cpp:1549-1556). Values raw u16.
+# Field-reading rules (this group):
+#   (1) Fields are listed in wire order. A count item (services, radios, rN_bss, bss, bN_clients, agents) is the count
+#       value written on the wire; only the entries listed follow it (a count above the listed entries = overstated).
+#       For 0x84, bN_clients is 2 octets BE. For 0x11, `attrs` is the number of attributes and is NOT on the wire.
+#   (2) SSIDs (rN_bM_ssid=hex:...) are raw octets; SSID Length = their octet count unless rN_bM_ssid_len is given,
+#       which then is the length octet written (overstated length).
+#   (3) An item given as hex: where it normally takes a MAC/integer is a cut field: exactly those raw bytes are written.
+#       An entry field omitted from the list (e.g. missing assoc time, vap mode, BSSID) is absent from the bytes.
+#   (4) `trailing`/`partial`/`pad` are raw bytes appended after the listed fields. `pad` marks the lenient 4-octet
+#       Profile form (kind=lenient): the expected decoded value is `profile`; the strict decoder rejects the same bytes.
+#   (5) Integers: 0x84 Num_Client and assoc_time are decimal, 2 octets BE; 0xbc rule_id 4 octets BE, qmid 2 octets BE;
+#       0xf2 haul_type and vap_mode 2 octets little-endian; all other 0x-hex items are 1 octet.
+#   (6) 0x11 WSC: each attribute aN_id/aN_value is written as id(2, BE), length(2, BE) = octet count of aN_value, value.
+#       `raw=hex:` gives the whole value as raw bytes.
+#   (7) 0xbc: bssid/rule_id/qmid are on the wire iff listed in fields, in table order BSSID, Rule ID, QMID.
+# Choices: (a) every cut field, partial entry or overstated count/length is error=Truncated (as B01/B02); extra octets
+#   after a complete fixed layout are TrailingBytes. (b) 0xbc: a reserved reason code has no conditional fields, so
+#   octets after it are TrailingBytes. (c) 0x11 attr-length-overstates is kind=spec: the body carries bytes; WscAttrIter
+#   reports the bad attribute later (D5). (d) 0x83 ssid-33-ends-nul is kind=spec (Table 26 sets no maximum; D4).
+#   (e) clients-overstate-be pins BE Num_Client: 0x0100 with one client is Truncated (an LE reader would read 1).
+#   (f) 0xb3: the 2-, 3- and 5-octet forms are invalid TrailingBytes (no sender writes them; D4).
+# Coordinator correction 2026-11-20: the WSC body (0x11) validates that the value is a well-formed attribute list (walked with WscAttrIter), so attr-length-overstates is kind=invalid, error=Truncated.
+# Coordinator correction 2026-11-20: 0xd5 partial-agent declares one agent and carries 7 extra octets, so its error is TrailingBytes (was Truncated); applied to both builds identically.
+tlv	case	fields	hex
+0x80	golden	services=2;svc0=0x00;svc1=0x01	020001
+0x80	agent-only	services=1;svc0=0x01	0101
+0x80	zero-services	services=0	00
+0x80	emplus-reserved	services=2;svc0=0x01;svc1=0xa1	0201a1
+0x80	emplus-ctrl-reserved	services=2;svc0=0x00;svc1=0xa0	0200a0
+0x80	nine-services	services=9;svc0=0x00;svc1=0x01;svc2=0x02;svc3=0x03;svc4=0x7f;svc5=0x80;svc6=0xa0;svc7=0xa1;svc8=0xff	09000102037f80a0a1ff
+0x80	empty	kind=invalid;error=Truncated	-
+0x80	count-overstates	services=3;svc0=0x00;svc1=0x01;kind=invalid;error=Truncated	030001
+0x80	trailing-bytes	services=1;svc0=0x00;trailing=hex:a5;kind=invalid;error=TrailingBytes	0100a5
+0x81	golden	services=1;svc0=0x00	0100
+0x81	two-services	services=2;svc0=0x00;svc1=0x01	020001
+0x81	zero-services	services=0	00
+0x81	reserved-ff	services=1;svc0=0xff	01ff
+0x81	empty	kind=invalid;error=Truncated	-
+0x81	count-overstates	services=2;svc0=0x00;kind=invalid;error=Truncated	0200
+0x81	trailing-bytes	services=1;svc0=0x00;trailing=hex:a5;kind=invalid;error=TrailingBytes	0100a5
+0x82	golden	ruid=02a0b1c2d3e0	02a0b1c2d3e0
+0x82	cut-ruid	ruid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0x82	seven-octets	ruid=02a0b1c2d3e0;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e0a5
+0x82	empty	kind=invalid;error=Truncated	-
+0xb8	golden	bssid=02a0b1c2d3e1	02a0b1c2d3e1
+0xb8	cut-bssid	bssid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0xb8	seven-octets	bssid=02a0b1c2d3e1;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e1a5
+0xb8	empty	kind=invalid;error=Truncated	-
+0x83	golden	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=2;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:486f6d652d3547;r0_b1_mac=3c1d2e3f4a52;r0_b1_ssid=hex:62682d616331;r1_ruid=02a0b1c2d3f0;r1_bss=1;r1_b0_mac=7a6b5c4d3e21;r1_b0_ssid=hex:486f6d652d3247	0202a0b1c2d3e0023c1d2e3f4a5107486f6d652d35473c1d2e3f4a520662682d61633102a0b1c2d3f0017a6b5c4d3e2107486f6d652d3247
+0x83	zero-radios	radios=0	00
+0x83	radio-zero-bss	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=0;r1_ruid=02a0b1c2d3f0;r1_bss=1;r1_b0_mac=7a6b5c4d3e21;r1_b0_ssid=hex:486f6d652d3247	0202a0b1c2d3e00002a0b1c2d3f0017a6b5c4d3e2107486f6d652d3247
+0x83	ssid-empty	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:	0102a0b1c2d3e0013c1d2e3f4a5100
+0x83	ssid-32	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:4142434445464748494a4b4c4d4e4f505152535455565758595a303132333435	0102a0b1c2d3e0013c1d2e3f4a51204142434445464748494a4b4c4d4e4f505152535455565758595a303132333435
+0x83	ssid-ends-nul	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:486f6d6500	0102a0b1c2d3e0013c1d2e3f4a5105486f6d6500
+0x83	ssid-33-ends-nul	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:4142434445464748494a4b4c4d4e4f505152535455565758595a30313233343500	0102a0b1c2d3e0013c1d2e3f4a51214142434445464748494a4b4c4d4e4f505152535455565758595a30313233343500
+0x83	empty	kind=invalid;error=Truncated	-
+0x83	cut-ruid	radios=1;r0_ruid=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0x83	missing-num-bss	radios=1;r0_ruid=02a0b1c2d3e0;kind=invalid;error=Truncated	0102a0b1c2d3e0
+0x83	radios-overstate	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=0;kind=invalid;error=Truncated	0202a0b1c2d3e000
+0x83	bss-overstates	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=2;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid=hex:486f6d65;kind=invalid;error=Truncated	0102a0b1c2d3e0023c1d2e3f4a5104486f6d65
+0x83	cut-ap-mac	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=hex:3c1d2e;kind=invalid;error=Truncated	0102a0b1c2d3e0013c1d2e
+0x83	missing-ssid-length	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;kind=invalid;error=Truncated	0102a0b1c2d3e0013c1d2e3f4a51
+0x83	ssid-length-overstates	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_mac=3c1d2e3f4a51;r0_b0_ssid_len=8;r0_b0_ssid=hex:486f6d65;kind=invalid;error=Truncated	0102a0b1c2d3e0013c1d2e3f4a5108486f6d65
+0x83	trailing-bytes	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	0102a0b1c2d3e000a5
+0x84	golden	bss=2;b0_mac=02a0b1c2d3e1;b0_clients=2;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=4660;b0_c1_mac=5c1a2b3c4d02;b0_c1_assoc_time=258;b1_mac=02a0b1c2d3e2;b1_clients=1;b1_c0_mac=5c1a2b3c4d03;b1_c0_assoc_time=65534	0202a0b1c2d3e100025c1a2b3c4d0112345c1a2b3c4d02010202a0b1c2d3e200015c1a2b3c4d03fffe
+0x84	zero-bss	bss=0	00
+0x84	bss-zero-clients	bss=2;b0_mac=02a0b1c2d3e1;b0_clients=0;b1_mac=02a0b1c2d3e2;b1_clients=1;b1_c0_mac=5c1a2b3c4d03;b1_c0_assoc_time=4660	0202a0b1c2d3e1000002a0b1c2d3e200015c1a2b3c4d031234
+0x84	assoc-time-ffff	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=1;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=65535	0102a0b1c2d3e100015c1a2b3c4d01ffff
+0x84	assoc-time-zero	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=1;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=0	0102a0b1c2d3e100015c1a2b3c4d010000
+0x84	empty	kind=invalid;error=Truncated	-
+0x84	bss-overstates	bss=2;b0_mac=02a0b1c2d3e1;b0_clients=0;kind=invalid;error=Truncated	0202a0b1c2d3e10000
+0x84	cut-ap-mac	bss=1;b0_mac=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0x84	cut-num-client	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=hex:00;kind=invalid;error=Truncated	0102a0b1c2d3e100
+0x84	clients-overstate-be	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=256;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=4660;kind=invalid;error=Truncated	0102a0b1c2d3e101005c1a2b3c4d011234
+0x84	clients-overstate	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=2;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=4660;kind=invalid;error=Truncated	0102a0b1c2d3e100025c1a2b3c4d011234
+0x84	cut-assoc-time	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=1;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=hex:12;kind=invalid;error=Truncated	0102a0b1c2d3e100015c1a2b3c4d0112
+0x84	missing-assoc-time	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=1;b0_c0_mac=5c1a2b3c4d01;kind=invalid;error=Truncated	0102a0b1c2d3e100015c1a2b3c4d01
+0x84	trailing-bytes	bss=1;b0_mac=02a0b1c2d3e1;b0_clients=1;b0_c0_mac=5c1a2b3c4d01;b0_c0_assoc_time=4660;trailing=hex:a5;kind=invalid;error=TrailingBytes	0102a0b1c2d3e100015c1a2b3c4d011234a5
+0xb3	golden	profile=0x03	03
+0xb3	profile-1	profile=0x01	01
+0xb3	profile-2	profile=0x02	02
+0xb3	reserved-00	profile=0x00	00
+0xb3	reserved-04	profile=0x04	04
+0xb3	reserved-ff	profile=0xff	ff
+0xb3	four-octet-upstream	profile=0x03;pad=hex:000000;kind=lenient	03000000
+0xb3	four-octet-upstream-p1	profile=0x01;pad=hex:000000;kind=lenient	01000000
+0xb3	empty	kind=invalid;error=Truncated	-
+0xb3	two-octets	profile=0x03;trailing=hex:00;kind=invalid;error=TrailingBytes	0300
+0xb3	three-octets	profile=0x03;trailing=hex:0000;kind=invalid;error=TrailingBytes	030000
+0xb3	five-octets	profile=0x03;trailing=hex:00000000;kind=invalid;error=TrailingBytes	0300000000
+0xbc	golden	reason=0x07;bssid=02a0b1c2d3e7	0702a0b1c2d3e7
+0xbc	reason-08-bssid	reason=0x08;bssid=02a0b1c2d3e7	0802a0b1c2d3e7
+0xbc	reason-0e-bssid	reason=0x0e;bssid=02a0b1c2d3e7	0e02a0b1c2d3e7
+0xbc	reason-01-rule-id	reason=0x01;rule_id=0x0a0b0c0d	010a0b0c0d
+0xbc	reason-02-rule-id	reason=0x02;rule_id=0x12345678	0212345678
+0xbc	reason-0b-qmid	reason=0x0b;qmid=0x1a2b	0b1a2b
+0xbc	reason-03-only	reason=0x03	03
+0xbc	reason-0c-only	reason=0x0c	0c
+0xbc	reason-reserved-00	reason=0x00	00
+0xbc	reason-reserved-0f	reason=0x0f	0f
+0xbc	reason-reserved-ff	reason=0xff	ff
+0xbc	empty	kind=invalid;error=Truncated	-
+0xbc	reason-07-missing-bssid	reason=0x07;kind=invalid;error=Truncated	07
+0xbc	reason-07-cut-bssid	reason=0x07;bssid=hex:02a0b1;kind=invalid;error=Truncated	0702a0b1
+0xbc	reason-01-missing-rule-id	reason=0x01;kind=invalid;error=Truncated	01
+0xbc	reason-02-cut-rule-id	reason=0x02;rule_id=hex:0a0b0c;kind=invalid;error=Truncated	020a0b0c
+0xbc	reason-0b-cut-qmid	reason=0x0b;qmid=hex:1a;kind=invalid;error=Truncated	0b1a
+0xbc	reason-03-trailing	reason=0x03;trailing=hex:a5;kind=invalid;error=TrailingBytes	03a5
+0xbc	reason-07-trailing	reason=0x07;bssid=02a0b1c2d3e7;trailing=hex:a5;kind=invalid;error=TrailingBytes	0702a0b1c2d3e7a5
+0xbc	reason-0b-trailing	reason=0x0b;qmid=0x1a2b;trailing=hex:a5;kind=invalid;error=TrailingBytes	0b1a2ba5
+0xbc	reason-reserved-trailing	reason=0x0f;trailing=hex:a5;kind=invalid;error=TrailingBytes	0fa5
+0xd5	golden	agents=2;a0_mac=0266778899aa;a0_profile=0x03;a0_security=0x01;a1_mac=02bbccddeeff;a1_profile=0x02;a1_security=0x00	020266778899aa030102bbccddeeff0200
+0xd5	one-agent	agents=1;a0_mac=021122334455;a0_profile=0x01;a0_security=0x00	010211223344550100
+0xd5	zero-agents	agents=0	00
+0xd5	reserved-values	agents=2;a0_mac=0266778899aa;a0_profile=0x00;a0_security=0x02;a1_mac=02bbccddeeff;a1_profile=0x04;a1_security=0xff	020266778899aa000202bbccddeeff04ff
+0xd5	empty	kind=invalid;error=Truncated	-
+0xd5	count-overstates	agents=2;a0_mac=0266778899aa;a0_profile=0x03;a0_security=0x01;kind=invalid;error=Truncated	020266778899aa0301
+0xd5	partial-agent	agents=1;a0_mac=0266778899aa;a0_profile=0x03;a0_security=0x01;partial=hex:02bbccddeeff02;kind=invalid;error=TrailingBytes	010266778899aa030102bbccddeeff02
+0xd5	trailing-bytes	agents=1;a0_mac=0266778899aa;a0_profile=0x03;a0_security=0x01;trailing=hex:a5;kind=invalid;error=TrailingBytes	010266778899aa0301a5
+0x0d	golden	role=0x00	00
+0x0d	reserved-01	role=0x01	01
+0x0d	reserved-ff	role=0xff	ff
+0x0d	empty	kind=invalid;error=Truncated	-
+0x0d	two-octets	role=0x00;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0x0e	golden	band=0x01	01
+0x0e	band-24ghz	band=0x00	00
+0x0e	band-60ghz	band=0x02	02
+0x0e	band-03-6ghz	band=0x03	03
+0x0e	reserved-04	band=0x04	04
+0x0e	reserved-ff	band=0xff	ff
+0x0e	empty	kind=invalid;error=Truncated	-
+0x0e	two-octets	band=0x01;trailing=hex:a5;kind=invalid;error=TrailingBytes	01a5
+0x0f	golden	role=0x00	00
+0x0f	reserved-01	role=0x01	01
+0x0f	reserved-ff	role=0xff	ff
+0x0f	empty	kind=invalid;error=Truncated	-
+0x0f	two-octets	role=0x00;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0x10	golden	band=0x01	01
+0x10	band-24ghz	band=0x00	00
+0x10	band-60ghz	band=0x02	02
+0x10	band-03-6ghz	band=0x03	03
+0x10	reserved-04	band=0x04	04
+0x10	reserved-ff	band=0xff	ff
+0x10	empty	kind=invalid;error=Truncated	-
+0x10	two-octets	band=0x01;trailing=hex:a5;kind=invalid;error=TrailingBytes	01a5
+0x11	golden	attrs=3;a0_id=0x104a;a0_value=hex:10;a1_id=0x1022;a1_value=hex:04;a2_id=0x1047;a2_value=hex:0f1e2d3c4b5a69788796a5b4c3d2e1f0	104a0001101022000104104700100f1e2d3c4b5a69788796a5b4c3d2e1f0
+0x11	message-type-only	attrs=1;a0_id=0x1022;a0_value=hex:05	1022000105
+0x11	zero-length-attribute	attrs=2;a0_id=0x1022;a0_value=hex:04;a1_id=0x1049;a1_value=hex:	102200010410490000
+0x11	empty	attrs=0	-
+0x11	attr-length-overstates	raw=hex:1022000504;kind=invalid;error=Truncated	1022000504
+0xf2	golden	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=2;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=0x0000;r0_b0_vap_mode=0x0000;r0_b1_bssid=3c1d2e3f4a52;r0_b1_haul_type=0x0001;r0_b1_vap_mode=0x0000;r1_ruid=02a0b1c2d3f0;r1_bss=1;r1_b0_bssid=7a6b5c4d3e21;r1_b0_haul_type=0x0001;r1_b0_vap_mode=0x0001	0202a0b1c2d3e0023c1d2e3f4a51000000003c1d2e3f4a520100000002a0b1c2d3f0017a6b5c4d3e2101000100
+0xf2	zero-radios	radios=0	00
+0xf2	radio-zero-bss	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=0;r1_ruid=02a0b1c2d3f0;r1_bss=1;r1_b0_bssid=7a6b5c4d3e21;r1_b0_haul_type=0x0000;r1_b0_vap_mode=0x0000	0202a0b1c2d3e00002a0b1c2d3f0017a6b5c4d3e2100000000
+0xf2	raw-values	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=0x0102;r0_b0_vap_mode=0xa1b2	0102a0b1c2d3e0013c1d2e3f4a510201b2a1
+0xf2	empty	kind=invalid;error=Truncated	-
+0xf2	cut-ruid	radios=1;r0_ruid=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0xf2	radios-overstate	radios=2;r0_ruid=02a0b1c2d3e0;r0_bss=0;kind=invalid;error=Truncated	0202a0b1c2d3e000
+0xf2	bss-overstates	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=2;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=0x0001;r0_b0_vap_mode=0x0000;kind=invalid;error=Truncated	0102a0b1c2d3e0023c1d2e3f4a5101000000
+0xf2	cut-haul-type	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=hex:01;kind=invalid;error=Truncated	0102a0b1c2d3e0013c1d2e3f4a5101
+0xf2	missing-vap-mode	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=0x0001;kind=invalid;error=Truncated	0102a0b1c2d3e0013c1d2e3f4a510100
+0xf2	trailing-bytes	radios=1;r0_ruid=02a0b1c2d3e0;r0_bss=1;r0_b0_bssid=3c1d2e3f4a51;r0_b0_haul_type=0x0001;r0_b0_vap_mode=0x0000;trailing=hex:a5;kind=invalid;error=TrailingBytes	0102a0b1c2d3e0013c1d2e3f4a5101000000a5

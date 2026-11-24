@@ -8,6 +8,7 @@
 
 use em_types::TlvType;
 
+use crate::bodies::TlvBody;
 use crate::error::BuildError;
 use crate::header::CmduHeader;
 use crate::tlv::TLV_HEADER_LEN;
@@ -21,7 +22,8 @@ pub const MAX_TLV_VALUE: usize = 65535;
 
 /// Builds one CMDU: header first, then TLVs, then End of Message.
 ///
-/// The first error is kept; later calls to [`MsgBuilder::tlv`] do nothing and
+/// The first error is kept. It can come from [`MsgBuilder::new`], [`MsgBuilder::tlv`] or
+/// [`MsgBuilder::body`]. Later calls to `tlv` and `body` do nothing, and
 /// [`MsgBuilder::finish`] returns that error.
 #[derive(Debug)]
 pub struct MsgBuilder {
@@ -71,11 +73,30 @@ impl MsgBuilder {
         self
     }
 
+    /// Encodes `body` and appends it as a TLV of type `B::TLV_TYPE`.
+    ///
+    /// An encode failure is kept as [`BuildError::Encode`], like any other first
+    /// error. A builder that already holds an error does not encode. The errors
+    /// of [`MsgBuilder::tlv`] apply to the encoded value.
+    pub fn body<'a, B: TlvBody<'a>>(&mut self, body: &B) -> &mut Self {
+        if self.error.is_some() {
+            return self;
+        }
+        match body.encode_value() {
+            Ok(value) => self.tlv(B::TLV_TYPE, &value),
+            Err(error) => {
+                self.error = Some(BuildError::Encode(error));
+                self
+            }
+        }
+    }
+
     /// Appends End of Message and returns the finished message.
     ///
     /// # Errors
     ///
-    /// The first error kept by [`MsgBuilder::new`] or [`MsgBuilder::tlv`], or
+    /// The first error kept by [`MsgBuilder::new`], [`MsgBuilder::tlv`] or
+    /// [`MsgBuilder::body`] (including [`BuildError::Encode`]), or
     /// [`BuildError::OverBudget`] if End of Message does not fit.
     pub fn finish(mut self) -> Result<Vec<u8>, BuildError> {
         if let Some(error) = self.error {

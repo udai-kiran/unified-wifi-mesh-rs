@@ -1,0 +1,7 @@
+# Keeps the build context small; read by BuildKit next to docker/Dockerfile.
+.git
+.claude
+target
+**/target
+docs
+tools

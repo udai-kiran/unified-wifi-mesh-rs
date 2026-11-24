@@ -76,6 +76,8 @@ This rule is **binding for all code, including tests and examples**:
 
 ### R4. Timers replace `ThreadedTimer`
 
+> **Amended by [0012](0012-s1-discovery.md) D11 (2026-11-21):** S1 uses `sleep_until` on the earliest deadline the core reports, not `tokio_util::time::DelayQueue`.
+
 - **One-shot timers** (`execute_after`) become a `tokio::time::sleep` or `sleep_until` branch in
   the owning actor's `select!`, or a `tokio_util::time::DelayQueue` when an actor needs many keyed
   deadlines.
@@ -90,6 +92,8 @@ This rule is **binding for all code, including tests and examples**:
 
 ### R5. Logging: `tracing`
 
+> **Amended by [0012](0012-s1-discovery.md) D7 and D11 (2026-11-21):** the `em-agent` and `em-ctrl` binaries install `tracing-subscriber` (plain text on stdout, level from `RUST_LOG`). Libraries still use only the `tracing` facade.
+
 - Library crates emit events through the **`tracing`** facade (`tracing::{debug, info, warn,
   error}`, plus spans for per-node context). They never write files or set up a subscriber.
 - Upstream's module split (`EM_AGENT`, `EM_CTRL`, `EM_MGR`, `EM_DB`, `EM_PROV`, `EM_CONF`,
@@ -103,6 +107,9 @@ This rule is **binding for all code, including tests and examples**:
 > **Amended by [0002](0002-cmd-core-orch.md) D9 (2026-11-19):** the role actor in `em-ctrl` /
 > `em-agent` owns the single frame sender and the receiver of frames. `em-core` is a library of
 > handlers that the role actor calls. Read "`em-core`" below as "the role actor".
+>
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D2 (2026-11-21):** the transport is an AL-SAP
+> client of `ieee1905-rs`, run as a separate process. The raw `AF_PACKET` path is deferred.
 
 `em-transport` is an actor, or a pair of tasks, that owns the socket: the raw `AF_PACKET` socket
 or the AL-SAP UNIX sockets to `ieee1905-rs`.

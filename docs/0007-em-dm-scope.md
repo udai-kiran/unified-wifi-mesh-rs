@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (rev 3; final fixes after review round 2 checked against the pinned source by an independent check, not reviewed: two-round limit) |
+| Status | **Accepted** (rev 3; final fixes after review round 2 checked against the pinned source by an independent check, not reviewed: two-round limit). Amendments A1, A2 (Step 3). |
 | Date | 2026-11-19 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-dm`; `em-msg`, `em-db`, `em-ctrl`, `em-agent`, `em-easyconnect` (boundaries); note 0002; `docs/em_base-coverage.md` |
@@ -379,6 +379,84 @@ Answered by the user (2026-11-19):
   valid 32-byte SSIDs, so the user chose: accept up to 32 bytes, take the bytes before the first NUL
   (all 32 if none), never overwrite a byte (D7 item 4). Not reviewed: recorded as a decision
   amendment.
+- **A2 (2026-11-19/20, Step 3).** The Step 3 plan had a plan review: 12 findings, all resolved. The
+  user decided U1, U2, F1 and F1b and accepted C7; C1–C6 and C8 are coordinator decisions from
+  upstream evidence. The finished change was reviewed afterwards; the review is recorded in
+  `STATUS.md`.
+  - **U1. The network record is stored once per network.** This amends D1, which listed the
+    network in `NodeModel`. The record lives in `NetworkModel`, next to that network's SSID
+    configuration (D2). The co-located agent MAC write (`dm_easy_mesh_list.cpp:1742`) and the
+    controller-ID mismatch write (`:173`) update that one record. Intentional difference:
+    upstream keeps one copy per node, and TR-181 reads whichever comes first in hash order
+    (`dm_easy_mesh_ctrl.cpp:6767`).
+  - **U2. Removals are implemented.** `remove_network`, `remove_radio`, `remove_sta` and
+    `remove_op_class` are empty stubs upstream (`dm_easy_mesh_list.cpp:124, 394, 758, 1172`).
+    `remove_device`'s key never matches (`:226-233`).
+  - **C1. `ModelDelta` lives in `em-dm`, and apply consumes it.** There is one variant per Δ of
+    0002 D6 plus `sta_cap_update`. Apply returns an outcome. Within a delta or a multi-row put, the
+    rows that land and the rows that are skipped match upstream. A skipped row is reported and
+    never written partially. Where upstream clamps a row, the port rejects the row. There is no
+    variant for `set_ssid`, `set_radio` or `dev_test` (0002 rev 7 erratum).
+  - **C2. Client Capability Report.** It writes the pending staging row (a whole replace, as
+    upstream) and the frame of the consolidated row, which is then decoded with
+    `decode_sta_capability` (`dm_easy_mesh.cpp:4104-4124`). The caller resolves the MLD links.
+  - **C3. Iteration order is key order** (`BTreeMap`), not hash order. It also replaces
+    `m_network_list`'s insertion order.
+  - **C4. Typed keys with exact matching.** The prefix matching and the 64/256-byte key truncation
+    are gone (defect 2). Node lookups are scoped by (network id, AL MAC). Global finds by radio MAC
+    ("first match in key order") remain where upstream relies on them: STA, op class and radio
+    (`dm_easy_mesh_list.cpp:714-810, 1047-1113, 1177-1253`). The radio-capability,
+    1905-security and SSID-to-VID maps stay global, keyed as upstream.
+  - **C5. Dirty marking.** Each node has a typed bit set with upstream's bit values. Callers mark,
+    as upstream does. `bss_list_delete` carries an optional radio filter: upstream's `"radio=<mac>"`
+    criterion (`em_orch_ctrl.cpp:544-545`, `dm_bss.cpp:375-392`). Clearing a bit also clears its
+    filter. The wrong-slot reset, the unterminated copy and the type-0 loop cannot occur.
+  - **C6. Every fixed upstream array is bounded at its upstream limit.** Inserting at capacity is
+    an error that leaves the model unchanged. The maps that are unbounded upstream (stations,
+    scan results, nodes) stay unbounded. `set_num_*` has no counterpart.
+  - **C7. Network lifecycle (user accepted).** Creating a node in an unknown network creates a
+    default network. The cap of 5 networks applies on every creation path. `remove_network` is
+    refused while the network has nodes.
+  - **C8. `ModelAccess`.** `AgentModel` and `MeshModel` implement this trait. It gives short-lived
+    `NodeCtx`/`NodeRef` split borrows of a node and its network. The agent ignores the node id,
+    as upstream does (`inc/em_agent.h:862`).
+  - **F1 / F1b. Two sanctioned duplications (user decision; 0004 R2).** `copy_frame_f1` copies
+    frame bytes: upstream stores the frame in the pending and the consolidated row, once per link.
+    `copy_sta_row` copies a whole station row into the pending staging map on association
+    (`dm_easy_mesh.cpp:3966-3989`). Nothing else in `em-dm` duplicates owned data.
+  - **Addendum (2026-11-20, rev 3.1; user decisions D4 and D5, 2026-11-20).** Review round 2 found
+    operations that rebuild a storage location from a record's fields when they already hold it.
+    - **D1. Storage position is the cursor and the route.** The mesh walks over stations, policies
+      and scan results yield and take the stored map key (`Located::key`). The node-level station
+      walks yield `StaEntry { key, row }`. The SSID walk is positional, `(NetId, index)`, in array
+      (insertion) order within a network, as upstream (`dm_easy_mesh_list.cpp:812-867`).
+      `beacon_station` acts on the row it found. Editing a key field through a `&mut` accessor does
+      not rekey the row; it stays where it is stored, as upstream's pointer and array storage does.
+      Intentional difference (`d1-storage-route`): `delete_scan_result_list` (and its beacon
+      cleanup), `delete_policy_list`, `delete_op_class_list`, `delete_radio_list`,
+      `delete_network_ssid_list` and `apply_sta_mld_association` remove from the node and row they
+      visit, by position or stored key. Upstream rebuilds the key from the record there
+      (`dm_easy_mesh.cpp:3967-3975, 4007-4016`).
+    - **C3 amended for SSIDs.** The order inside a network is array order, not id order, and
+      `NetworkModel::first_network_ssid` is slot 0. Across networks it stays `NetId` order.
+      `MeshModel::first_network_ssid` starts at the first populated network, where upstream's
+      loop without a `break` returns the last (defect, not reproduced).
+    - **D2.** `BssKey` keeps `haul_type`, as `find_matching_bss` does (`dm_easy_mesh.cpp:3517-3535`).
+      `NodeModel::bss_index_by_radio` is the positional `get_bss` (`:2896-2910`), so the engine's
+      in-place identity write (`em_configuration.cpp:1625-1638`) goes through `bss_mut`.
+    - **D3. Capability slot `i` is radio `i`'s.** `commit_radio` returns a radio `Put` and a
+      capability outcome. A capability whose `ruid` is not the radio's MAC is not stored (upstream
+      finds it by the radio's MAC, `dm_easy_mesh.cpp:240-247`): the slot holds the zeroed default
+      and `EmInsertRadio` reports `SkippedRow { RadioCap, WrongRadio }`. A capability supplied for
+      an existing radio, or with a full radio table, is reported `NotAttempted`. `remove_radio`
+      removes the slot at the radio's index if it exists. `AlInsert` counts its network write.
+    - **D4(b) (user decision).** The co-located write marks the controller node of the network
+      whose key is the record's controller MAC; else the first controller node of the network in
+      key order; else none (`d4-controller-by-role`). Upstream asserts on the exact lookup
+      (`dm_easy_mesh_list.cpp:1738-1739`).
+    - **D5(b) (user decision).** `delete_scan_result_list` also removes a station scanner's
+      zero-BSSID self report, once per removed result, matched by that result's op class and channel (`d5-self-report-cleanup`). Upstream's bulk
+      delete never reaches it (research 7.9, 7.13).
 
 ## Acceptance criteria
 

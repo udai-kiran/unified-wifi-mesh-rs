@@ -1,0 +1,240 @@
+# Upstream dm_easy_mesh_t members at unified-wifi-mesh ba4180b: one row per DEFINITION.
+# Source: research/dm_methods.tsv (196 rows, one per name) with the overloaded names split.
+# Row count: 232 (key = name@cpp:LINE for an out-of-line definition, name@h:LINE for an inline one).
+# commit_config declared at inc/dm_easy_mesh.h:726 has no definition and no row; the 4 definitions are cpp:207, 323, 346 and 351.
+# get_first_sta_info h:2176 in the research row is the static get_next_sta_info dispatcher; it is listed under get_next_sta_info.
+# get_controller_interface (class OTHER in the research) and get_controller_interface_mac listed extra header lines h:782, 803, 792, 1052: those are get_ctrl_al_interface, get_ctrl_al_interface_name, get_ctrl_al_interface_mac and get_ctl_mac, rows of their own; only h:917 and h:926 are kept here.
+# get_bss h:1444 is the declaration of the cpp:2896 definition; the inline overload is h:1429.
+key	name	h_line	cpp_line	class	behaviour	notes
+analyze_ap_cap_query@cpp:412	analyze_ap_cap_query	343	412	JSON	decodes CapReport subdoc into a local dm and builds em_cmd_ap_cap_report_t (cpp:412-425)	decode return value ignored; returns 1 even if decode failed (inference from code)
+analyze_client_cap_query@h:359	analyze_client_cap_query	359	none	UNDEFINED	member declared (h:359) but no member definition; cpp:432 is a free function `int analyze_client_cap_query(...)` returning 0	name collision; the member cannot be linked if called
+analyze_dev_init@cpp:442	analyze_dev_init	275	442	OTHER	stub: returns 0 (cpp:442-444)	stub; agent-side analyze is separate
+analyze_radio_config@cpp:395	analyze_radio_config	291	395	OTHER	stub: prints and returns 0 (cpp:395-402)	stub
+analyze_sta_list@cpp:437	analyze_sta_list	327	437	OTHER	stub: returns 0 (cpp:437-439); dm_easy_mesh_agent_t has its own analyze_sta_list (agent cpp:111-227)	stub shadowed by agent override
+analyze_vap_config@cpp:404	analyze_vap_config	309	404	OTHER	stub: returns 0 (cpp:404-410)	stub
+apply_sta_cap_to_maps@cpp:4104	apply_sta_cap_to_maps	1731	4104	MODEL-OP	writes m_sta_assoc_map (new entry, or copy_sta_info into existing); if m_sta_map has key: set_frame_body + decode_sta_capability (cpp:4104-4124)	copy_sta_info is whole-record replace (dm_sta.cpp:704-735); callers em_ctrl.cpp:356,382
+apply_sta_disassociation@cpp:4054	apply_sta_disassociation	1732	4054	MODEL-OP	for disassoc event: resolves affiliated BSSIDs to radio via get_bss, rewrites rows via apply_sta_association_row; sets db flag (cpp:4054-4102)	unresolved affiliated BSSID only logged (cpp:4090-4093)
+apply_sta_mld_association@cpp:3991	apply_sta_mld_association	1733	3991	MODEL-OP	marks existing associated rows false, adds affiliated rows (associated=true), caches frame body from any map entry; sets db flag (cpp:3991-4052)	loop `hash_map_get_first(maps[i])` has no NULL check on map pointers (inference: map may be NULL before init)
+clone_hash_maps@cpp:3244	clone_hash_maps	2663	3244	COPY	deep copies m_sta_map, m_sta_assoc_map, m_sta_dassoc_map entries into obj by key (remove + put) (cpp:3244-3283)	does not clear obj entries absent from source; keys via snprintf into em_long_string_t
+commit_bss_config@cpp:328	commit_bss_config	758	328	MODEL-OP	copies dm.m_bss[vap_index] over this BSS matched by ruid+bssid (cpp:328-344)	vap_index checked against EM_MAX_BSS_PER_RADIO (16) but not against dm.m_num_bss before dm.get_bss(vap_index) (cpp:333-336)
+commit_config@cpp:207	commit_config	669	207	MODEL-OP	5 decls: dm+target overload (h:669, cpp:207-321) merges al/radio/bss records from dm into this; tlv (h:688, cpp:323-325) and attrib (h:707, cpp:346-349) are stubs returning 0; em_cmd_t* (h:742, cpp:351-) handles dev_init al_insert/em_insert; h:726 overload has no definition	em_commit_target_em (used at em_orch_ctrl.cpp:494) has no branch: silent no-op; radio branch appends at m_num_radios (bounded EM_MAX_BANDS); em_cmd_t overload has only test callers (name-based)
+commit_config@cpp:323	commit_config	688	323	MODEL-OP	5 decls: dm+target overload (h:669, cpp:207-321) merges al/radio/bss records from dm into this; tlv (h:688, cpp:323-325) and attrib (h:707, cpp:346-349) are stubs returning 0; em_cmd_t* (h:742, cpp:351-) handles dev_init al_insert/em_insert; h:726 overload has no definition	em_commit_target_em (used at em_orch_ctrl.cpp:494) has no branch: silent no-op; radio branch appends at m_num_radios (bounded EM_MAX_BANDS); em_cmd_t overload has only test callers (name-based)
+commit_config@cpp:346	commit_config	707	346	MODEL-OP	5 decls: dm+target overload (h:669, cpp:207-321) merges al/radio/bss records from dm into this; tlv (h:688, cpp:323-325) and attrib (h:707, cpp:346-349) are stubs returning 0; em_cmd_t* (h:742, cpp:351-) handles dev_init al_insert/em_insert; h:726 overload has no definition	em_commit_target_em (used at em_orch_ctrl.cpp:494) has no branch: silent no-op; radio branch appends at m_num_radios (bounded EM_MAX_BANDS); em_cmd_t overload has only test callers (name-based)
+commit_config@cpp:351	commit_config	742	351	MODEL-OP	5 decls: dm+target overload (h:669, cpp:207-321) merges al/radio/bss records from dm into this; tlv (h:688, cpp:323-325) and attrib (h:707, cpp:346-349) are stubs returning 0; em_cmd_t* (h:742, cpp:351-) handles dev_init al_insert/em_insert; h:726 overload has no definition	em_commit_target_em (used at em_orch_ctrl.cpp:494) has no branch: silent no-op; radio branch appends at m_num_radios (bounded EM_MAX_BANDS); em_cmd_t overload has only test callers (name-based)
+copy_assoc_sta_mld_info@cpp:3956	copy_assoc_sta_mld_info	1729	3956	COPY	copies m_assoc_sta_mld rows out to caller array under m_sta_map_mutex (cpp:3956-3964)	array size is caller-supplied EM_MAX_ASSOC_STA_MLD
+copy_sta_snapshot@cpp:4229	copy_sta_snapshot	1739	4229	COPY	clears vector and copies every m_sta_map entry (cpp:4229-4239)	full copy of all stations; used for whole-snapshot reads (0002 D6 cite)
+create_ap_cap_query_json_cmd@cpp:2790	create_ap_cap_query_json_cmd	2505	2790	JSON	builds AP capability query cJSON command (cpp:2790-2814)	-
+create_autoconfig_renew_json_cmd@cpp:2743	create_autoconfig_renew_json_cmd	2476	2743	JSON	builds autoconfig renew cJSON command (cpp:2743-2789)	-
+create_client_cap_query_json_cmd@cpp:2815	create_client_cap_query_json_cmd	2491	2815	JSON	builds client capability query cJSON command (cpp:2815-)	-
+create_new_scan_result@cpp:3537	create_new_scan_result	1532	3537	MODEL-OP	allocates dm_scan_result_t, keys it into m_scan_result_map (cpp:3537-3560)	no EM_MAX_ cap check; hash_map_put without NULL check on m_scan_result_map (NULL by default, h:80); key snprintf'd into em_2xlong_string_t (silent truncation possible); duplicate key not checked
+db_cfg_type_get_criteria@cpp:4160	db_cfg_type_get_criteria	2565	4160	DB	returns criteria buffer index for a db_cfg type (cpp:4160-4171)	`while (type != 1)` never ends for type 0; index not bounded
+db_cfg_type_is_set@h:2552	db_cfg_type_is_set	2552	inline-h	DB	bit test on m_db_cfg_param.db_cfg_type (inline h:2552 and h:2574)	inline only, no cpp definition
+db_cfg_type_is_set@h:2574	db_cfg_type_is_set	2574	inline-h	DB	bit test on m_db_cfg_param.db_cfg_type (inline h:2552 and h:2574)	inline only, no cpp definition
+decode_ap_cap_config@cpp:1883	decode_ap_cap_config	650	1883	JSON	decodes AP capability cJSON subdoc into this (cpp:1883-1932)	-
+decode_client_cap_config@cpp:1933	decode_client_cap_config	633	1933	JSON	decodes client capability cJSON subdoc (cpp:1933-1993)	-
+decode_config@cpp:853	decode_config	382	853	JSON	dispatches cJSON subdoc by key to decode_config_* (cpp:853-893)	-
+decode_config_op_class_array@cpp:1647	decode_config_op_class_array	512	1647	JSON	decodes op-class array cJSON (cpp:1647-1681)	-
+decode_config_reset@cpp:894	decode_config_reset	399	894	JSON	decodes Reset subdoc (cpp:894-980)	-
+decode_config_set_channel@cpp:1352	decode_config_set_channel	454	1352	JSON	decodes SetChannel subdoc (cpp:1352-1572)	-
+decode_config_set_policy@cpp:1084	decode_config_set_policy	473	1084	JSON	decodes SetPolicy subdoc into policies via set_policy (cpp:1084-1351)	-
+decode_config_set_radio@cpp:981	decode_config_set_radio	493	981	JSON	decodes RadioEnable subdoc (cpp:981-1083)	-
+decode_config_set_ssid@cpp:1573	decode_config_set_ssid	435	1573	JSON	decodes SetSSID subdoc (cpp:1573-1646)	-
+decode_config_test@cpp:1703	decode_config_test	418	1703	JSON	decodes Test subdoc (cpp:1703-1882)	-
+decode_num_devices@cpp:820	decode_num_devices	613	820	JSON	counts devices in subdoc (cpp:820-852)	-
+decode_sta_config@h:598	decode_sta_config	598	none	UNDEFINED	declared only (h:598); no definition anywhere in tree	-
+deinit@cpp:3285	deinit	2735	3285	LIFECYCLE	frees scan, policy, sta, and other maps and member-owned objects (cpp:3285-3340)	-
+encode_config@cpp:447	encode_config	529	447	JSON	encodes config subdoc by key (cpp:447-470)	-
+encode_config_op_class_array@cpp:559	encode_config_op_class_array	580	559	JSON	encodes op-class array (cpp:559-586)	-
+encode_config_reset@cpp:471	encode_config_reset	546	471	JSON	encodes Reset subdoc (cpp:471-558)	-
+encode_config_test@cpp:587	encode_config_test	563	587	JSON	encodes Test subdoc (cpp:587-)	-
+find_matching_bss@cpp:3517	find_matching_bss	1480	3517	MODEL-OP	linear search m_bss by id fields (cpp:3517-3535)	strncmp(net_id, id->net_id, strlen(id->net_id)) is a prefix match on the query length
+find_matching_device@cpp:2420	find_matching_device	1123	2420	MODEL-OP	compares m_device mac with dev (cpp:2420-2427)	only one device record exists (m_device)
+find_matching_radio@cpp:2401	find_matching_radio	1906	2401	MODEL-OP	linear search m_radio by intf.mac (cpp:2401-2410)	bounded by m_num_radios
+find_matching_scan_result@cpp:3579	find_matching_scan_result	1518	3579	MODEL-OP	linear search m_scan_result_map by id (cpp:3579-)	strncmp(net_id, id->net_id, strlen(id->net_id)) prefix match
+find_sta@cpp:3082	find_sta	2246	3082	MODEL-OP	2 overloads: (mac,bssid) linear search m_sta_map (cpp:3082-3096); (mac) loops BSSes and calls find_sta(mac,bssid) (cpp:3098-)	-
+find_sta@cpp:3098	find_sta	2248	3098	MODEL-OP	2 overloads: (mac,bssid) linear search m_sta_map (cpp:3082-3096); (mac) loops BSSes and calls find_sta(mac,bssid) (cpp:3098-)	-
+get_agent_al_interface@h:846	get_agent_al_interface	846	inline-h	MODEL-OP	returns m_device dev interface (inline h:846)	inline
+get_agent_al_interface_mac@h:857	get_agent_al_interface_mac	857	inline-h	MODEL-OP	returns m_device dev interface mac (inline h:857)	inline
+get_agent_al_interface_name@h:868	get_agent_al_interface_name	868	inline-h	MODEL-OP	returns m_device dev interface name (inline h:868)	inline
+get_ap_mld@h:1635	get_ap_mld	1635	inline-h	MODEL-OP	returns &m_ap_mld[index] (inline h:1635)	no bound check on index (EM_MAX_AP_MLD=64)
+get_ap_mld_by_ref@h:1649	get_ap_mld_by_ref	1649	inline-h	MODEL-OP	returns m_ap_mld[index] by ref (inline h:1649)	no bound check
+get_ap_mld_frm_haul_type@cpp:3629	get_ap_mld_frm_haul_type	1713	3629	MODEL-OP	scans m_ap_mld by haul_type (cpp:3629-3644)	bounded by m_num_ap_mld, which is unchecked (see set_num_ap_mld)
+get_ap_mld_frm_haul_type@h:1714	get_ap_mld_frm_haul_type	1714	inline-h	MODEL-OP	scans m_ap_mld by haul_type (cpp:3629-3644)	bounded by m_num_ap_mld, which is unchecked (see set_num_ap_mld)
+get_associated_bsta_bss_info@cpp:2942	get_associated_bsta_bss_info	1367	2942	DERIVED-READ	picks backhaul STA BSS with non-zero bssid and radio (cpp:2942-2960)	-
+get_backhaul_bss_info@cpp:2962	get_backhaul_bss_info	1376	2962	DERIVED-READ	picks backhaul AP BSS (cpp:2962-2982)	-
+get_beaconchannel_by_bandwidth@cpp:2626	get_beaconchannel_by_bandwidth	130	2626	DERIVED-READ	switch on bandwidth: center minus offset (cpp:2626-2643)	-
+get_beaconchannel_by_opclass@cpp:2682	get_beaconchannel_by_opclass	165	2682	DERIVED-READ	scans m_e4_table then calls bandwidth helper (cpp:2682-2703)	-
+get_bss@h:1429	get_bss	1429	inline-h	MODEL-OP	find BSS by (radio mac, bss mac) (cpp:2896-2910); second overload inline (h:1444)	-
+get_bss@cpp:2896	get_bss	1444	2896	MODEL-OP	find BSS by (radio mac, bss mac) (cpp:2896-2910); second overload inline (h:1444)	-
+get_bss_by_ref@h:1456	get_bss_by_ref	1456	inline-h	MODEL-OP	returns m_bss[index] by ref (inline h:1456)	no bound check
+get_bss_info@h:1337	get_bss_info	1337	inline-h	MODEL-OP	2 overloads: m_bss[index].get_bss_info() (inline h:1337); static void* dispatch (h:1351)	no bound check on index
+get_bss_info@h:1351	get_bss_info	1351	inline-h	MODEL-OP	2 overloads: m_bss[index].get_bss_info() (inline h:1337); static void* dispatch (h:1351)	no bound check on index
+get_bss_info_with_mac@cpp:2731	get_bss_info_with_mac	243	2731	MODEL-OP	linear search m_bss by bssid (cpp:2731-2741)	-
+get_bss_info_with_mac@h:259	get_bss_info_with_mac	259	inline-h	MODEL-OP	linear search m_bss by bssid (cpp:2731-2741)	-
+get_bsta_bss_info@cpp:2912	get_bsta_bss_info	1359	2912	DERIVED-READ	first backhaul BSS (cpp:2912-2940)	-
+get_bsta_mld_info@h:1679	get_bsta_mld_info	1679	inline-h	MODEL-OP	returns &m_bsta_mld.m_bsta_mld_info (inline h:1679, static h:1690)	inline
+get_bsta_mld_info@h:1690	get_bsta_mld_info	1690	inline-h	MODEL-OP	returns &m_bsta_mld.m_bsta_mld_info (inline h:1679, static h:1690)	inline
+get_centerchannel_by_bandwidth@cpp:2644	get_centerchannel_by_bandwidth	146	2644	DERIVED-READ	switch on bandwidth: beacon plus offset (cpp:2644-2660)	-
+get_centerchannel_by_opclass@cpp:2662	get_centerchannel_by_opclass	182	2662	DERIVED-READ	scans m_e4_table (cpp:2662-2680)	-
+get_channel_list_by_op_class@cpp:2716	get_channel_list_by_op_class	214	2716	DERIVED-READ	copies channels from m_e4_table row (cpp:2716-2730)	static table
+get_cmd_ctx@h:2059	get_cmd_ctx	2059	inline-h	OTHER	returns &m_cmd_ctx (inline h:2059)	command context, not a live-model record
+get_colocated@h:2616	get_colocated	2616	inline-h	MODEL-OP	returns m_colocated (inline h:2616)	inline
+get_controller_interface@h:917	get_controller_interface	917	inline-h	OTHER	NOT a dm_easy_mesh_t member; decl_def matched substrings of calls into m_network (h:782,803,917)	decl_def substring artefact
+get_controller_interface_mac@h:926	get_controller_interface_mac	926	inline-h	MODEL-OP	returns m_network.get_controller_interface_mac() (inline h:926)	inline
+get_ctl_mac@h:1052	get_ctl_mac	1052	inline-h	MODEL-OP	returns m_network controller interface mac (inline h:1052)	inline
+get_ctrl_al_interface@h:782	get_ctrl_al_interface	782	inline-h	MODEL-OP	returns m_network controller interface (inline h:782)	inline
+get_ctrl_al_interface_mac@h:792	get_ctrl_al_interface_mac	792	inline-h	MODEL-OP	returns m_network controller interface mac (inline h:792)	inline
+get_ctrl_al_interface_name@h:803	get_ctrl_al_interface_name	803	inline-h	MODEL-OP	returns controller interface name (inline h:803)	inline; dereferences controller interface without NULL check
+get_curr_op_class@cpp:2412	get_curr_op_class	1135	2412	MODEL-OP	returns &m_op_class[index] if index < EM_MAX_OPCLASS (cpp:2412-2418)	bounded by EM_MAX_OPCLASS, not m_num_opclass
+get_device@h:1103	get_device	1103	inline-h	MODEL-OP	returns &m_device (inline h:1103)	inline
+get_device_by_ref@h:1110	get_device_by_ref	1110	inline-h	MODEL-OP	returns m_device by ref (inline h:1110)	inline
+get_device_info@h:976	get_device_info	976	inline-h	MODEL-OP	2 overloads: m_device.get_device_info() (inline h:976) and static void* (h:990)	inline
+get_device_info@h:990	get_device_info	990	inline-h	MODEL-OP	2 overloads: m_device.get_device_info() (inline h:976) and static void* (h:990)	inline
+get_dpp@h:1751	get_dpp	1751	inline-h	MODEL-OP	returns &m_dpp (inline h:1751)	inline
+get_em@h:2649	get_em	2649	inline-h	MODEL-OP	returns m_em (inline h:2649)	inline
+get_first_sta@cpp:3114	get_first_sta	2264	3114	MODEL-OP	first m_sta_map entry with station mac (cpp:3114-3127)	-
+get_first_sta_info@cpp:3006	get_first_sta_info	2099	3006	MODEL-OP	3 overloads: first entry of selected map (cpp:3006-3025); other two inline (h:2160,2176)	-
+get_first_sta_info@h:2160	get_first_sta_info	2160	inline-h	MODEL-OP	3 overloads: first entry of selected map (cpp:3006-3025); other two inline (h:2160,2176)	-
+get_freq_band_by_op_class@cpp:2704	get_freq_band_by_op_class	198	2704	DERIVED-READ	scans m_e4_table for band (cpp:2704-2714)	static table
+get_haul_type_from_ssid@cpp:2876	get_haul_type_from_ssid	1201	2876	DERIVED-READ	matches SSID against m_network_ssid (cpp:2876-2894)	strncmp with sizeof(ssid_t)
+get_id@h:108	get_id	108	inline-h	MODEL-OP	returns m_instance_num (inline h:108)	inline
+get_ieee_1905_security_cap@h:965	get_ieee_1905_security_cap	965	inline-h	MODEL-OP	returns m_ieee_1905_security cap (inline h:965)	inline
+get_ieee_1905_security_info@h:943	get_ieee_1905_security_info	943	inline-h	MODEL-OP	2 overloads: inline (h:954) and static void* (h:943)	inline
+get_ieee_1905_security_info@h:954	get_ieee_1905_security_info	954	inline-h	MODEL-OP	2 overloads: inline (h:954) and static void* (h:943)	inline
+get_interface_by_index@h:1067	get_interface_by_index	1067	inline-h	MODEL-OP	returns &m_interfaces[index] (inline h:1067)	no bound check on index
+get_interfaces_list@cpp:2219	get_interfaces_list	2430	2219	HOST	getifaddrs enumeration into caller array (cpp:2219-2273)	reads host network state
+get_last_topo_query_sent_time@h:112	get_last_topo_query_sent_time	112	inline-h	MODEL-OP	returns last_topo_query_sent_time (inline h:112)	inline
+get_manufacturer@h:1934	get_manufacturer	1934	inline-h	MODEL-OP	returns m_device manufacturer (inline h:1934)	inline
+get_manufacturer_model@h:1943	get_manufacturer_model	1943	inline-h	MODEL-OP	returns m_device manufacturer model (inline h:1943)	inline
+get_mlo_policy@cpp:3620	get_mlo_policy	1582	3620	MODEL-OP	returns &m_mlo_policy[haul] for fronthaul/backhaul only (cpp:3620-3627)	-
+get_msg_id@h:1976	get_msg_id	1976	inline-h	MODEL-OP	returns msg_id (inline h:1976)	inline
+get_network@h:1004	get_network	1004	inline-h	MODEL-OP	returns &m_network (inline h:1004)	inline
+get_network_by_ref@h:1015	get_network_by_ref	1015	inline-h	MODEL-OP	returns m_network by ref (inline h:1015)	inline
+get_network_info@h:1026	get_network_info	1026	inline-h	MODEL-OP	2 overloads: inline (h:1026), static void* (h:1040)	inline
+get_network_info@h:1040	get_network_info	1040	inline-h	MODEL-OP	2 overloads: inline (h:1026), static void* (h:1040)	inline
+get_network_ssid@h:1172	get_network_ssid	1172	inline-h	MODEL-OP	returns &m_network_ssid[index] (inline h:1172)	no bound check (EM_MAX_NET_SSIDS=5)
+get_network_ssid_by_ref@h:1185	get_network_ssid_by_ref	1185	inline-h	MODEL-OP	returns m_network_ssid[index] by ref (inline h:1185)	no bound check
+get_network_ssid_info_by_haul_type@cpp:2853	get_network_ssid_info_by_haul_type	1199	2853	DERIVED-READ	scans m_network_ssid num_hauls for haul type (cpp:2853-2874)	-
+get_next_sta@cpp:3129	get_next_sta	2278	3129	MODEL-OP	next m_sta_map entry for station after psta (cpp:3129-3146)	-
+get_next_sta_info@cpp:3027	get_next_sta_info	2115	3027	MODEL-OP	next entry in selected map after given info (cpp:3027-3059)	-
+get_next_sta_info@h:2176	get_next_sta_info	2176	inline-h	MODEL-OP	next entry in selected map after given info (cpp:3027-3059)	-
+get_num_ap_mld@h:1589	get_num_ap_mld	1589	inline-h	MODEL-OP	returns m_num_ap_mld (inline h:1589; static h:1601)	no clamp
+get_num_ap_mld@h:1601	get_num_ap_mld	1601	inline-h	MODEL-OP	returns m_num_ap_mld (inline h:1589; static h:1601)	no clamp
+get_num_assoc_sta_mld@h:1699	get_num_assoc_sta_mld	1699	inline-h	MODEL-OP	returns m_num_assoc_sta_mld (inline h:1699; static h:1711)	no clamp
+get_num_assoc_sta_mld@h:1711	get_num_assoc_sta_mld	1711	inline-h	MODEL-OP	returns m_num_assoc_sta_mld (inline h:1699; static h:1711)	no clamp
+get_num_bss@h:1385	get_num_bss	1385	inline-h	MODEL-OP	returns m_num_bss (inline h:1385; static h:1394)	no clamp; can exceed EM_MAX_BSSS via set_num_bss
+get_num_bss@h:1394	get_num_bss	1394	inline-h	MODEL-OP	returns m_num_bss (inline h:1385; static h:1394)	no clamp; can exceed EM_MAX_BSSS via set_num_bss
+get_num_bss_for_associated_sta@cpp:3216	get_num_bss_for_associated_sta	2300	3216	DERIVED-READ	counts m_sta_map entries for a station mac under m_sta_map_mutex (cpp:3216-3231)	-
+get_num_network_ssid@h:1145	get_num_network_ssid	1145	inline-h	MODEL-OP	returns m_num_net_ssids (inline h:1145)	no clamp
+get_num_op_class@h:1252	get_num_op_class	1252	inline-h	MODEL-OP	returns m_num_opclass (inline h:1252; static h:1264)	no clamp
+get_num_op_class@h:1264	get_num_op_class	1264	inline-h	MODEL-OP	returns m_num_opclass (inline h:1252; static h:1264)	no clamp
+get_num_policy@h:1488	get_num_policy	1488	inline-h	MODEL-OP	returns count of m_policy_map (inline h:1488)	-
+get_num_radios@h:1859	get_num_radios	1859	inline-h	MODEL-OP	returns min(m_num_radios, EM_MAX_BANDS) (inline h:1859; static h:1871)	clamped
+get_num_radios@h:1871	get_num_radios	1871	inline-h	MODEL-OP	returns min(m_num_radios, EM_MAX_BANDS) (inline h:1859; static h:1871)	clamped
+get_num_scan_results@h:1541	get_num_scan_results	1541	inline-h	MODEL-OP	returns hash_map_count(m_scan_result_map) (inline h:1541)	hash_map_count(NULL) safety not verified (inference)
+get_op_class@h:1298	get_op_class	1298	inline-h	MODEL-OP	returns &m_op_class[index] (inline h:1298)	no bound check
+get_op_class_by_ref@h:1311	get_op_class_by_ref	1311	inline-h	MODEL-OP	returns m_op_class[index] by ref (inline h:1311)	no bound check
+get_op_class_info@h:1229	get_op_class_info	1229	inline-h	MODEL-OP	2 overloads: m_op_class[index].get_op_class_info() (inline h:1229); static void* (h:1245)	no bound check
+get_op_class_info@h:1245	get_op_class_info	1245	inline-h	MODEL-OP	2 overloads: m_op_class[index].get_op_class_info() (inline h:1229); static void* (h:1245)	no bound check
+get_opclass_info_for_bss@cpp:2984	get_opclass_info_for_bss	228	2984	DERIVED-READ	scans m_op_class by ruid/op_class (cpp:2984-3004)	-
+get_platform@cpp:2152	get_platform	1094	2152	HOST	reads /sys/firmware/devicetree/base/model and returns "rpi"/"bpi" or NULL (cpp:2152-2163)	return may be NULL; callers pass it to strlen (see get_prioritized_interface)
+get_policy_key@cpp:167	get_policy_key	1497	167	DERIVED-READ	builds "net@dev@radio@type" key with snprintf into caller buffer (cpp:167-184)	caller-supplied buffer size; snprintf truncates silently
+get_primary_device_type@h:1968	get_primary_device_type	1968	inline-h	MODEL-OP	returns m_device primary device type (inline h:1968)	inline
+get_prioritized_interface@cpp:2177	get_prioritized_interface	1085	2177	DERIVED-READ	picks interface whose platform preference matches (cpp:2177-2217)	strncmp(platform, pref.platform, strlen(platform)) is a prefix match; NULL platform dereferenced by strlen
+get_radio@cpp:2354	get_radio	1766	2354	MODEL-OP	2 overloads: by index (cpp:2354-2361) bounded EM_MAX_BANDS; by mac (cpp:2363-2372)	index overload not bounded by m_num_radios
+get_radio@cpp:2363	get_radio	1791	2363	MODEL-OP	2 overloads: by index (cpp:2354-2361) bounded EM_MAX_BANDS; by mac (cpp:2363-2372)	index overload not bounded by m_num_radios
+get_radio_by_ref@h:1777	get_radio_by_ref	1777	inline-h	MODEL-OP	returns m_radio[index] by ref (inline h:1777)	no bound check
+get_radio_cap@cpp:2374	get_radio_cap	1921	2374	MODEL-OP	2 overloads: by mac over m_num_radios (cpp:2374-2384); by index bounded EM_MAX_BANDS (cpp:2386-2393)	-
+get_radio_cap@cpp:2386	get_radio_cap	1922	2386	MODEL-OP	2 overloads: by mac over m_num_radios (cpp:2374-2384); by index bounded EM_MAX_BANDS (cpp:2386-2393)	-
+get_radio_cap_info@cpp:2395	get_radio_cap_info	1743	2395	MODEL-OP	2 overloads: index forwards to get_radio_cap (cpp:2395-2399); inline (h:1744)	-
+get_radio_cap_info@h:1744	get_radio_cap_info	1744	inline-h	MODEL-OP	2 overloads: index forwards to get_radio_cap (cpp:2395-2399); inline (h:1744)	-
+get_radio_data@cpp:2331	get_radio_data	1850	2331	MODEL-OP	returns entry from onewifi decoded m_wifi_data by interface (cpp:2331-2352)	reads external onewifi struct (m_wifi_data), not a native record
+get_radio_info@h:1820	get_radio_info	1820	inline-h	MODEL-OP	2 overloads: m_radio[index].get_radio_info() (inline h:1820); static void* (h:1835)	no bound check on index
+get_radio_info@h:1835	get_radio_info	1835	inline-h	MODEL-OP	2 overloads: m_radio[index].get_radio_info() (inline h:1820); static void* (h:1835)	no bound check on index
+get_radio_interface@h:1805	get_radio_interface	1805	inline-h	MODEL-OP	returns m_radio[index].get_radio_interface() (inline h:1805)	no bound check
+get_scan_result@cpp:3562	get_scan_result	1555	3562	MODEL-OP	returns the index-th m_scan_result_map entry by hash iteration order (cpp:3562-3577)	index is an iteration count, not a stored slot; NULL past end
+get_serial_number@h:1957	get_serial_number	1957	inline-h	MODEL-OP	returns m_device serial (inline h:1957)	inline
+get_software_version@h:1950	get_software_version	1950	inline-h	MODEL-OP	returns m_device software version (inline h:1950)	inline
+get_ssid_mismatch_check_time@h:110	get_ssid_mismatch_check_time	110	inline-h	MODEL-OP	returns ssid_mismatch_check_time (inline h:110)	inline
+get_sta_info@cpp:3148	get_sta_info	2133	3148	MODEL-OP	finds em_sta_info in the map chosen by target, key sta@bssid@radio (cpp:3148-3181)	em_long_string_t key built with snprintf; truncation silent
+get_sta_info@h:2193	get_sta_info	2193	inline-h	MODEL-OP	finds em_sta_info in the map chosen by target, key sta@bssid@radio (cpp:3148-3181)	em_long_string_t key built with snprintf; truncation silent
+get_subdoc_radio_type_for_freq@h:2695	get_subdoc_radio_type_for_freq	2695	inline-h	DERIVED-READ	static band to webconfig subdoc type (inline h:2695)	pure
+get_subdoc_vap_type_for_freq@h:2677	get_subdoc_vap_type_for_freq	2677	inline-h	DERIVED-READ	static band to webconfig subdoc type (inline h:2677)	pure
+get_topo_state@h:105	get_topo_state	105	inline-h	MODEL-OP	returns m_topo_changed (inline h:105)	inline
+handle_dirty_dm@h:2584	handle_dirty_dm	2584	none	UNDEFINED	declared (h:2584); no dm_easy_mesh_t definition (em_ctrl_t::handle_dirty_dm at src/ctrl/em_ctrl.cpp:779 is another class)	-
+has_at_least_one_associated_sta@cpp:3061	has_at_least_one_associated_sta	2288	3061	DERIVED-READ	scans m_sta_map for associated flag (cpp:3061-3074)	-
+has_policy_type@cpp:186	has_policy_type	1505	186	DERIVED-READ	scans m_policy_map for policy type (cpp:186-205)	-
+hex@cpp:1994	hex	2322	1994	DERIVED-READ	pure helper: bytes to hex string (cpp:1994-2022)	no state
+init@cpp:4241	init	2724	4241	LIFECYCLE	resets all members and sub-objects (cpp:4241-4278)	-
+is_ap_mld_mac@cpp:3646	is_ap_mld_mac	1740	3646	DERIVED-READ	checks mac against m_ap_mld entries (cpp:3646-3666)	-
+is_bsta_mld_present@h:1658	is_bsta_mld_present	1658	inline-h	MODEL-OP	returns m_bsta_mld_present (inline h:1658; static h:1670)	inline
+is_bsta_mld_present@h:1670	is_bsta_mld_present	1670	inline-h	MODEL-OP	returns m_bsta_mld_present (inline h:1658; static h:1670)	inline
+is_controller@h:2619	is_controller	2619	inline-h	MODEL-OP	returns m_is_ctlr (inline h:2619)	inline
+is_ssid_match@cpp:2841	is_ssid_match	1213	2841	DERIVED-READ	compares ssid against m_network_ssid (cpp:2841-2851)	-
+is_sta_associated@cpp:3076	is_sta_associated	2228	3076	DERIVED-READ	find_sta then associated flag (cpp:3076-3080)	-
+is_sta_mld@cpp:3233	is_sta_mld	2302	3233	DERIVED-READ	scans m_assoc_sta_mld for mac (cpp:3233-3242)	-
+mac_address_from_name@cpp:2275	mac_address_from_name	2397	2275	HOST	ioctl SIOCGIFHWADDR for an interface name (cpp:2275-2299)	reads host interface state
+macbytes_to_string@cpp:2056	macbytes_to_string	2352	2056	DERIVED-READ	pure helper: mac bytes to text (cpp:2056-2068)	no state
+maclist_to_string@cpp:2084	maclist_to_string	2380	2084	DERIVED-READ	pure helper: mac list to text (cpp:2084-2102)	no state
+merge_assoc_sta_updates@cpp:4173	merge_assoc_sta_updates	1736	4173	MODEL-OP	sta_aggregate merge: src assoc entries copy_sta_info into existing consolidated entry or insert; src dassoc entries remove from m_sta_map (cpp:4173-4213)	copy_sta_info is whole-record replace; keys from snprintf into em_long_string_t
+merge_sta_link_metrics@cpp:4215	merge_sta_link_metrics	1737	4215	MODEL-OP	for each src assoc entry that exists in consolidated map: copy_sta_info (cpp:4215-4227)	updates only existing stations; no insert; whole-record replace
+name_from_mac_address@cpp:2301	name_from_mac_address	2413	2301	HOST	getifaddrs search for interface name of a mac (cpp:2301-2330)	reads host interface state; used by ctor
+print_config@cpp:2429	print_config	2515	2429	DEBUG/PRINT	prints config (cpp:2429-2543)	-
+print_op_class_list@cpp:3485	print_op_class_list	1322	3485	DEBUG/PRINT	prints op-class list (cpp:3485-3499)	-
+put_sta_info@cpp:3183	put_sta_info	2145	3183	MODEL-OP	inserts sta info into selected map keyed by id/bssid/radio (cpp:3183-3214)	key built into em_2xlong_string_t
+put_sta_info@h:2206	put_sta_info	2206	inline-h	MODEL-OP	inserts sta info into selected map keyed by id/bssid/radio (cpp:3183-3214)	key built into em_2xlong_string_t
+remove_ap_mld_info_by_haul_type@cpp:3897	remove_ap_mld_info_by_haul_type	1716	3897	MODEL-OP	removes first AP MLD with haul type; compacts array (cpp:3897-3925)	-
+remove_bss_by_index@cpp:3501	remove_bss_by_index	1467	3501	MODEL-OP	shifts m_bss down and decrements m_num_bss (cpp:3501-3515)	last slot not cleared (stale copy stays in m_bss[m_num_bss])
+replace_assoc_sta_mld_info@cpp:3927	replace_assoc_sta_mld_info	1727	3927	MODEL-OP	whole-record replace of matching STA-MLD entry, else append; clamps num_affiliated_sta to EM_MAX_AP_MLD (cpp:3927-3954)	whole-record replace (not field-preserving); append bounded EM_MAX_ASSOC_STA_MLD
+reset@cpp:4279	reset	2710	4279	LIFECYCLE	clears counts and policy/scan maps (cpp:4279-)	-
+reset_cmd_ctx@h:2080	reset_cmd_ctx	2080	inline-h	OTHER	memset of m_cmd_ctx (inline h:2080)	command context, not a live-model record
+reset_db_cfg_type@cpp:4125	reset_db_cfg_type	2541	4125	DB	clears db flag and criteria (cpp:4125-4140)	uses criteria[num] where num==1 after loop, not criteria[index] (cpp:4130-4138): wrong buffer cleared
+resolve_ap_mld_to_fallback_ruid@cpp:3668	resolve_ap_mld_to_fallback_ruid	1741	3668	DERIVED-READ	resolves AP MLD mac to a fallback RUID (cpp:3668-3698)	-
+securitymode_to_str@cpp:2104	securitymode_to_str	2444	2104	DERIVED-READ	pure helper: security mode to string (cpp:2104-2126)	no state
+set_agent_al_interface_mac@h:879	set_agent_al_interface_mac	879	inline-h	MODEL-OP	sets m_device dev interface mac (inline h:879)	inline
+set_agent_al_interface_name@h:890	set_agent_al_interface_name	890	inline-h	MODEL-OP	sets m_device dev interface name (inline h:890)	inline
+set_channels_list@cpp:3428	set_channels_list	2630	3428	MODEL-OP	copies op-class entries into m_op_class with ruid checks (cpp:3428-3483)	-
+set_cmd_ctx@h:2070	set_cmd_ctx	2070	inline-h	OTHER	memcpy into m_cmd_ctx (inline h:2070)	command context, not a live-model record
+set_colocated@h:2606	set_colocated	2606	inline-h	MODEL-OP	sets m_colocated (inline h:2606)	inline
+set_controller@h:2618	set_controller	2618	inline-h	MODEL-OP	sets m_is_ctlr (inline h:2618)	inline
+set_controller_intf_media@h:836	set_controller_intf_media	836	inline-h	MODEL-OP	sets network controller media (inline h:836)	inline
+set_ctrl_al_interface_mac@cpp:2165	set_ctrl_al_interface_mac	814	2165	MODEL-OP	sets device interface mac and network controller id (cpp:2165-2169)	-
+set_ctrl_al_interface_name@cpp:2171	set_ctrl_al_interface_name	825	2171	MODEL-OP	sets controller interface name (cpp:2171-2175)	-
+set_db_cfg_param@cpp:4142	set_db_cfg_param	2529	4142	DB	sets db flag bit and copies criteria with strncpy(dst, src, strlen(src)) (cpp:4142-4158)	unbounded: strlen(criteria) can exceed em_long_string_t; no NUL termination
+set_em@h:2595	set_em	2595	inline-h	OTHER	stores em_t owner pointer (inline h:2595)	wiring, not model data
+set_id@h:107	set_id	107	inline-h	LIFECYCLE	assigns instance number from static counter (inline h:107)	inline
+set_last_topo_query_sent_time@h:111	set_last_topo_query_sent_time	111	inline-h	MODEL-OP	sets last_topo_query_sent_time (inline h:111)	inline
+set_manufacturer@h:1997	set_manufacturer	1997	inline-h	MODEL-OP	sets device manufacturer (inline h:1997)	inline
+set_manufacturer_model@h:2008	set_manufacturer_model	2008	inline-h	MODEL-OP	sets device manufacturer model (inline h:2008)	inline
+set_msg_id@h:1985	set_msg_id	1985	inline-h	MODEL-OP	sets msg_id (inline h:1985)	inline
+set_network@h:770	set_network	770	inline-h	MODEL-OP	whole-record assign m_network = network (inline h:770)	whole-record assign
+set_num_ap_mld@h:1610	set_num_ap_mld	1610	inline-h	MODEL-OP	sets m_num_ap_mld (inline h:1610; static h:1622)	NO bound check against EM_MAX_AP_MLD (64); callers may overflow m_ap_mld
+set_num_ap_mld@h:1622	set_num_ap_mld	1622	inline-h	MODEL-OP	sets m_num_ap_mld (inline h:1610; static h:1622)	NO bound check against EM_MAX_AP_MLD (64); callers may overflow m_ap_mld
+set_num_bss@h:1403	set_num_bss	1403	inline-h	MODEL-OP	sets m_num_bss (inline h:1403; static h:1415)	NO bound check against EM_MAX_BSSS; em_configuration.cpp:1629,2267 pass get_num_bss()+1 unchecked (overflow of m_bss[])
+set_num_bss@h:1415	set_num_bss	1415	inline-h	MODEL-OP	sets m_num_bss (inline h:1403; static h:1415)	NO bound check against EM_MAX_BSSS; em_configuration.cpp:1629,2267 pass get_num_bss()+1 unchecked (overflow of m_bss[])
+set_num_network_ssid@h:1158	set_num_network_ssid	1158	inline-h	MODEL-OP	sets m_num_net_ssids (inline h:1158)	NO bound check against EM_MAX_NET_SSIDS (5); em_configuration.cpp:4975 passes num+1
+set_num_op_class@cpp:53	set_num_op_class	1274	53	MODEL-OP	sets m_num_opclass after EM_MAX_OPCLASS check (cpp:53-60)	bounded (logs and returns)
+set_num_op_class@h:1287	set_num_op_class	1287	inline-h	MODEL-OP	sets m_num_opclass after EM_MAX_OPCLASS check (cpp:53-60)	bounded (logs and returns)
+set_num_radios@h:1881	set_num_radios	1881	inline-h	MODEL-OP	sets m_num_radios clamped to EM_MAX_BANDS (inline h:1881; static h:1893)	clamped; em_configuration.cpp:6136 passes radio_index+1 after its own check
+set_num_radios@h:1893	set_num_radios	1893	inline-h	MODEL-OP	sets m_num_radios clamped to EM_MAX_BANDS (inline h:1881; static h:1893)	clamped; em_configuration.cpp:6136 passes radio_index+1 after its own check
+set_policy@cpp:3393	set_policy	2642	3393	MODEL-OP	inserts or replaces policy by key after EM_MAX_POLICIES check; overwrites policy.dev_mac with this device MAC (cpp:3393-3426)	dev_mac is overwritten before keying (cpp:3401); whole em_policy_t memcpy
+set_primary_device_type@h:2043	set_primary_device_type	2043	inline-h	MODEL-OP	sets device primary type (inline h:2043)	inline
+set_serial_number@h:2032	set_serial_number	2032	inline-h	MODEL-OP	sets device serial (inline h:2032)	inline
+set_software_version@h:2019	set_software_version	2019	inline-h	MODEL-OP	sets device software version (inline h:2019)	inline
+set_ssid_mismatch_check_time@h:109	set_ssid_mismatch_check_time	109	inline-h	MODEL-OP	sets ssid_mismatch_check_time (inline h:109)	inline
+set_topo_state@h:106	set_topo_state	106	inline-h	MODEL-OP	sets m_topo_changed (inline h:106)	inline
+string_to_macbytes@cpp:2070	string_to_macbytes	2365	2070	DERIVED-READ	pure helper: text to mac bytes (cpp:2070-2082)	no state
+str_to_securitymode@cpp:2128	str_to_securitymode	2458	2128	DERIVED-READ	pure helper: string to security mode (cpp:2128-)	no state
+unhex@cpp:2024	unhex	2338	2024	DERIVED-READ	pure helper: hex text to bytes (cpp:2024-2054)	no state
+update_ap_mld_info@cpp:3700	update_ap_mld_info	1718	3700	MODEL-OP	upserts AP MLD by haul/mac, incremental affiliated-AP update (cpp:3700-3820)	bounded by EM_MAX_AP_MLD via update path (check at cpp:3700-3712)
+update_ap_mld_info@h:1719	update_ap_mld_info	1719	inline-h	MODEL-OP	upserts AP MLD by haul/mac, incremental affiliated-AP update (cpp:3700-3820)	bounded by EM_MAX_AP_MLD via update path (check at cpp:3700-3712)
+update_assoc_sta_mld_info@cpp:3828	update_assoc_sta_mld_info	1724	3828	MODEL-OP	upserts assoc STA MLD and incremental affiliated STA entries under lock (cpp:3828-3895)	field-preserving for affiliated entries keyed by bssid; bounded EM_MAX_AP_MLD and EM_MAX_ASSOC_STA_MLD
+update_assoc_sta_mld_info@h:1725	update_assoc_sta_mld_info	1725	inline-h	MODEL-OP	upserts assoc STA MLD and incremental affiliated STA entries under lock (cpp:3828-3895)	field-preserving for affiliated entries keyed by bssid; bounded EM_MAX_AP_MLD and EM_MAX_ASSOC_STA_MLD
+update_bsta_mld_info@cpp:3822	update_bsta_mld_info	1721	3822	MODEL-OP	STUB: body is TODO and only logs (cpp:3822-3826)	no-op; no callers outside src/dm except agent name-list
+update_bsta_mld_info@h:1722	update_bsta_mld_info	1722	inline-h	MODEL-OP	STUB: body is TODO and only logs (cpp:3822-3826)	no-op; no callers outside src/dm except agent name-list
+update_cac_status_id@cpp:1682	update_cac_status_id	905	1682	MODEL-OP	sets ruid of op classes with type > capability to al_mac (cpp:1682-1694)	-
+update_scan_results@cpp:3599	update_scan_results	1568	3599	MODEL-OP	upserts scan result keyed by id; netid fixed "OneWifiMesh", scanner_type forced radio, dev_mac = AL mac; whole-record assign (cpp:3599-3614)	NULL scan_result dereferenced (no check); the test expects a throw, which will not happen
+update_scan_results@h:1580	update_scan_results	1580	inline-h	MODEL-OP	upserts scan result keyed by id; netid fixed "OneWifiMesh", scanner_type forced radio, dev_mac = AL mac; whole-record assign (cpp:3599-3614)	NULL scan_result dereferenced (no check); the test expects a throw, which will not happen
+~dm_easy_mesh_t@cpp:4346	~dm_easy_mesh_t	2765	4346	LIFECYCLE	dtor: frees maps and sub-objects (cpp:4346)	none
+dm_easy_mesh_t()@cpp:4330	dm_easy_mesh_t()	2745	4330	LIFECYCLE	default ctor: zeroes counts, db_cfg type none, colocated and controller flags (cpp:4330-4343)	not in decl_def; added
+dm_easy_mesh_t(const dm_network_t&)@cpp:4318	dm_easy_mesh_t(const dm_network_t&)	2756	4318	LIFECYCLE	ctor from network: copies ctrl_id into device id, backhaul_alid, backhaul_mac; name lookup via getifaddrs (cpp:4318-4328)	not in decl_def; added; name_from_mac_address is HOST (ctor side effect); whole em_interface_t memcpy into id fields (sizes not checked here)

@@ -256,6 +256,8 @@ wire_code! {
         (SUPPORTED_ROLE, 0x0F, spec, "em_tlv_type_supported_role", "IEEE 1905.1 TLV §6.4.16"),
         (SUPPORTED_FREQ_BAND, 0x10, spec, "em_tlv_type_supported_freq_band", "IEEE 1905.1 TLV §6.4.17"),
         (WSC, 0x11, spec, "em_tlv_type_wsc", "IEEE 1905.1 TLV §6.4.18"),
+        (PUSH_BUTTON_EVENT_NOTIFICATION, 0x12, spec, none, "Table 6-4; TLV §6.4.19"),
+        (PUSH_BUTTON_JOIN_NOTIFICATION, 0x13, spec, none, "Table 6-4; TLV §6.4.20"),
         (SUPPORTED_SERVICE, 0x80, spec, "em_tlv_type_supported_service", "Table 22, §17.2; TLV §17.2.1"),
         (SEARCHED_SERVICE, 0x81, spec, "em_tlv_type_searched_service", "Table 22, §17.2; TLV §17.2.2"),
         (AP_RADIO_IDENTIFIER, 0x82, spec, "em_tlv_type_radio_id", "Table 22, §17.2; TLV §17.2.3"),
@@ -509,6 +511,18 @@ mod golden {
             "AFFILIATED_AP_METRICS",
             0xE5,
             "Table 22, \u{00a7}17.2; TLV \u{00a7}17.2.101",
+        ),
+        (
+            "TlvType",
+            "PUSH_BUTTON_EVENT_NOTIFICATION",
+            0x12,
+            "Table 6-4; TLV \u{00a7}6.4.19",
+        ),
+        (
+            "TlvType",
+            "PUSH_BUTTON_JOIN_NOTIFICATION",
+            0x13,
+            "Table 6-4; TLV \u{00a7}6.4.20",
         ),
     ];
 
@@ -769,8 +783,8 @@ mod golden {
 
         assert_eq!(
             ADDITIONS.len(),
-            2,
-            "expected exactly 2 ADDITIONS, got {}",
+            4,
+            "expected exactly 4 ADDITIONS, got {}",
             ADDITIONS.len()
         );
     }
@@ -878,7 +892,7 @@ mod golden {
             upstream_backed, 213,
             "expected 213 upstream-backed entries, got {upstream_backed}"
         );
-        assert_eq!(additions, 2, "expected 2 additions, got {additions}");
+        assert_eq!(additions, 4, "expected 4 additions, got {additions}");
         assert_eq!(
             spec_count, 210,
             "expected 210 spec entries, got {spec_count}"

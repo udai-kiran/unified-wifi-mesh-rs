@@ -6,9 +6,12 @@
 //! `autoconfig_search` and `i1905_ack`), in the order of the constructor's
 //! `switch`. The rows were generated from the golden fixture
 //! `tests/data/upstream_msg_tables.tsv`, and a test checks that they still
-//! equal it. Do not edit the rows by hand. For 25 of these rows, where upstream
+//! equal it. Do not edit the rows by hand. For 26 of these rows, where upstream
 //! is stricter than the spec, [`crate::spec_min`] gives validation a lower
-//! minimum length; the rows here keep upstream's values.
+//! minimum length. Note 0012 D6 also overrides three requirements in
+//! [`crate::validate()`]: the Search's Multi-AP Profile is optional, while the
+//! Response's Multi-AP Profile and 1905 Layer Security Capability are mandatory
+//! for every profile. The rows here keep upstream's values in both cases.
 
 use em_types::{MsgType, ProfileType, TlvType};
 

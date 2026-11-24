@@ -1,0 +1,35 @@
+# Upstream em_msg.cpp readers mapped to Rust tests (note 0009 D6, A10). Upstream: em_msg.cpp at pin ba4180b.
+# One row per upstream reader, plus one row per intentional-difference tag in crates/em-msg/src/readers.rs
+# (scope tag; a tag on two tests has two rows). Same columns as crates/em-dm/tests/data/upstream_test_map.tsv.
+# disposition: rust:<module path of the Rust test> or skip:<reason>; skip reasons: not ported: no production caller.
+# tag: parity, or intentional-difference:<id> where the port changes the behaviour on purpose (the id is in a comment of the Rust test).
+# triage_verdict is PORT or SKIP; triage_method is not used here (-). Reader rows name the corpus test, which compares each Rust reader with the generated upstream vectors; unit tests are in the notes.
+test	line	scope	triage_verdict	triage_method	disposition	tag	notes
+get_tlv(em_tlv_t*)	34	reader	SKIP	-	skip:not ported: no production caller	parity	cpp:34-50; D6 and A10
+get_client_mac_info	52	reader	SKIP	-	skip:not ported: no production caller	parity	cpp:52-69; D6 and A10
+get_al_mac_address	71	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	al_mac_address; unit test readers::tests::get_al_mac_address_overlong_value_is_an_error
+get_supported_service	89	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	supported_services; unit test readers::tests::supported_services_applies_upstreams_checks
+parse_profile_tlv	131	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	parse_profile_value (14 corpus rows); unit test readers::tests::parse_profile_value_accepts_one_or_four_octets_below_four
+get_profile	154	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	profile; get_profile and get_profile_type are one reader
+get_sta_mac	177	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	sta_mac; unit tests readers::tests::sta_mac_value_too_short_for_the_read_is_an_error, readers::tests::first_matching_tlv_in_frame_order_wins_for_every_reader
+get_bss_id	223	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	bss_id
+get_radio_id	251	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	radio_id; unit tests readers::tests::get_radio_id_channel_scan_request_with_0_radios_ends_with_not_found, readers::tests::get_radio_id_operational_bss_with_0_radios_continues_the_walk (upstream quirk kept), upstream_reader_vectors::channel_scan_req_0_radios_is_ok_none_for_get_radio_id
+get_freq_band	346	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	freq_band
+get_profile_type	365	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	profile; same reader as get_profile
+get_tlv(em_tlv_type_t)	387	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	find_tlv; readers::tests::find_tlv_returns_the_value_and_never_end_of_message
+get_tlv(buffer)	404	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	static get_tlv; find_tlv
+get_first_tlv	424	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	first_tlv; unit test readers::tests::first_tlv_reports_why_it_failed, upstream_reader_vectors::first_tlv_failure_and_next_tlv_end_are_different_results
+get_next_tlv	446	reader	PORT	-	rust:upstream_reader_vectors::every_reader_equals_upstream_on_the_corpus	parity	next_tlv; unit test readers::tests::next_tlv_walks_by_offset
+al-mac-length	71	tag	PORT	-	rust:readers::tests::get_al_mac_address_overlong_value_is_an_error	intentional-difference:al-mac-length	upstream copies htons(tlv->len) octets into a 6-octet buffer (cpp:71-86); the port requires exactly 6
+bss-id-short-read	223	tag	PORT	-	rust:readers::tests::get_bss_id_value_too_short_for_the_read_is_an_error	intentional-difference:bss-id-short-read	upstream reads 6 octets with no length check (cpp:223-249); the port reports the shortfall
+radio-id-short-read	251	tag	PORT	-	rust:readers::tests::get_radio_id_value_too_short_for_the_read_is_an_error	intentional-difference:radio-id-short-read	upstream reads 6 octets with no length check (cpp:251-344); the port reports the shortfall
+channel-scan-request-short	273	tag	PORT	-	rust:readers::tests::get_radio_id_short_channel_scan_request_fails_the_whole_walk_before_the_end_of_message_check	intentional-difference:channel-scan-request-short	upstream returns false for a value shorter than 9 octets before the End of Message test (cpp:273-276); the port reports an error
+freq-band-empty	346	tag	PORT	-	rust:readers::tests::get_freq_band_empty_value_is_an_error	intentional-difference:freq-band-empty	upstream copies one octet whatever the length (cpp:346-363); the port reports an empty value
+missing-end-of-message	266	tag	PORT	-	rust:readers::tests::readers_without_end_of_message_return_a_framing_error	intentional-difference:missing-end-of-message	upstream returns not found for a frame without End of Message; the port reports a framing error
+framing-error	266	tag	PORT	-	rust:readers::tests::readers_stop_at_the_first_framing_error	intentional-difference:framing-error	upstream returns false where a TLV runs past the end (cpp:266-272); the port reports the framing error
+walker-zero-length-stop (get_next_tlv)	446	tag	PORT	-	rust:readers::tests::get_next_tlv_stops_at_a_zero_length_tlv_that_hides_the_eht_operations_tlv	intentional-difference:walker-zero-length-stop	kept as upstream by user decision (A10); the same tag covers the get_first_tlv row below
+walker-zero-length-stop (get_first_tlv)	424	tag	PORT	-	rust:readers::tests::get_first_tlv_fails_on_an_empty_first_tlv_of_a_backhaul_sta_capability_report	intentional-difference:walker-zero-length-stop	get_first_tlv fails on a zero-length first TLV (cpp:424-444); kept by user decision (A10)
+walker-size-wrap	466	tag	PORT	-	rust:readers::tests::get_next_tlv_size_wrap_at_0xfffd_to_0xffff_is_not_reproduced	intentional-difference:walker-size-wrap	upstream holds sizeof(em_tlv_t) + len in a uint16_t, which wraps for lengths 0xFFFD-0xFFFF (cpp:466); the port does not wrap
+sta-mac-short-value	177	tag	PORT	-	rust:readers::tests::sta_mac_value_too_short_for_the_read_is_an_error	intentional-difference:sta-mac-short-value	upstream returns false for a value below its minimum (cpp:197-211); the port returns ValueTooShort
+supported-service-rejected	89	tag	PORT	-	rust:readers::tests::supported_services_applies_upstreams_checks	intentional-difference:supported-service-rejected	upstream returns false for an empty value, a length other than 1 + num, or num above 8 (cpp:104-117); the port returns the reason
+profile-rejected	131	tag	PORT	-	rust:readers::tests::parse_profile_value_accepts_one_or_four_octets_below_four	intentional-difference:profile-rejected	upstream returns false for a length other than 1 or 4, or a raw value of 4 or more (cpp:139-148); the port returns the reason

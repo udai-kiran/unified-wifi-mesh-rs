@@ -1,0 +1,341 @@
+# Upstream node tests mapped to Rust tests (A10). One row per PORT and PORT-CTOR row of research/node_test_triage.tsv,
+# plus the one SKIP-TRIVIAL(ambiguous-check) row, decided PORT (reason in its notes).
+# disposition: rust:<module path of the Rust test> or skip:<reason>; skip reasons: host-dependent, UB/null-deref, stale API.
+# tag: parity, or intentional-difference:<id> where the port changes the behaviour on purpose (the note names the upstream behaviour).
+# triage_verdict and triage_method are the columns of the triage row; method (unmatched) rows carry the hand verdicts of plan.md.
+# scope list rows (brief 3b): one row per test of research/list_test triage (tests/data/list_test_triage.tsv), all 155; SKIP-UB and SKIP-STALE-API rows carry skip: dispositions.
+test	line	scope	triage_verdict	triage_method	disposition	tag	notes
+commit_bss_config_valid_vap0	643	node	PORT	commit_bss_config	rust:model::tests::bss_radio::commit_bss_config_replaces_the_bss_with_the_same_radio_and_bssid	parity	
+commit_bss_config_valid_non_zero_vap	682	node	PORT	commit_bss_config	rust:model::tests::bss_radio::commit_bss_config_only_touches_the_matching_bssid	parity	
+commit_bss_config_out_of_range	719	node	PORT	commit_bss_config	rust:model::tests::bss_radio::commit_bss_config_for_an_unknown_bss_changes_nothing	intentional-difference:commit-bss-source-by-value	upstream refuses vap_index >= EM_MAX_BSS_PER_RADIO (cpp:331-334); the port takes the source BSS as the argument, so the index cannot be out of range; an unknown BSS changes nothing
+commit_config_al_target_copies_network_and_device_safe_fields	752	node	PORT	commit_config	rust:model::tests::delta::al_insert_with_a_network_replaces_the_network_record	parity	device safe fields: model::tests::delta::al_insert_keeps_the_emplus_flag_and_the_extended_info
+commit_config_radio_existing_radio_updates	809	node	PORT	commit_config	rust:model::tests::delta::em_insert_radio_replaces_an_existing_radio_and_leaves_its_capability_alone	parity	
+commit_config_bss_adds_new_bss	850	node	PORT	commit_config	rust:model::tests::delta::em_insert_bss_adds_new_bss_and_replaces_known_ones_by_bssid	parity	
+commit_config_unknown_target_no_effect	895	node	PORT	commit_config	skip:stale API: the commit target enum is replaced by the ModelDelta variants, so an unknown target cannot be expressed (plan C1)	parity	
+commit_config_valid_cmd	932	node	PORT	commit_config	rust:model::tests::delta::em_insert_radio_adds_a_new_radio_with_its_capability_at_the_same_index	parity	commit_config(cmd) em_insert/al_insert are EmInsertRadio/AlInsert deltas
+commit_config_null_cmd	968	node	PORT	commit_config	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+create_new_scan_result_valid_scan_result_id	1638	node	PORT	create_new_scan_result	rust:model::tests::scan::create_new_scan_result_stores_an_empty_result_with_the_id	parity	
+create_new_scan_result_enum_variations	1687	node	PORT	create_new_scan_result	rust:model::tests::scan::create_new_scan_result_keeps_every_scanner_type	parity	
+create_new_scan_result_null_scan_result_id	1736	node	PORT	create_new_scan_result	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+ctor_valid_network_copies_ctrl_id	5453	node	PORT-CTOR	(unmatched)	rust:model::tests::creation::the_converting_constructor_sets_the_identity_fields_explicitly	intentional-difference:defect3-ctor-identity	upstream memcpys ctrl_id over id (cpp:4320), overwriting the network id; the port sets every identity field explicitly
+ctor_name_resolution_success_if_mac_exists	5490	node	PORT-CTOR	(unmatched)	skip:host-dependent: resolves an interface name through getifaddrs; hand verdict SKIP (plan.md)	parity	
+ctor_name_resolution_fails_for_unknown_mac	5521	node	PORT-CTOR	(unmatched)	rust:model::tests::creation::the_converting_constructor_leaves_the_tables_empty	parity	the name stays empty; the lookup itself is the host adapter's (0007 D1)
+ctor_zero_initialized_ctrl_id	5554	node	PORT-CTOR	(unmatched)	rust:model::tests::creation::the_converting_constructor_of_a_zero_identity_is_zeroed	parity	
+ctor_nullptr_network_reference_bug	5586	node	PORT-CTOR	(unmatched)	skip:UB/null-deref: dereferences a null network reference; hand verdict SKIP (plan.md)	parity	
+find_matching_bss_valid_matching_bss	6255	node	PORT	find_matching_bss	rust:model::tests::bss_radio::find_matching_bss_by_radio_bssid_and_haul	parity	
+find_matching_bss_no_matching_bss	6317	node	PORT	find_matching_bss	rust:model::tests::bss_radio::find_matching_bss_no_match	parity	
+find_matching_bss_null_input	6365	node	PORT	find_matching_bss	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+find_matching_device_matching_device	6410	node	PORT	find_matching_device	rust:model::tests::creation::find_matching_device_compares_the_al_mac	parity	
+find_matching_device_non_matching_device	6459	node	PORT	find_matching_device	rust:model::tests::creation::find_matching_device_compares_the_al_mac	parity	
+find_matching_device_null_device	6508	node	PORT	find_matching_device	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+find_matching_radio_ExactMatch	6554	node	PORT	find_matching_radio	rust:model::tests::bss_radio::find_matching_radio_exact_match	parity	
+find_matching_radio_NoMatch	6608	node	PORT	find_matching_radio	rust:model::tests::bss_radio::find_matching_radio_no_match	parity	
+find_matching_radio_PartialMatch	6660	node	PORT	find_matching_radio	rust:model::tests::bss_radio::find_matching_radio_partial_match_is_no_match	parity	
+find_matching_radio_NullInput	6714	node	PORT	find_matching_radio	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+find_matching_scan_result_valid_match	6747	node	PORT	find_matching_scan_result	rust:model::tests::scan::find_matching_scan_result_needs_the_whole_key	parity	
+find_matching_scan_result_no_match	6798	node	PORT	find_matching_scan_result	rust:model::tests::scan::find_matching_scan_result_needs_the_whole_key	parity	
+find_matching_scan_result_partial_mismatch	6841	node	PORT	find_matching_scan_result	rust:model::tests::scan::find_matching_scan_result_compares_the_network_id_exactly	intentional-difference:c4-exact-keys	upstream compares the network id by prefix (cpp:3579-3597)
+find_matching_scan_result_nullptr_id	6884	node	PORT	find_matching_scan_result	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+find_sta_valid_match	6919	node	PORT	find_sta	rust:model::tests::sta::find_sta_valid_match	parity	
+find_sta_no_entries	6971	node	PORT	find_sta	rust:model::tests::sta::find_sta_no_entries	parity	
+find_sta_partial_mismatch_sta_mac	7016	node	PORT	find_sta	rust:model::tests::sta::find_sta_partial_mismatch_sta_mac	parity	
+find_sta_partial_mismatch_bssid	7068	node	PORT	find_sta	rust:model::tests::sta::find_sta_partial_mismatch_bssid	parity	
+find_sta_zero_mac_inputs	7114	node	PORT	find_sta	rust:model::tests::sta::find_sta_zero_mac_inputs	parity	
+find_sta_without_init_bug	7148	node	PORT	find_sta	skip:UB/null-deref: calls find_sta on a model whose sta map was never initialised (null hash map); a NodeModel always owns its maps	parity	
+get_ap_mld_valid_index_zero_configured	7388	node	PORT	get_ap_mld	rust:model::tests::mld::get_ap_mld_by_index_and_beyond_the_count	parity	
+get_ap_mld_valid_index_zero_no_ap_configured	7436	node	PORT	get_ap_mld	rust:model::tests::mld::get_ap_mld_by_index_and_beyond_the_count	intentional-difference:index-bounds	upstream returns a zeroed slot for an unconfigured index below 64; the port returns None at and beyond the count
+get_ap_mld_index_out_of_range	7475	node	PORT	get_ap_mld	rust:model::tests::mld::get_ap_mld_by_index_and_beyond_the_count	intentional-difference:index-bounds	upstream returns null from index 64; the port returns None at and beyond the count
+get_ap_mld_by_ref_index_out_of_range	7598	node	SKIP-TRIVIAL(ambiguous-check)	get_ap_mld_by_ref	rust:model::tests::mld::ap_mld_by_ref_index_beyond_the_count_is_none	intentional-difference:index-bounds	ambiguous triage row (SKIP-TRIVIAL(ambiguous-check)) decided PORT: it is the by-reference twin of get_ap_mld_index_out_of_range and the port's ap_mld_mut has the same bound; reason: the index bound is behaviour, not a trivial accessor
+get_backhaul_bss_info_valid_backhaul_bss_exists	7956	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_finds_enabled_backhaul_ap	parity	
+get_backhaul_bss_info_no_bss_configured	8002	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_empty_table	parity	
+get_backhaul_bss_info_non_backhaul_bss	8034	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_ignores_non_backhaul_bss	parity	
+get_backhaul_bss_info_radio_missing	8069	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_needs_its_radio	parity	
+get_backhaul_bss_info_radio_disabled	8108	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_needs_an_enabled_radio	parity	
+get_backhaul_bss_info_bss_disabled	8151	node	PORT	get_backhaul_bss_info	rust:model::tests::bss_radio::backhaul_bss_info_needs_an_enabled_bss	parity	
+get_bss_valid_existing	8192	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_radio_needs_the_bss_and_the_radio_mac	parity	
+get_bss_invalid_bss_mac	8232	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_radio_wrong_bss_mac	parity	
+get_bss_invalid_radio_mac	8268	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_radio_wrong_radio_mac	parity	
+get_bss_1_no_bss_configured	8303	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_radio_empty_table	parity	
+get_bss_valid_index_zero	8336	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_index_zero_and_last	parity	
+get_bss_valid_last_index	8373	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_index_zero_and_last	parity	
+get_bss_index_out_of_configured_range	8407	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_index_beyond_count_is_none	intentional-difference:index-bounds	upstream returns a stale or zeroed slot below 24
+get_bss_no_bss_configured	8438	node	PORT	get_bss	rust:model::tests::bss_radio::bss_by_index_beyond_count_is_none	intentional-difference:index-bounds	upstream returns a zeroed slot below 24
+get_bss_multiple_entries_integrity	8470	node	PORT	get_bss	rust:model::tests::bss_radio::bss_list_keeps_insertion_order_and_content	parity	
+get_bss_info_with_mac_valid_mac	8839	node	PORT	get_bss_info_with_mac	rust:model::tests::bss_radio::bss_info_with_mac_valid	parity	
+get_bss_info_with_mac_invalid_mac	8882	node	PORT	get_bss_info_with_mac	rust:model::tests::bss_radio::bss_info_with_mac_unknown_mac	parity	
+get_bss_info_with_mac_no_bss_configured	8925	node	PORT	get_bss_info_with_mac	rust:model::tests::bss_radio::bss_info_with_mac_empty_table	parity	
+get_associated_bsta_bss_info_prefers_associated_bss	9094	node	PORT	get_associated_bsta_bss_info	rust:model::tests::bss_radio::associated_bsta_prefers_a_bss_with_a_non_zero_bssid	parity	
+get_associated_bsta_bss_info_falls_back_when_all_bssids_are_zero	9127	node	PORT	get_associated_bsta_bss_info	rust:model::tests::bss_radio::associated_bsta_falls_back_when_all_bssids_are_zero	parity	
+get_bsta_bss_info_valid_backhaul_sta_bss	9182	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_finds_backhaul_sta	parity	
+get_bsta_bss_info_no_bss_configured	9231	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_empty_table	parity	
+get_bsta_bss_info_not_backhaul	9261	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_not_backhaul	parity	
+get_bsta_bss_info_not_sta_mode	9294	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_not_sta_mode	parity	
+get_bsta_bss_info_radio_not_found	9332	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_radio_not_found	parity	
+get_bsta_bss_info_radio_disabled	9367	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_radio_disabled	parity	
+get_bsta_bss_info_bss_disabled	9405	node	PORT	get_bsta_bss_info	rust:model::tests::bss_radio::bsta_bss_info_bss_disabled	parity	
+get_first_sta_found	10847	node	PORT	get_first_sta	rust:model::tests::sta::first_sta_found	parity	
+get_first_sta_empty_map	10891	node	PORT	get_first_sta	rust:model::tests::sta::first_sta_empty_map	parity	
+get_first_sta_mac_not_found	10927	node	PORT	get_first_sta	rust:model::tests::sta::first_sta_mac_not_found	parity	
+get_first_sta_present_only_in_assoc_map	10968	node	PORT	get_first_sta	rust:model::tests::sta::first_sta_looks_only_at_the_consolidated_map	parity	
+get_first_sta_info_consolidated_positive	11008	node	PORT	get_first_sta_info	rust:model::tests::sta::first_sta_info_per_target	parity	
+get_first_sta_info_assoc_positive	11056	node	PORT	get_first_sta_info	rust:model::tests::sta::first_sta_info_per_target	parity	
+get_first_sta_info_disassoc_positive	11100	node	PORT	get_first_sta_info	rust:model::tests::sta::first_sta_info_per_target	parity	
+get_first_sta_info_empty_map	11143	node	PORT	get_first_sta_info	rust:model::tests::sta::first_sta_info_empty_map	parity	
+get_first_sta_info_wrong_target	11177	node	PORT	get_first_sta_info	skip:stale API: em_target_sta_map_t is the closed enum StaMapTarget, so an unknown target value cannot be expressed (upstream falls back to the consolidated map, cpp:3011-3017)	parity	
+get_first_sta_info_null_dm	11425	node	PORT	get_first_sta_info	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+get_network_ssid_info_by_haul_type_positive	12656	node	PORT	get_network_ssid_info_by_haul_type	rust:model::tests::network::ssid_by_haul_type_finds_the_first_row_that_carries_it	parity	
+get_next_sta_ValidNextSta	12769	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_valid_next	parity	
+get_next_sta_MultipleMatchingMacs	12814	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_skips_other_stations_and_matches_the_mac	parity	
+get_next_sta_NullPsta	12862	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_for_a_previous_key_that_is_not_stored_finds_nothing	parity	a null previous-row pointer matches no row, so upstream returns NULL (cpp:3129-3146); the port: a key that is not stored finds nothing
+get_next_sta_LastSta	12902	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_last_sta	parity	
+get_next_sta_MacNotFound	12942	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_mac_not_found	parity	
+get_next_sta_EmptyStaMap	12985	node	PORT	get_next_sta	rust:model::tests::sta::next_sta_empty_sta_map	parity	
+InfoNotFound	13121	node	PORT	(unmatched)	rust:model::tests::sta::next_sta_info_for_a_key_that_is_not_stored	parity	hand verdict PORT (plan.md)
+LastStaInfo	13159	node	PORT	(unmatched)	rust:model::tests::sta::next_sta_info_last_element	parity	hand verdict PORT (plan.md)
+NullInfoPointer	13197	node	PORT	(unmatched)	rust:model::tests::sta::next_sta_info_for_a_key_that_is_not_stored	parity	hand verdict PORT (plan.md); a null info pointer is not in the map, so upstream returns NULL (cpp:3050-3052); the port: a key that is not stored finds nothing
+EmptyMap	13231	node	PORT	(unmatched)	rust:model::tests::sta::next_sta_info_empty_map	parity	hand verdict PORT (plan.md)
+ValidNextStaInfo	13396	node	PORT	(unmatched)	rust:model::tests::sta::next_sta_info_valid_next	parity	hand verdict PORT (plan.md)
+get_next_sta_info_NullInput	13446	node	PORT	get_next_sta_info	rust:model::tests::sta::next_sta_info_for_a_key_that_is_not_stored	parity	a null info pointer is not in the map, so upstream returns NULL (cpp:3050-3052); the port: a key that is not stored finds nothing
+get_next_sta_info_LastElement	13484	node	PORT	get_next_sta_info	rust:model::tests::sta::next_sta_info_last_element	parity	
+get_next_sta_info_EmptyMap	13526	node	PORT	get_next_sta_info	rust:model::tests::sta::next_sta_info_empty_map	parity	
+get_num_bss_for_associated_sta_multiple_matches	14004	node	PORT	get_num_bss_for_associated_sta	rust:model::tests::sta::num_bss_for_associated_sta_counts_the_rows_of_the_station	parity	
+get_num_bss_for_associated_sta_no_match	14045	node	PORT	get_num_bss_for_associated_sta	rust:model::tests::sta::num_bss_for_associated_sta_counts_the_rows_of_the_station	parity	
+get_num_bss_for_associated_sta_empty_map	14085	node	PORT	get_num_bss_for_associated_sta	rust:model::tests::sta::num_bss_for_associated_sta_counts_the_rows_of_the_station	parity	
+get_num_bss_for_associated_sta_nullptr_crash	14118	node	PORT	get_num_bss_for_associated_sta	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+get_num_scan_results_default	14884	node	PORT	(unmatched)	rust:model::tests::scan::the_default_node_has_no_scan_results	parity	hand verdict PORT (plan.md)
+get_num_scan_results_empty_map	14917	node	PORT	(unmatched)	rust:model::tests::scan::the_default_node_has_no_scan_results	parity	hand verdict PORT (plan.md)
+get_num_scan_results_null_map_crash	14952	node	PORT	(unmatched)	skip:UB/null-deref: needs hash_map_count(NULL); hand verdict SKIP (plan.md), no Rust analogue	parity	hand verdict SKIP (plan.md)
+get_num_scan_results_single_entry	14985	node	PORT	(unmatched)	rust:model::tests::scan::get_num_scan_results_counts_one_entry	parity	hand verdict PORT (plan.md)
+get_num_scan_results_multiple_entries	15027	node	PORT	(unmatched)	rust:model::tests::scan::get_num_scan_results_counts_multiple_entries	parity	hand verdict PORT (plan.md)
+get_opclass_info_for_bss_match_bssid_only	15352	node	PORT	get_opclass_info_for_bss	rust:model::tests::op_class::op_class_info_for_bss_matches_the_radio_mac_only	parity	
+get_opclass_info_for_bss_match_bssid_and_opclass	15397	node	PORT	get_opclass_info_for_bss	rust:model::tests::op_class::op_class_info_for_bss_with_an_op_class_number_needs_both	parity	
+get_opclass_info_for_bss_bssid_not_found	15442	node	PORT	get_opclass_info_for_bss	rust:model::tests::op_class::op_class_info_for_bss_matches_the_radio_mac_only	parity	
+get_opclass_info_for_bss_opclass_mismatch	15479	node	PORT	get_opclass_info_for_bss	rust:model::tests::op_class::op_class_info_for_bss_with_an_op_class_number_needs_both	parity	
+get_opclass_info_for_bss_no_opclasses	15513	node	PORT	get_opclass_info_for_bss	rust:model::tests::op_class::op_class_info_for_bss_with_no_op_classes_is_none	parity	
+get_prioritized_interface_valid_eth	15720	node	PORT	get_prioritized_interface	rust:model::tests::creation::get_prioritized_interface_picks_the_first_ethernet_name	parity	
+get_prioritized_interface_valid_wlan	15757	node	PORT	get_prioritized_interface	rust:model::tests::creation::get_prioritized_interface_picks_the_first_wlan_name_for_a_wifi_preference	parity	
+get_prioritized_interface_no_match	15796	node	PORT	get_prioritized_interface	rust:model::tests::creation::get_prioritized_interface_without_a_match_is_none	parity	
+get_radio_valid_index	15832	node	PORT	get_radio	rust:model::tests::bss_radio::radio_by_index_valid_and_beyond_the_count	parity	
+get_radio_invalid_index	15867	node	PORT	get_radio	rust:model::tests::bss_radio::radio_by_index_valid_and_beyond_the_count	intentional-difference:index-bounds	upstream returns a zeroed slot below 3
+get_radio_valid_mac	15902	node	PORT	get_radio	rust:model::tests::bss_radio::radio_by_mac_valid_and_unknown	parity	
+get_radio_invalid_mac	15940	node	PORT	get_radio	rust:model::tests::bss_radio::radio_by_mac_valid_and_unknown	parity	
+get_radio_cap_valid_mac	16010	node	PORT	get_radio_cap	rust:model::tests::bss_radio::radio_cap_by_mac_valid_and_unknown	parity	
+get_radio_cap_invalid_mac	16052	node	PORT	get_radio_cap	rust:model::tests::bss_radio::radio_cap_by_mac_valid_and_unknown	parity	
+get_scan_result_single_entry_valid_index	16425	node	PORT	get_scan_result	rust:model::tests::scan::get_scan_result_single_entry_and_out_of_range	parity	
+get_scan_result_multiple_entries_valid_index	16481	node	PORT	get_scan_result	rust:model::tests::scan::get_scan_result_by_index_follows_key_order	intentional-difference:c3-key-order	upstream indexes by hash order (cpp:3562-3577); the port indexes by key order
+get_scan_result_invalid_index	16534	node	PORT	get_scan_result	rust:model::tests::scan::get_scan_result_single_entry_and_out_of_range	parity	
+get_scan_result_empty_map	16582	node	PORT	get_scan_result	rust:model::tests::scan::get_scan_result_single_entry_and_out_of_range	parity	
+get_sta_info_assoc_positive	16777	node	PORT	get_sta_info	rust:model::tests::sta::sta_info_assoc_positive_and_negative	parity	
+get_sta_info_assoc_negative_wrong_bssid	16825	node	PORT	get_sta_info	rust:model::tests::sta::sta_info_assoc_positive_and_negative	parity	
+get_sta_info_static_positive	16862	node	PORT	get_sta_info	rust:model::tests::sta::sta_info_consolidated_positive_and_negative	parity	
+get_sta_info_static_negative_not_found	16908	node	PORT	get_sta_info	rust:model::tests::sta::sta_info_consolidated_positive_and_negative	parity	
+set_channels_list_AddNewOpClass	17331	node	PORT	set_channels_list	rust:model::tests::op_class::set_channels_list_adds_a_new_op_class	parity	
+set_channels_list_ReplaceExistingOpClass	17378	node	PORT	set_channels_list	rust:model::tests::op_class::set_channels_list_replaces_an_existing_op_class	parity	
+set_channels_list_NullRuidAutoFilledForAnticipated	17428	node	PORT	set_channels_list	rust:model::tests::op_class::set_channels_list_fills_a_zero_ruid_of_an_anticipated_op_class_with_the_device_mac	parity	
+set_channels_list_ZeroInputCount	17473	node	PORT	set_channels_list	rust:model::tests::op_class::set_channels_list_with_no_input_changes_nothing	parity	
+set_channels_list_SameRuidDifferentOpClass	17505	node	PORT	set_channels_list	rust:model::tests::op_class::set_channels_list_same_radio_different_op_class_adds_a_row	parity	
+set_num_network_ssid_typical_valid_positive	18975	node	PORT	set_num_network_ssid	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_network_ssid_min_boundary	19008	node	PORT	set_num_network_ssid	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_ap_mld_zero_value	19349	node	PORT	set_num_ap_mld	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_ap_mld_positive_value	19381	node	PORT	set_num_ap_mld	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_ap_mld_max_unsigned_int	19416	node	PORT	set_num_ap_mld	rust:model::tests::mld::the_ap_mld_table_holds_one_row_per_valid_haul_type_and_is_bounded_at_64	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); an over-range count becomes the capacity bound
+set_num_ap_mld_sets_to_zero	19449	node	PORT	set_num_ap_mld	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_ap_mld_sets_to_positive_value	19486	node	PORT	set_num_ap_mld	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_ap_mld_sets_to_max_unsigned_int	19519	node	PORT	set_num_ap_mld	rust:model::tests::mld::the_ap_mld_table_holds_one_row_per_valid_haul_type_and_is_bounded_at_64	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); an over-range count becomes the capacity bound
+set_num_ap_mld_null_dm	19549	node	PORT	set_num_ap_mld	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+set_num_bss_zero	19580	node	PORT	set_num_bss	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_bss_positive	19613	node	PORT	set_num_bss	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_bss_max_uint	19647	node	PORT	set_num_bss	rust:model::tests::bss_radio::bss_capacity_is_24_and_updating_an_existing_row_still_works	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); an over-range count becomes the capacity bound
+set_num_bss_valid_typical_positive	19680	node	PORT	set_num_bss	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_bss_valid_zero_value	19709	node	PORT	set_num_bss	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_bss_valid_max_boundary_value	19739	node	PORT	set_num_bss	rust:model::tests::bss_radio::bss_capacity_is_24_and_updating_an_existing_row_still_works	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); the boundary is the capacity
+set_num_bss_null_mesh_instance	19768	node	PORT	set_num_bss	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+set_num_op_class_typical_positive	19796	node	PORT	set_num_op_class	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_zero	19832	node	PORT	set_num_op_class	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_capacity_boundary	19844	node	PORT	set_num_op_class	rust:model::tests::op_class::put_op_class_at_capacity_is_an_error_and_changes_nothing	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); upstream refuses a count above 64 (cpp:53-60)
+set_num_op_class_maximum_value	19871	node	PORT	set_num_op_class	rust:model::tests::op_class::put_op_class_at_capacity_is_an_error_and_changes_nothing	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_valid_typical	19907	node	PORT	set_num_op_class	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_valid_zero	19938	node	PORT	set_num_op_class	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_valid_max_unsigned	19967	node	PORT	set_num_op_class	rust:model::tests::op_class::put_op_class_at_capacity_is_an_error_and_changes_nothing	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_op_class_invalid_dm_pointer	19998	node	PORT	set_num_op_class	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+set_num_radios_set_to_0	20026	node	PORT	set_num_radios	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_radios_set_to_positive_value	20057	node	PORT	set_num_radios	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_radios_set_to_UINT_MAX	20086	node	PORT	set_num_radios	rust:model::tests::bss_radio::radio_capacity_is_3_and_updating_an_existing_row_still_works	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); upstream clamps to 3
+set_num_radios_valid_typical	20117	node	PORT	set_num_radios	rust:model::tests::creation::counts_are_the_collection_lengths_and_there_is_no_setter	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6)
+set_num_radios_valid_max_unsigned	20150	node	PORT	set_num_radios	rust:model::tests::bss_radio::radio_capacity_is_3_and_updating_an_existing_row_still_works	intentional-difference:c6-count-rule	upstream writes a bare count (set_num_*); the port has no setter, the count is the collection length (plan C6); upstream clamps to 3
+set_num_radios_invalid_dm_nullptr	20181	node	PORT	set_num_radios	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+has_at_least_one_associated_sta_Positive	21328	node	PORT	has_at_least_one_associated_sta	rust:model::tests::sta::has_at_least_one_associated_sta_positive_negative_and_empty	parity	
+has_at_least_one_associated_sta_Negative	21374	node	PORT	has_at_least_one_associated_sta	rust:model::tests::sta::has_at_least_one_associated_sta_positive_negative_and_empty	parity	
+has_at_least_one_associated_sta_EmptyMap	21418	node	PORT	has_at_least_one_associated_sta	rust:model::tests::sta::has_at_least_one_associated_sta_positive_negative_and_empty	parity	
+put_sta_info_AssocMap_Positive	21646	node	PORT	put_sta_info	rust:model::tests::sta::put_sta_info_into_the_assoc_and_consolidated_maps	parity	
+put_sta_info_ConsolidatedMap_Positive	21692	node	PORT	put_sta_info	rust:model::tests::sta::put_sta_info_into_the_assoc_and_consolidated_maps	parity	
+put_sta_info_DuplicateSTA_Negative	21738	node	PORT	put_sta_info	rust:model::tests::sta::put_sta_info_duplicate_keeps_the_stored_row	parity	
+put_sta_info_NullSTAInfo_Negative	21784	node	PORT	put_sta_info	skip:UB/null-deref: a null pointer or null map argument cannot be expressed in Rust	parity	
+RemoveBss_ValidIndex	21815	node	PORT	(unmatched)	rust:model::tests::bss_radio::remove_bss_by_index_valid_index_shifts_the_later_bss	parity	hand verdict PORT (plan.md); the stale last slot (cpp:3501-3515) is covered by remove_bss_by_index_leaves_no_stale_last_slot, intentional-difference:a4-remove-bss-stale-slot
+RemoveBss_InvalidIndex	21853	node	PORT	(unmatched)	rust:model::tests::bss_radio::remove_bss_by_index_invalid_index	parity	hand verdict PORT (plan.md)
+RemoveBss_LastIndex	21895	node	PORT	(unmatched)	rust:model::tests::bss_radio::remove_bss_by_index_last_index	parity	hand verdict PORT (plan.md)
+RemoveBss_EmptyList	21933	node	PORT	(unmatched)	rust:model::tests::bss_radio::remove_bss_by_index_empty_list	parity	hand verdict PORT (plan.md)
+Updatecac_positive_UpdateRuid	21971	node	PORT	(unmatched)	rust:model::tests::op_class::update_cac_status_id_sets_the_ruid_of_the_types_above_capability_only	parity	hand verdict PORT (plan.md)
+Updatecac_Negative_EmptyOpClass	22018	node	PORT	(unmatched)	rust:model::tests::op_class::update_cac_status_id_with_no_op_classes_does_nothing	parity	hand verdict PORT (plan.md)
+Updatecac_Edge_NoTypeUpdate	22055	node	PORT	(unmatched)	rust:model::tests::op_class::update_cac_status_id_with_only_the_early_types_changes_nothing	parity	hand verdict PORT (plan.md)
+UpdateApMldInfo_positive_CreateNewMld	22356	node	PORT	(unmatched)	rust:model::tests::mld::update_ap_mld_info_creates_a_new_mld	parity	hand verdict PORT (plan.md)
+UpdateApMldInfo_positive_UpdateExistingMld	22420	node	PORT	(unmatched)	rust:model::tests::mld::update_ap_mld_info_updates_the_mld_of_the_same_haul_type	parity	hand verdict PORT (plan.md)
+UpdateApMldInfo_negative_MaxMldLimitReached	22479	node	PORT	(unmatched)	rust:model::tests::mld::the_ap_mld_table_holds_one_row_per_valid_haul_type_and_is_bounded_at_64	intentional-difference:c6-capacity	hand verdict PORT (plan.md); upstream fills 64 entries by hand; AP MLDs are keyed by haul type and only 5 are valid, the table type is bounded at 64
+UpdateScanResults_positive_CreateNewScanResult	22636	node	PORT	(unmatched)	rust:model::tests::scan::update_scan_results_creates_a_new_result	parity	hand verdict PORT (plan.md)
+UpdateScanResults_positive_UpdateExistingScanResult	22675	node	PORT	(unmatched)	rust:model::tests::scan::update_scan_results_replaces_an_existing_result	parity	hand verdict PORT (plan.md)
+UpdateScanResults_negative_NullScanResult	22716	node	PORT	(unmatched)	skip:UB/null-deref: null dereference at cpp:3601; hand verdict SKIP (plan.md)	parity	hand verdict SKIP (plan.md)
+network_ssid_update_without_database_reaches_all_models	196	list	PORT	put_network_ssid	rust:model::tests::list_port::network_ssid_update_without_database_reaches_all_models	intentional-difference:u1-network-stored-once	Upstream `network_ssid_update_without_database_reaches_all_models` (:196): two puts of `Fronthaul@Network1`; every Network1 node sees the new SSID and passphrase, the Network2 nodes see none. The SSID is stored once in the network, so the nodes read the same row (no per-node copy). intentional-difference:u1-network-stored-once
+network_ssid_propagation_requires_exact_ids	232	list	PORT	put_network_ssid	rust:model::tests::list_port::network_ssid_propagation_requires_exact_ids	intentional-difference:u1-network-stored-once	Upstream `network_ssid_propagation_requires_exact_ids` (:232): Network1 and Network10 nodes, `Fronthaul@Network1Extra` seeded on Network1 and `Fronthaul@Network10` on Network10. Two puts of `Fronthaul@Network1` give Network1 two SSIDs (Extra unchanged, the new id updated) and leave Network10 alone. intentional-difference:u1-network-stored-once
+create_data_model_valid_data_model_creation	305	list	PORT	create_data_model	rust:model::tests::list_port::create_data_model_valid_data_model_creation	parity	value assertions
+create_data_model_negative_null_net_id	354	list	SKIP-UB	create_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+create_data_model_negative_null_al_intf	392	list	SKIP-UB	create_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+create_data_model_loop_profile_types	428	list	PORT	create_data_model	rust:model::tests::list_port::create_data_model_loop_profile_types	parity	value assertions
+create_data_model_default_unsuccess_assoc_policy	462	list	PORT	create_data_model	rust:model::tests::list_port::create_data_model_default_unsuccess_assoc_policy	parity	value assertions
+debug_probe_valid_invocation	501	list	SKIP-STALE-API	debug_probe	skip:stale API	parity	debug_probe has no effect and is not ported (dm_easy_mesh_list.cpp:894-906)
+delete_data_model_existent	530	list	PORT-REWRITE	delete_data_model	rust:model::tests::list_port::delete_data_model_existent	parity	smoke test: state assertions added
+delete_data_model_non_existent	572	list	PORT-REWRITE	delete_data_model	rust:model::tests::list_port::delete_data_model_non_existent	parity	not found, expects throw: None, model unchanged
+delete_data_model_null_netid	606	list	SKIP-UB	delete_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+delete_data_model_null_al_mac	640	list	SKIP-UB	delete_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+delete_data_model_empty_netid	669	list	PORT-REWRITE	delete_data_model	rust:model::tests::list_port::delete_data_model_empty_netid	parity	empty key smoke test: state assertions added
+dm_easy_mesh_list_t_defaultConstructor_singleInstance	702	list	PORT-REWRITE	ctor/dtor	rust:model::tests::list_port::dm_easy_mesh_list_t_default_constructor_single_instance	parity	smoke test: state assertions added
+get_bss_key_not_exists	728	list	PORT	get_bss	rust:model::tests::list_port::get_bss_key_not_exists	parity	value assertions
+get_bss_null_key	759	list	SKIP-UB	get_bss	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_bss_empty_key	788	list	PORT-REWRITE	get_bss	rust:model::tests::list_port::get_bss_empty_key	parity	empty key: an empty network id is valid input that finds nothing
+get_data_model_ExistentNetworkID	823	list	PORT	get_data_model	rust:model::tests::list_port::get_data_model_existent_network_id	parity	value assertions
+get_data_model_NonExistentNetworkID	875	list	PORT	get_data_model	rust:model::tests::list_port::get_data_model_non_existent_network_id	parity	value assertions
+get_data_model_NullNetworkID	912	list	SKIP-UB	get_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_data_model_NullALMAC	939	list	SKIP-UB	get_data_model	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_device_valid_existing_device	970	list	PORT	get_device	rust:model::tests::list_port::get_device_valid_existing_device	parity	value assertions
+get_device_valid_non_existing_device	1003	list	PORT	get_device	rust:model::tests::list_port::get_device_valid_non_existing_device	parity	value assertions
+get_device_null_key	1033	list	SKIP-UB	get_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_device_empty_key	1062	list	PORT-REWRITE	get_device	rust:model::tests::list_port::get_device_empty_key	parity	empty key: an empty network id is valid input that finds nothing
+get_device_improper_formatted_key	1091	list	PORT-REWRITE	get_device	rust:model::tests::list_port::get_device_improper_formatted_key	parity	malformed string key: a typed NodeId cannot be malformed; the nearest case is an unknown node
+get_device_extra_whitespace	1123	list	PORT-REWRITE	get_device	rust:model::tests::list_port::get_device_extra_whitespace	parity	malformed string key: whitespace is part of a typed network id
+get_first_bss_returns_NULL_when_empty	1155	list	PORT	get_first_bss	rust:model::tests::list_port::get_first_bss_returns_null_when_empty	parity	value assertions
+get_first_device_returns_valid_pointer	1191	list	PORT	get_first_device	rust:model::tests::list_port::get_first_device_returns_valid_pointer	intentional-difference:c3-key-order	Upstream `get_first_device_returns_valid_pointer` (:1191): upstream's first device in hash order is on Network2 with profile 3; the port's first node in key order is the controller node `put_network` created at the zero MAC of Network1 (profile 3). intentional-difference:c3-key-order
+get_first_dm_valid	1226	list	PORT	get_first_dm	rust:model::tests::list_port::get_first_dm_valid	intentional-difference:c3-key-order	Upstream `get_first_dm_valid` (:1226): the first node has 8 policies; which node it is, is the key order's. intentional-difference:c3-key-order
+get_first_network_returns_NULL_when_no_networks_present	1256	list	PORT	get_first_network	rust:model::tests::list_port::get_first_network_returns_null_when_no_networks_present	intentional-difference:c7-network-lifecycle	Upstream `get_first_network_returns_NULL_when_no_networks_present` (:1256). Upstream's fixture leaves the node networks with an empty id, so the first network is never found; the port's networks carry their ids (plan C7), so the empty mesh is the case with no network. intentional-difference:c7-network-lifecycle
+get_first_network_ssid_returns_null	1285	list	PORT	get_first_network_ssid	rust:model::tests::list_port::get_first_network_ssid_returns_null	parity	value assertions
+get_first_op_class_valid	1315	list	PORT	get_first_op_class	rust:model::tests::list_port::get_first_op_class_valid	parity	value assertions
+get_first_policy_empty_policy_list	1350	list	PORT	get_first_policy	rust:model::tests::list_port::get_first_policy_empty_policy_list	intentional-difference:a5-policy-net-id	Upstream `get_first_policy_empty_policy_list` (:1350): the first policy is a default one of the first node. Upstream asserts the literal `OneWifiMesh` id and `ap_metrics_rep` (hash order); the port seeds the node's network id (plan A5) and iterates in key order, whose first type is `steering_local`. intentional-difference:a5-policy-net-id
+get_first_pre_set_op_class_by_type_NoPreConfiguredOperationClassPresent	1383	list	PORT	get_first_pre_set_op_class_by_type	rust:model::tests::list_port::get_first_pre_set_op_class_by_type_no_pre_configured_operation_class_present	parity	value assertions
+get_first_radio_returns_valid_pointer_when_multiple_radios_exist	1411	list	PORT	get_first_radio	rust:model::tests::list_port::get_first_radio_returns_valid_pointer_when_multiple_radios_exist	parity	value assertions
+get_first_radio_returns_NULL_when_net_id_does_not_match	1439	list	PORT	get_first_radio	rust:model::tests::list_port::get_first_radio_returns_null_when_net_id_does_not_match	parity	value assertions
+get_first_radio_handles_null_mac	1468	list	PORT	get_first_radio	rust:model::tests::list_port::get_first_radio_handles_null_mac	parity	value assertions
+get_first_radio_NULL_netid_returns_NULL	1497	list	SKIP-UB	get_first_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_first_radio_empty_netid_returns_NULL	1533	list	PORT-REWRITE	get_first_radio	rust:model::tests::list_port::get_first_radio_empty_netid_returns_null	parity	empty key: an empty network id is valid input that finds nothing
+get_first_scan_result_ReturnNullWhenNoScanResultsExist	1566	list	PORT	get_first_scan_result	rust:model::tests::list_port::get_first_scan_result_return_null_when_no_scan_results_exist	parity	value assertions
+get_first_sta_empty_network_list	1594	list	PORT	get_first_sta	rust:model::tests::list_port::get_first_sta_empty_network_list	parity	value assertions
+get_network_nonExistentKey	1622	list	PORT	get_network	rust:model::tests::list_port::get_network_non_existent_key	parity	value assertions
+get_network_emptyKey	1650	list	PORT-REWRITE	get_network	rust:model::tests::list_port::get_network_empty_key	intentional-difference:c4-exact-keys	Upstream `get_network_emptyKey` (:1650) asserts a network is found for the empty key, because the prefix match of `strncmp(…, strlen(key) = 0)` matches any network (`dm_easy_mesh_list.cpp:114`, research 7.6). The port matches exactly: the empty id names no stored network. intentional-difference:c4-exact-keys
+get_network_NULLKey	1679	list	SKIP-UB	get_network	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_network_ssid_Negative_nonexistent_key	1707	list	PORT	get_network_ssid	rust:model::tests::list_port::get_network_ssid_negative_nonexistent_key	parity	value assertions
+get_network_ssid_Negative_null_key	1738	list	SKIP-UB	get_network_ssid	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_network_ssid_Negative_empty_string_key	1765	list	PORT-REWRITE	get_network_ssid	rust:model::tests::list_port::get_network_ssid_negative_empty_string_key	parity	empty key: an empty SSID id is valid input that finds nothing
+get_network_ssid_Positive_special_character_key_notexists	1799	list	PORT	get_network_ssid	rust:model::tests::list_port::get_network_ssid_positive_special_character_key_notexists	parity	value assertions
+get_next_bss_valid	1831	list	PORT	get_next_bss	rust:model::tests::list_port::get_next_bss_valid	intentional-difference:c4-keys-from-records	Upstream `get_next_bss_valid` (:1831): two BSSs are put, then the first and the next are read. Upstream's keys carry the ids and its records are zeroed; the port derives the key from the record, so the records carry the ids. intentional-difference:c4-keys-from-records
+get_next_bss_returnNull_when_currentBSSNULL	1872	list	SKIP-UB	get_next_bss	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+GetNextDevice_Positive	1902	list	PORT	get_next_device	rust:model::tests::list_port::get_next_device_positive	parity	value assertions
+get_next_device_EmptyDeviceListWithNULLInput	1935	list	SKIP-UB	get_next_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_dm_Positive	1964	list	PORT	get_next_dm	rust:model::tests::list_port::get_next_dm_positive	parity	value assertions
+get_next_dm_NullptrInput	1996	list	SKIP-UB	get_next_dm	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_network_null_current_network	2022	list	SKIP-UB	get_next_network	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_network_ssid_null_input	2050	list	SKIP-UB	get_next_network_ssid	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_op_class_valid	2078	list	PORT	get_next_op_class	rust:model::tests::list_port::get_next_op_class_valid	parity	value assertions
+get_next_op_class_Retrieve_next_operating_class_from_empty_list_using_NULL_pointer	2108	list	SKIP-UB	get_next_op_class	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_policy_positive	2135	list	PORT	get_next_policy	rust:model::tests::list_port::get_next_policy_positive	parity	value assertions
+get_next_policy_passing_null_current_policy	2167	list	SKIP-UB	get_next_policy	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_pre_set_op_class_by_type_null_op_class_exists	2197	list	SKIP-UB	get_next_pre_set_op_class_by_type	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_pre_set_op_class_by_type_invalid_opclasstype	2225	list	PORT	get_next_pre_set_op_class_by_type	rust:model::tests::list_port::get_next_pre_set_op_class_by_type_invalid_opclasstype	parity	value assertions
+get_next_radio_valid_next_radio_available	2258	list	PORT-REWRITE	get_next_radio	rust:model::tests::list_port::get_next_radio_valid_next_radio_available	intentional-difference:vacuous-upstream-test	Upstream `get_next_radio_valid_next_radio_available` (:2258). Upstream puts zeroed radios, which no node owns, so its assertions never run; the port puts two real radios in `dm1` and reads the second after the first. intentional-difference:vacuous-upstream-test
+get_next_radio_no_next_radio_available	2294	list	PORT	get_next_radio	rust:model::tests::list_port::get_next_radio_no_next_radio_available	parity	value assertions
+get_next_radio_null_net_id_provided	2338	list	PORT-REWRITE	get_next_radio	rust:model::tests::list_port::get_next_radio_null_net_id_provided	intentional-difference:vacuous-upstream-test	Upstream `get_next_radio_null_net_id_provided` (:2338): after the last radio there is no next one (upstream's assertion is inside an `if` that its zeroed radios never reach). intentional-difference:vacuous-upstream-test
+get_next_radio_null_radio_pointer_provided	2376	list	SKIP-UB	get_next_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_radio_null_input	2405	list	SKIP-UB	get_next_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_scan_result_positive	2438	list	PORT	get_next_scan_result	rust:model::tests::list_port::get_next_scan_result_positive	parity	value assertions
+get_next_scan_result_NULL_input	2490	list	SKIP-UB	get_next_scan_result	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_next_sta_NULL_pointer_returns_NULL	2517	list	SKIP-UB	get_next_sta	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_op_class_non_existent_key	2546	list	PORT	get_op_class	rust:model::tests::list_port::get_op_class_non_existent_key	parity	value assertions
+get_op_class_null_key	2578	list	SKIP-UB	get_op_class	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_policy_non_existent_key	2606	list	PORT	get_policy	rust:model::tests::list_port::get_policy_non_existent_key	parity	value assertions
+get_policy_null_key	2636	list	SKIP-UB	get_policy	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_radio_non_existent_radio_key_returns_null	2667	list	PORT	get_radio	rust:model::tests::list_port::get_radio_non_existent_radio_key_returns_null	parity	value assertions
+get_radio_null_radio_key_returns_null	2700	list	SKIP-UB	get_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_scan_result_validKey_returnsCorrespondingScanResult	2730	list	PORT	get_scan_result	rust:model::tests::list_port::get_scan_result_valid_key_returns_corresponding_scan_result	parity	value assertions
+get_scan_result_nonexistentKey_returnsNull	2773	list	PORT	get_scan_result	rust:model::tests::list_port::get_scan_result_nonexistent_key_returns_null	parity	value assertions
+get_scan_result_nullKey_returnsNull	2803	list	SKIP-UB	get_scan_result	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+get_sta_valid_non_existing_sta	2830	list	PORT	get_sta	rust:model::tests::list_port::get_sta_valid_non_existing_sta	parity	value assertions
+get_sta_null_key	2865	list	SKIP-UB	get_sta	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+init_valid_non_null_mgr	2893	list	PORT-REWRITE	init	rust:model::tests::list_port::init_valid_non_null_mgr	parity	smoke test: state assertions added
+init_null_mgr	2923	list	SKIP-UB	init	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_valid_insertion	2952	list	PORT-REWRITE	put_bss	rust:model::tests::list_port::put_bss_valid_insertion	parity	smoke test: state assertions added
+put_bss_null_key	2984	list	SKIP-UB	put_bss	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_empty_key	3012	list	PORT-REWRITE	put_bss	rust:model::tests::list_port::put_bss_empty_key	parity	empty key, expects throw: the port reports NotFound and changes nothing
+put_bss_null_dm_bss	3042	list	SKIP-UB	put_bss	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_bss_special_char_key	3071	list	PORT-REWRITE	put_bss	rust:model::tests::list_port::put_bss_special_char_key	intentional-difference:c4-typed-keys	Upstream `put_bss_special_char_key` (:3071), which expects a throw because the key `mesh@bss#004$%…` breaks upstream's string parsing. A typed key is not parsed: a network id with `@`, `#` and `$` is ordinary text, so the BSS lands in a node of that network, and a BSS of a network without a node is `NotFound`. intentional-difference:c4-typed-keys
+put_device_valid_insertion	3102	list	PORT-REWRITE	put_device	rust:model::tests::list_port::put_device_valid_insertion	parity	smoke test: state assertions added
+put_device_null_key	3133	list	SKIP-UB	put_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_device_null_device	3164	list	SKIP-UB	put_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_valid_network_insertion	3192	list	PORT-REWRITE	put_network	rust:model::tests::list_port::put_network_valid_network_insertion	parity	smoke test: state assertions added
+put_network_null_key	3223	list	SKIP-UB	put_network	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_null_network	3253	list	SKIP-UB	put_network	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_valid_new_ssid_insertion	3281	list	PORT-REWRITE	put_network_ssid	rust:model::tests::list_port::put_network_ssid_valid_new_ssid_insertion	parity	smoke test: state assertions added
+put_network_ssid_negative_null_key	3311	list	SKIP-UB	put_network_ssid	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_negative_null_network_ssid	3339	list	SKIP-UB	put_network_ssid	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_network_ssid_negative_empty_key	3369	list	PORT-REWRITE	put_network_ssid	rust:model::tests::list_port::put_network_ssid_negative_empty_key	parity	empty key, expects throw: the port reports NotFound and changes nothing
+put_op_class_valid_input	3398	list	PORT-REWRITE	put_op_class	rust:model::tests::list_port::put_op_class_valid_input	intentional-difference:c4-global-finds	Upstream `put_op_class_valid_input` (:3398), a smoke test. Upstream's lookup of the node that owns `mac1` finds none and returns 0 without storing (`dm_easy_mesh_list.cpp:1224-1226`); here `dm1` owns the radio `mac1`, and the op class is stored and read back. intentional-difference:c4-global-finds
+put_op_class_null_key	3442	list	SKIP-UB	put_op_class	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_op_class_null_op_class	3480	list	SKIP-UB	put_op_class	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_op_class_empty_key	3509	list	PORT-REWRITE	put_op_class	rust:model::tests::list_port::put_op_class_empty_key	parity	empty key, expects throw: an empty ruid is valid input
+put_policy_valid_policy_insertion	3550	list	PORT-REWRITE	put_policy	rust:model::tests::list_port::put_policy_valid_policy_insertion	parity	smoke test: state assertions added
+put_policy_null_key	3581	list	SKIP-UB	put_policy	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_policy_null_policy	3614	list	SKIP-UB	put_policy	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_policy_empty_key	3644	list	PORT-REWRITE	put_policy	rust:model::tests::list_port::put_policy_empty_key	parity	empty key, expects throw: the port reports NotFound and changes nothing
+put_radio_valid_radio_valid_key	3674	list	PORT-REWRITE	put_radio	rust:model::tests::list_port::put_radio_valid_radio_valid_key	intentional-difference:a6-node-needed	Upstream `put_radio_valid_radio_valid_key` (:3674), a smoke test. Upstream's radio is zeroed, so no node is found and nothing is stored; the port stores a radio of `dm2` and returns the `create_node` arguments of `dm_easy_mesh_list.cpp:470` (plan A6). intentional-difference:a6-node-needed
+put_radio_NULL_key_valid_radio	3709	list	SKIP-UB	put_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_radio_valid_key_NULL_radio	3739	list	SKIP-UB	put_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_radio_empty_key_valid_radio	3770	list	PORT-REWRITE	put_radio	rust:model::tests::list_port::put_radio_empty_key_valid_radio	parity	empty key, expects throw: the port reports NotFound and changes nothing
+put_scan_result_valid_insertion_standard	3801	list	PORT-REWRITE	put_scan_result	rust:model::tests::list_port::put_scan_result_valid_insertion_standard	parity	smoke test: state assertions added
+put_scan_result_valid_insertion_non_zero_index	3834	list	PORT-REWRITE	put_scan_result	rust:model::tests::list_port::put_scan_result_valid_insertion_non_zero_index	parity	smoke test: state assertions added
+put_scan_result_null_key	3868	list	SKIP-UB	put_scan_result	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_scan_result_null_scan_result	3901	list	SKIP-UB	put_scan_result	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_scan_result_empty_key	3935	list	PORT-REWRITE	put_scan_result	rust:model::tests::list_port::put_scan_result_empty_key	parity	empty key, expects throw: the port reports NotFound and changes nothing
+put_sta_validKey_added	3971	list	PORT-REWRITE	put_sta	rust:model::tests::list_port::put_sta_valid_key_added	intentional-difference:vacuous-upstream-test	Upstream `put_sta_validKey_added` (:3971), a smoke test. Upstream puts the radio `mac3` into a local node that is not in the list, so no node owns it and nothing is stored; the port gives `dm1` the radio `mac3` and stores the station there. intentional-difference:vacuous-upstream-test
+put_sta_nullKey	4004	list	SKIP-UB	put_sta	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+put_sta_nullSta	4032	list	SKIP-UB	put_sta	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_bss_valid_key_existing	4062	list	PORT-REWRITE	remove_bss	rust:model::tests::list_port::remove_bss_valid_key_existing	parity	smoke test: state assertions added
+remove_bss_null_key_handles_gracefully	4095	list	SKIP-UB	remove_bss	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_bss_non_existent_key_no_change	4125	list	PORT-REWRITE	remove_bss	rust:model::tests::list_port::remove_bss_non_existent_key_no_change	parity	not found, expects throw: None, model unchanged
+remove_device_existing_valid_key	4158	list	PORT-REWRITE	remove_device	rust:model::tests::list_port::remove_device_existing_valid_key	intentional-difference:u2-removes-implemented	Upstream `remove_device_existing_valid_key` (:4158): upstream's remove uses the 3-part key `net@mac@media`, which never matches the node key, so the device stays (`dm_easy_mesh_list.cpp:226-233`); the port removes it. intentional-difference:u2-removes-implemented
+remove_device_non_existent_key	4194	list	PORT-REWRITE	remove_device	rust:model::tests::list_port::remove_device_non_existent_key	parity	empty key smoke test: state assertions added
+remove_device_null_key	4223	list	SKIP-UB	remove_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_network_existing_valid_key	4252	list	PORT-REWRITE	remove_network	rust:model::tests::list_port::remove_network_existing_valid_key	intentional-difference:u2-removes-implemented	Upstream `remove_network_existing_valid_key` (:4252): upstream's body is empty. The port refuses while the network has nodes and removes it after they are gone (plan U2, C7). intentional-difference:u2-removes-implemented
+remove_network_non_existent_key	4284	list	PORT-REWRITE	remove_network	rust:model::tests::list_port::remove_network_non_existent_key	parity	not found, expects throw: error, model unchanged
+remove_network_null_key	4316	list	SKIP-UB	remove_network	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_network_ssid_valid_existing_key	4347	list	PORT-REWRITE	remove_network_ssid	rust:model::tests::list_port::remove_network_ssid_valid_existing_key	parity	smoke test: state assertions added
+remove_network_ssid_nonexistent_key	4379	list	PORT-REWRITE	remove_network_ssid	rust:model::tests::list_port::remove_network_ssid_nonexistent_key	parity	not found, expects throw: None, model unchanged
+remove_network_ssid_null_key	4409	list	SKIP-UB	remove_network_ssid	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_op_class_valid_key_present	4439	list	PORT-REWRITE	remove_op_class	rust:model::tests::list_port::remove_op_class_valid_key_present	intentional-difference:u2-removes-implemented	Upstream `remove_op_class_valid_key_present` (:4439): upstream's body is empty (`dm_easy_mesh_list.cpp:1172-1175`); the port removes the op class. intentional-difference:u2-removes-implemented
+remove_op_class_valid_key_not_present	4470	list	PORT-REWRITE	remove_op_class	rust:model::tests::list_port::remove_op_class_valid_key_not_present	parity	not found, expects throw: None, model unchanged
+remove_op_class_null_key	4495	list	SKIP-UB	remove_op_class	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_policy_existing_policy_key	4524	list	PORT-REWRITE	remove_policy	rust:model::tests::list_port::remove_policy_existing_policy_key	parity	smoke test: state assertions added
+remove_policy_non_existent_policy_key	4555	list	PORT-REWRITE	remove_policy	rust:model::tests::list_port::remove_policy_non_existent_policy_key	parity	not found, expects throw: None, model unchanged
+remove_policy_null_key	4583	list	SKIP-UB	remove_policy	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_radio_existingRadio_validKey	4611	list	PORT-REWRITE	remove_radio	rust:model::tests::list_port::remove_radio_existing_radio_valid_key	intentional-difference:u2-removes-implemented	Upstream `remove_radio_existingRadio_validKey` (:4611): upstream's body is empty (`dm_easy_mesh_list.cpp:394-397`); the port removes the radio. intentional-difference:u2-removes-implemented
+remove_radio_nonExistentKey	4641	list	PORT-REWRITE	remove_radio	rust:model::tests::list_port::remove_radio_non_existent_key	parity	not found, expects throw: None, model unchanged
+remove_radio_nullPointerKey	4669	list	SKIP-UB	remove_radio	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_scan_result_existing_valid_key	4698	list	PORT-REWRITE	remove_scan_result	rust:model::tests::list_port::remove_scan_result_existing_valid_key	parity	smoke test: state assertions added
+remove_scan_result_non_existent_key	4735	list	PORT-REWRITE	remove_scan_result	rust:model::tests::list_port::remove_scan_result_non_existent_key	parity	smoke test: state assertions added
+remove_scan_result_null_key	4770	list	SKIP-UB	remove_scan_result	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+remove_sta_existing_sta_valid	4802	list	PORT-REWRITE	remove_sta	rust:model::tests::list_port::remove_sta_existing_sta_valid	intentional-difference:u2-removes-implemented	Upstream `remove_sta_existing_sta_valid` (:4802): upstream's body is empty (`dm_easy_mesh_list.cpp:758-761`) and its station was never stored; the port stores the station and removes it. intentional-difference:u2-removes-implemented
+remove_sta_non_existing_sta	4839	list	PORT-REWRITE	remove_sta	rust:model::tests::list_port::remove_sta_non_existing_sta	parity	not found, expects throw: None, model unchanged
+remove_sta_null_key	4871	list	SKIP-UB	remove_sta	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+dm_easy_mesh_list_t_valid_destruction	4901	list	PORT-REWRITE	ctor/dtor	rust:model::tests::list_port::dm_easy_mesh_list_t_valid_destruction	parity	smoke test: state assertions added
+delete_all_data_models_DeleteNonEmptyDataModels	4941	list	PORT-REWRITE	delete_all_data_models	rust:model::tests::list_port::delete_all_data_models_delete_non_empty_data_models	parity	smoke test: state assertions added
+get_next_pre_set_op_class_by_type_positive	4982	list	PORT	get_next_pre_set_op_class_by_type	rust:model::tests::list_port::get_next_pre_set_op_class_by_type_positive	parity	value assertions
+get_bss_returns_valid_bss	5016	list	PORT	get_bss	rust:model::tests::list_port::get_bss_returns_valid_bss	parity	value assertions
+get_next_network_ssid_positive	5061	list	PORT	get_next_network_ssid	rust:model::tests::list_port::get_next_network_ssid_positive	intentional-difference:a4-ssid-identity	Upstream `get_next_network_ssid_positive` (:5061): two SSIDs, the first and the next differ. Upstream stores both rows with the id `Network1` and tells them apart only by the put key, which it compares with the stored id (`dm_easy_mesh_list.cpp:966-972`); the port's identity is the record's own id, so the rows carry distinct ids. intentional-difference:a4-ssid-identity
+update_device_existing_device_updated	5117	list	PORT	update_device	rust:model::tests::list_port::update_device_existing_device_updated	parity	value assertions
+update_device_non_existing_device_should_throw	5170	list	PORT-REWRITE	update_device	rust:model::tests::list_port::update_device_non_existing_device_should_throw	parity	not found, expects throw: error, model unchanged
+update_device_null_key	5200	list	SKIP-UB	update_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)
+update_device_null_device	5231	list	SKIP-UB	update_device	skip:UB/null-deref	parity	null pointer, null key or null argument: not representable in Rust (plan A10)

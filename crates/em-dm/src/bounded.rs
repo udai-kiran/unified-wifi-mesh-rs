@@ -59,6 +59,25 @@ impl<T, const CAP: usize> BoundedVec<T, CAP> {
         Ok(Self(items))
     }
 
+    /// Takes ownership of a fixed-size array; the length is checked at compile time, so it
+    /// cannot fail.
+    #[must_use]
+    pub(crate) fn from_array<const N: usize>(items: [T; N]) -> Self {
+        const { assert!(N <= CAP) };
+        Self(Vec::from(items))
+    }
+
+    /// A copy with the same capacity. It cannot fail: the elements already fit. Crate-private so
+    /// that duplication stays at the named boundaries of the models (0004 R2), see
+    /// `model::node::sta::copy_frame_f1`.
+    #[must_use]
+    pub(crate) fn copy_of(&self) -> Self
+    where
+        T: Copy,
+    {
+        Self(Vec::from(self.0.as_slice()))
+    }
+
     /// Replaces all elements with `items`.
     ///
     /// # Errors
@@ -97,6 +116,32 @@ impl<T, const CAP: usize> BoundedVec<T, CAP> {
         self.0.iter()
     }
 
+    /// The elements, mutably. The length cannot change through the slice.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.0
+    }
+
+    /// Mutable iterator over the elements.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.0.iter_mut()
+    }
+
+    /// Removes and returns the element at `index`, shifting the later elements left; `None` if
+    /// `index` is out of range.
+    pub fn remove(&mut self, index: usize) -> Option<T> {
+        if index < self.0.len() {
+            Some(self.0.remove(index))
+        } else {
+            None
+        }
+    }
+
+    /// Gives up the bound and returns the elements, so they can be moved out one by one.
+    #[must_use]
+    pub fn into_vec(self) -> Vec<T> {
+        self.0
+    }
+
     /// Number of elements.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -127,6 +172,24 @@ impl<'a, T, const CAP: usize> IntoIterator for &'a BoundedVec<T, CAP> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
+    }
+}
+
+impl<'a, T, const CAP: usize> IntoIterator for &'a mut BoundedVec<T, CAP> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
+impl<T, const CAP: usize> IntoIterator for BoundedVec<T, CAP> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -200,5 +263,25 @@ mod tests {
         assert_eq!(list.push(2), Ok(()));
         assert_eq!((&list).into_iter().count(), 1);
         assert_eq!(list.iter().next(), Some(&2));
+    }
+
+    #[test]
+    fn remove_shifts_left_and_frees_a_slot() {
+        let mut list = BoundedVec::<u8, 3>::try_from_vec(vec![1, 2, 3]).unwrap();
+        assert_eq!(list.remove(5), None);
+        assert_eq!(list.remove(0), Some(1));
+        assert_eq!(list.as_slice(), &[2, 3]);
+        assert_eq!(list.push(4), Ok(()));
+    }
+
+    #[test]
+    fn mutable_access_and_by_value_iteration() {
+        let mut list = BoundedVec::<u8, 3>::try_from_vec(vec![1, 2]).unwrap();
+        for item in &mut list {
+            *item += 10;
+        }
+        list.as_mut_slice()[0] = 7;
+        let moved: Vec<u8> = list.into_iter().collect();
+        assert_eq!(moved, vec![7, 12]);
     }
 }

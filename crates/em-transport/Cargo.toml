@@ -1,0 +1,21 @@
+[package]
+name = "em-transport"
+version = "0.1.0"
+description = "AL-SAP client for the unified-wifi-mesh Rust port: talks to an external IEEE 1905 daemon over two UNIX sockets."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+em-types = { path = "../em-types" }
+tokio = { version = "1.54.1", default-features = false, features = ["net", "io-util", "sync", "time", "macros", "rt"] }
+tracing = { version = "0.1.44", default-features = false }
+
+[dev-dependencies]
+em-msg = { path = "../em-msg" }
+tokio = { version = "1.54.1", default-features = false, features = ["net", "io-util", "sync", "time", "macros", "rt", "test-util"] }

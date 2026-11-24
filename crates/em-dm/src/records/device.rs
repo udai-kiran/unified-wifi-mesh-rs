@@ -197,3 +197,89 @@ record! {
         pub sec_cap: Ieee1905SecurityCap = Map::field("sec_cap"),
     }
 }
+
+impl ExtDeviceInfo {
+    /// The zeroed C record (`received` false, empty credentials, codes 0).
+    #[must_use]
+    pub fn zeroed() -> Self {
+        Self {
+            received: false,
+            boot_id: 0,
+            client_id: Secret::default(),
+            client_secret: Secret::default(),
+            product_class: ProductClass(0),
+            device_role: DeviceRole(0),
+        }
+    }
+}
+
+impl DeviceInfo {
+    /// The zeroed C record (`memset(&m_device_info, 0, ...)`, `dm_easy_mesh.cpp:4301`): every
+    /// number 0, every string and list empty.
+    #[must_use]
+    pub fn zeroed() -> Self {
+        Self {
+            id: DeviceId {
+                net_id: Text::default(),
+                dev_mac: MacAddr::ZERO,
+                media: MediaType(0),
+            },
+            intf: crate::records::zeroed_interface(),
+            profile: ProfileType(0),
+            multi_ap_cap: CStrBytes::default(),
+            coll_interval: 0,
+            report_unsuccess_assocs: false,
+            max_reporting_rate: 0,
+            ap_metrics_reporting_interval: 0,
+            manufacturer: CStrBytes::default(),
+            serial_number: CStrBytes::default(),
+            manufacturer_model: CStrBytes::default(),
+            software_ver: CStrBytes::default(),
+            exec_env: CStrBytes::default(),
+            dscp_map: CStrBytes::default(),
+            max_pri_rules: 0,
+            max_vids: 0,
+            country_code: CStrBytes::default(),
+            prioritization_sup: false,
+            report_ind_scans: false,
+            traffic_sep_allowed: false,
+            svc_prio_allowed: false,
+            dfs_enable: false,
+            max_unsuccessful_assoc_report_rate: 0,
+            sta_steer_state: false,
+            coord_cac_allowed: false,
+            ctrl_operation_mode: CStrBytes::default(),
+            backhaul_mac: crate::records::zeroed_interface(),
+            backhaul_down_mac: BoundedVec::new(),
+            backhaul_media_type: Ieee80211Variant(0),
+            backhaul_phyrate: 0,
+            backhaul_alid: crate::records::zeroed_interface(),
+            backhaul_sta: MacAddr::ZERO,
+            traffic_sep_cap: false,
+            easy_conn_cap: false,
+            test_cap: 0,
+            apmld_maxlinks: 0,
+            tidlink_map: 0,
+            assoc_sta_reporting_int: 0,
+            max_nummlds: 0,
+            bstamld_maxlinks: 0,
+            environment: CStrBytes::default(),
+            primary_device_type: CStrBytes::default(),
+            secondary_device_type: CStrBytes::default(),
+            sec_1905: Ieee1905Security {
+                auth_flags: 0,
+                encr_flags: 0,
+                conn_flags: 0,
+                cfg_methods: 0,
+            },
+            is_emplus_agent: 0,
+            uptime: 0,
+            total_mem: 0,
+            free_mem: 0,
+            cached_mem: 0,
+            cpu_load: 0,
+            cpu_temp: 0,
+            extended_info: ExtDeviceInfo::zeroed(),
+        }
+    }
+}

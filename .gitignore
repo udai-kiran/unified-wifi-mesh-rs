@@ -5,6 +5,10 @@
 # Python bytecode (tools/)
 __pycache__/
 
+# Lean build state (lake, and the editor's Lean language server, which runs `lake serve` in
+# crates/*/verify/lean when a Lean file is opened)
+.lake/
+
 # Editors
 .idea/
 .vscode/

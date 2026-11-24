@@ -1,0 +1,17 @@
+[package]
+name = "em-orch"
+version = "0.1.0"
+description = "Synchronous command orchestration for the EasyMesh port."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+em-cmd = { path = "../em-cmd" }
+em-types = { path = "../em-types" }
+tracing = { version = "0.1.44", default-features = false }
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (rev 6). The design choices in D10 were decided by the user, 2026-11-19. Revs 1–3 went through a plan review and two review rounds. Rev 4 was a revised design (user decisions D10.5–6) and had two review rounds of its own. The rev-6 fixes after the final round were checked by the coordinator against the pinned source but **not re-reviewed** (two-round limit; user decision). |
+| Status | **Accepted** (rev 6; rev 7 erratum 2026-11-20, see D6). The design choices in D10 were decided by the user, 2026-11-19. Revs 1–3 went through a plan review and two review rounds. Rev 4 was a revised design (user decisions D10.5–6) and had two review rounds of its own. The rev-6 fixes after the final round were checked by the coordinator against the pinned source but **not re-reviewed** (two-round limit; user decision). |
 | Date | 2026-11-19 |
 | Upstream | `rdkcentral/unified-wifi-mesh` @ `ba4180ba36748629f10c20babc4320dd69c9db4f` |
 | Affects | `em-cmd`, `em-core`, `em-orch`, `em-ctrl`, `em-agent`, `em-transport`, `em-db`, `em-easyconnect`. Notes: 0001 D7, 0003 (deadline ownership), 0004 R2/R3/R4/R6 (R6 amended, D9), 0007 D2 (amended) and D5. Docs: `docs/em_base-coverage.md` (`pending (0002)` rows), `docs/bus-event-inventory.md`. `STATUS.md` rows 9–13 and the `em-core` README. |
@@ -178,7 +178,7 @@ There are 42 subclasses plus the base: 43.
   - `sta_cap_update` is the **controller's** handling of a received Client Capability Report.
     `handle_client_cap_report` (`em_capability.cpp:926-1014`) borrows the frame body from the
     received frame, and `queue_cap_update` (`:907-923`) ships the device, station, BSSID, radio
-    and frame body. `handle_sta_cap_update` (`em_ctrl.cpp:297-340`) stores the body in the
+    and frame body. `handle_sta_cap_update` (`em_ctrl.cpp:297-384`) stores the body in the
     station records. The agent's report generation from its stored frame (0007 D5,
     `em_capability.cpp:542-581`) is a different path.
 - **Easy Connect.**
@@ -232,6 +232,12 @@ There are 42 subclasses plus the base: 43.
 ## Decision
 
 ### D1. One role actor per process; engines are synchronous (user decision)
+
+> **Amended by [0012](0012-s1-discovery.md) D10 and D11 (2026-11-21):** deadlines use `sleep_until` without `DelayQueue`, and in S1 the role effects of an orchestrator pass are applied after the whole pass, not after each candidate.
+
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D4 (2026-11-21):** over AL-SAP there is no
+> send-completion event. The 500 ms delay before EAPOL 1 starts when the frame is written to the data
+> socket.
 
 Each process runs one role actor, in `em-ctrl` or `em-agent`.
 
@@ -331,6 +337,10 @@ fn handle_frame(ctx: &mut EngineCtx<'_>, frame: Frame<'_>);
 
 ### D2. Crates and graph
 
+> **Amended by [0014](0014-init-config-and-al-mac.md) D16 (2026-11-22):** `em-cmd` also carries the local admin protocol used by the new `em-cli` admin client.
+
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** the `OrchRole` hooks return `RoleEffect`s, and `em-orch` owns each node's orchestration state.
+
 | Crate | Contents | Depends on |
 |---|---|---|
 | `em-cmd` | **Orchestrated command types from every source**: one native struct per command (IPC requests, internal submissions, platform- and engine-originated commands); no pointers and no wire aliases (0001 D7 rule 4). `Command` enum, `Origin` (`Ipc` or `Internal`, data only), status codes (upstream `em_cmd_out_status_t`), `OrchOp` (upstream `dm_orch_type_t`), each command's plan as a fixed set of named `PlanVariant`s (the analyze-time overrides, e.g. `dm_easy_mesh_ctrl.cpp:3582-3637`, choose a variant), and each command's candidate rule. No tokio types. | `em-types`, `em-dm` (value records as parameters) |
@@ -347,6 +357,8 @@ em-dm, em-crypto, em-easyconnect; the role crates depend on all of them.
   is not reproduced.
 
 ### D3. Upstream `em_cmd_t` is split three ways
+
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** nodes store no orchestration state or `OpContext`; `em-orch` owns the state, and handlers read the command and state through `CommandView`.
 
 | Upstream | Rust | Owner |
 |---|---|---|
@@ -376,6 +388,11 @@ Appendix A lists all 43 classes with their command variant, plan variants, role 
 kinds.
 
 ### D4. Orchestration semantics
+
+> **Amended by [0010](0010-vertical-slices-and-transport.md) D4 and D8 (2026-11-21):** "M2's send
+> succeeded" (internal fix 3) means the socket write succeeded, and a resend uses a new MID.
+
+> **Amended by [0012](0012-s1-discovery.md) D10 (2026-11-21):** submission is two-phase: `submit` pre-processes the plan, the role applies the node-creation effects, then `admit` builds the candidates.
 
 **Kept**, because peers can observe them:
 - **Plans and stages.** Each command's plans (Appendix A), including the analyze-time variants.
@@ -510,17 +527,42 @@ command's model copy goes to one of:
 | Agent renew (`dm_easy_mesh_agent.cpp:233-245`) | P: controller MAC and radio; R: identity |
 | Agent CSA (`:670-777`), where upstream writes the channel into a copy that is then discarded, so the live model is never updated | Δ: the channel is applied when the action is handled. This fixes the lost update, which is an intentional difference. |
 | Agent STA link metrics (`:780-804`), where the command is built before decode (`:789` before `:790`) | decode first; Δ: the decoded station changes; P: stations and MID |
-| Agent STA-list fan-out (`:111-227`, `:219`) | Δ first: the live associated-STA MLD entries are refreshed from the decoded snapshot before fan-out (`dm_easy_mesh_agent.cpp:139-146`), because the Client Association Event encoder reads them (`em_configuration.cpp:414-429`). P: the **associated** and **disassociated** station lists, kept separate, as `ctrl_notify` reads them (`dm_easy_mesh_agent.cpp:146-219`, `em_configuration.cpp:824-845`); Δ: `sta_aggregate` (submit = false) is applied at submit-time pre-processing from the **full** decoded association and disassociation maps (every station and link, `dm_easy_mesh_agent.cpp:218-219`, `dm_easy_mesh.cpp:3244-3282`), not the per-radio notification lists, as upstream merges at `em_orch_agent.cpp:286-292` |
+| Agent STA-list fan-out (`:111-227`, `:219`) | Δ first: the live associated-STA MLD entries are refreshed from the decoded snapshot before fan-out (`dm_easy_mesh_agent.cpp:139-146`), because the Client Association Event encoder reads them (`em_configuration.cpp:414-429`). P: the **associated** and **disassociated** station lists, kept separate, as `ctrl_notify` reads them (`dm_easy_mesh_agent.cpp:146-219`, `em_configuration.cpp:824-845`); Δ: `sta_aggregate` (submit = false) is applied at submit-time pre-processing from the **full** decoded association and disassociation maps (every station and link, `dm_easy_mesh_agent.cpp:218-219`, `dm_easy_mesh.cpp:3244-3282`), not the per-radio notification lists, as upstream merges at `em_orch_agent.cpp:286-292` (`merge_assoc_sta_updates`, `dm_easy_mesh.cpp:4173-4213`) |
 | Agent scan / unassociated results (`:989, 1048`) | Δ applied on decode, as upstream's live write does; R in the stage |
 | Agent `arr_index` and candidates (`em_orch_agent.cpp:287, 306, 320-375`) | Each command keeps upstream's candidate rule (Appendix A): `dev_init` takes every radio node; `sta_link_metrics` takes radio nodes with an associated station; `sta_list` takes the named radio if its lists are non-empty; `cfg_renew` takes radio slot 0 only (`:347-353`). The `arr_index` merge target is P per command. |
 | Agent `al_insert` / `em_insert` (`em_orch_agent.cpp:258, 274-276`) | Δ in the command, applied at submit-time pre-processing (as upstream does), together with the node-creation effect |
 | Controller identity-only constructions (`dm_easy_mesh_ctrl.cpp:3302, 3413, 3891, 4943, 4958`) | P: target identity plus the request parameters. *Inference*: the converting constructor leaves the counts uninitialised; the port does not reproduce it. |
 | Controller removal (`:4881`) | P: the peer's key; the node is removed by key with D4's cancel and detach |
-| Controller policy (`em_orch_ctrl.cpp:272-286, 476-479`) | P: the changed-policy set. Its `db_cfg` stage writes the database at submit, as upstream (`em_cmd_set_policy.cpp:47-52`). At finish the policy Δ is applied to the model and `update_tables` runs synchronously. The return is logged, which upstream does not do; there is no retry. |
+| Controller policy (`em_orch_ctrl.cpp:272-286, 476-479`) | P: the changed-policy set. Its `db_cfg` stage writes the database at submit, as upstream (`em_cmd_set_policy.cpp:47-52`). At finish the policy Δ is applied to the model (`set_policy`, `em_orch_ctrl.cpp:282`) and `update_tables` runs synchronously. The return is logged, which upstream does not do; there is no retry. The `policy_cfg` stage writes the same policies into the device's model too (`em_orch_ctrl.cpp:555-566`). |
 | Controller DPP (`dm_dpp.cpp:42-53`) | P: decoded DPP parameters; Easy Connect state per D1 |
 | Next-stage fan-out | the chain's stages are `(ChainId, stage)` entries that share the one `Command` in the `ChainRecord` (D3); reads are R; no model copies |
 | Client Capability Report read (`em_capability.cpp:48-56, 542-581`) | The capability handler runs in the role actor with `&Model`. It borrows the station's stored frame and encodes the TLV, emitting at most the prefix that fits `EM_CLIENT_CAP_MAX_FRAME_BODY`, without modifying the stored frame. Only the serialized TLV leaves, to the frame sender. (The controller's inbound handling is D5's `sta_cap_update` delta.) Upstream copies every station (`dm_easy_mesh.cpp:4229-4239`), and the port does not. Tests per 0007 D5. |
 | **Message ids** | The counter (`get_next_msg_id`) is owned by the role actor. Echoed MIDs are P. Tracked MIDs are O. |
+
+**Erratum (rev 7, 2026-11-20, from em-dm Step 3; not reviewed).** These points do not change any
+decision above.
+- **Where `ModelDelta` lives.** It is defined in `em-dm` (0007 A2). Every Δ above writes only
+  native `em-dm` records once its consumer has decoded the input.
+- **Apply consumes the delta.** Apply takes the delta by value. A Δ carried in a `Command`
+  (`al_insert`/`em_insert`, `sta_aggregate`) sits in an `Option` slot or beside the Command. It is
+  moved out at pre-processing, so the Command stays otherwise immutable (D3).
+- **`em_insert` is split per radio** by its producer (`em_orch_agent.cpp:263-280`).
+- **Station records on `sta_list` are left to the em-cmd note.** That note decides which side owns
+  them: the `StaAggregate` maps or the `ctrl_notify` P lists. The disassociated stations must
+  outlive the aggregate's removal of them.
+- **`sta_cap_update`.** It writes two rows per link: the pending staging row and the frame of the
+  consolidated row, which is then decoded (`dm_easy_mesh.cpp:4104-4124`). The handler resolves
+  the MLD links and passes their keys. `apply` returns the number of links updated, so the handler
+  can reproduce the conditional dirty mark (`em_ctrl.cpp:359-361, 383`).
+- **No Δ for `set_ssid`, `set_radio` and `dev_test`; `reset` is a mesh operation:**
+  - `set_ssid`'s live write is the controller's SSID put on the database path. The chain is
+    `update_tables` → `dm_network_ssid_list_t::set_config` → `put_network_ssid`
+    (`dm_easy_mesh_ctrl.cpp:6145-6150`, `dm_network_ssid_list.cpp:114-123, 181`), and the put is
+    a `MeshModel` operation.
+  - `set_radio` has no live write.
+  - The controller's `al_insert` for `dev_test` commits with `em_commit_target_em`, which
+    `commit_config` has no branch for (`dm_easy_mesh.cpp:207-321`), so it is a no-op.
+  - `reset`'s `dm_delete_all` is the mesh operation `delete_all_data_models`.
 
 ### D7. Commands and replies (user decision)
 
@@ -586,6 +628,9 @@ The user accepted the recommendations:
 6. **Database I/O synchronous in the role actor** (rev 4), at upstream's points (D1).
 
 ### D11. Porting order
+
+> **Replaced by [0010](0010-vertical-slices-and-transport.md) D1 (2026-11-21):** the port proceeds in
+> vertical slices S0 to S8. The dependency graph of D2 is unchanged.
 
 Each crate gets its own scope note:
 1. `em-cmd`: command types, plan variants, candidate rules, status.
@@ -686,6 +731,7 @@ Each command's own port re-reads its upstream class and checks this row.
 ## Revision history
 
 - **rev 1:** decision draft with options.
+- **rev 7 (erratum, 2026-11-20, em-dm Step 3; not reviewed):** cite fixes (sta_cap_update handler end `:384`; `merge_assoc_sta_updates`; the second policy write at `em_orch_ctrl.cpp:555-566`) and the D6 erratum paragraph.
 - **rev 6 (fixes after review round 2 of the rev-4 design; not re-reviewed: two-round limit,
   user decision):**
   - idle timers restart on input, for exact upstream timing;

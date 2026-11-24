@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""Compare two independent builds of a TLV body fixture and write or check the fixture.
+
+For each group NAME, DIR holds NAME.a.tsv and NAME.b.tsv (two builders' work), and the tool
+writes NAME.tsv. Without --group, every group with a file in DIR (NAME.a.tsv, NAME.b.tsv or
+NAME.tsv) is processed, so a lone NAME.tsv or a lone build is reported as a missing build. With
+--group, only the named groups are processed. Blank lines and lines starting with `#` are skipped.
+The first other line must be the column line `tlv<TAB>case<TAB>fields<TAB>hex`. Each data row has:
+
+- tlv: `0x` and two lowercase hex digits, such as 0x8f.
+- case: not empty, with no leading or trailing whitespace.
+- fields: `name=value;...`, the case spec written once by builder A and copied to builder B. A name
+  is an identifier (`[A-Za-z_][A-Za-z0-9_]*`) and is unique within the row. A value may be empty and
+  may contain `=`. Values cannot contain `;` or a tab.
+- hex: lowercase byte pairs, or `-` for an empty value. A value is at most 65535 bytes.
+
+Build files are UTF-8 and lines are separated by LF. CRLF is also accepted: one CR immediately
+before each LF is removed. The final line need not end in LF, but a bare CR is rejected. Apart
+from tabs and line endings, Unicode control characters (category Cc) and U+2028/U+2029 are rejected
+on every line, including comments, with the character's code point and line number reported.
+
+The two builds must agree on the (tlv, case) rows, their order, the fields and the hex. Nothing is
+written unless every selected group is valid. Each fixture starts with a provenance header that names
+both builds with their sha256, and each fixture file is replaced atomically. --check rebuilds every
+group in memory and compares the committed fixture byte for byte. It writes nothing. When DIR has no
+group files, --check succeeds; without --check that is an error.
+
+Group names cannot be empty, end in .a or .b, or contain path separators, control characters,
+or Unicode line/paragraph separators.
+
+Exit 0: success. Exit 1: a group has a missing build file, a malformed build, builds that disagree,
+or, under --check, a missing or stale fixture. Exit 2: usage or I/O error, including no group files
+without --check, and an explicitly selected group with no files at all.
+"""
+# SPDX-License-Identifier: Apache-2.0
+
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+import unicodedata
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DIR = ROOT / "crates/em-msg/tests/data/bodies"
+COLUMN_LINE = "tlv\tcase\tfields\thex"
+TLV_PATTERN = re.compile(r"0x[0-9a-f]{2}")
+HEX_PATTERN = re.compile(r"-|(?:[0-9a-f]{2})+")
+FIELD_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+MAX_VALUE_BYTES = 65535
+
+
+class FixtureError(Exception):
+    """The builds are malformed or disagree (exit 1)."""
+
+
+class UsageError(Exception):
+    """Bad invocation or unreadable files (exit 2)."""
+
+
+def parse_build(name, data):
+    """Return the rows of one build as (tlv, case, fields, hex) tuples, in file order."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FixtureError(f"{name}: not UTF-8") from exc
+    physical_lines = text.split("\n")
+    lines = []
+    for line_number, line in enumerate(physical_lines, start=1):
+        if line_number < len(physical_lines) and line.endswith("\r"):
+            line = line[:-1]
+        for character in line:
+            if character != "\t" and unicodedata.category(character) in ("Cc", "Zl", "Zp"):
+                character_name = unicodedata.name(character, "CONTROL")
+                raise FixtureError(f"{name}: line {line_number}: invalid character "
+                                   f"U+{ord(character):04X} ({character_name})")
+        if line and not line.startswith("#"):
+            lines.append(line)
+    if not lines or lines[0] != COLUMN_LINE:
+        raise FixtureError(f"{name}: first data line must be {COLUMN_LINE!r}")
+    rows = []
+    seen = set()
+    for line in lines[1:]:
+        columns = line.split("\t")
+        if len(columns) != 4:
+            raise FixtureError(f"{name}: expected 4 columns, found {len(columns)}: {line!r}")
+        tlv, case, fields, hex_text = columns
+        if not TLV_PATTERN.fullmatch(tlv):
+            raise FixtureError(f"{name}: bad tlv code {tlv!r}")
+        if not case or case != case.strip():
+            raise FixtureError(f"{name}: blank case or surrounding whitespace in {case!r}")
+        field_names = set()
+        for item in fields.split(";"):
+            field_name, separator, _ = item.partition("=")
+            if not separator or not FIELD_NAME_PATTERN.fullmatch(field_name) or field_name in field_names:
+                raise FixtureError(f"{name}: {tlv}/{case}: invalid or duplicate field in {fields!r}")
+            field_names.add(field_name)
+        if not HEX_PATTERN.fullmatch(hex_text):
+            raise FixtureError(f"{name}: {tlv}/{case}: bad hex {hex_text!r}")
+        if hex_text != "-" and len(hex_text) > MAX_VALUE_BYTES * 2:
+            raise FixtureError(f"{name}: {tlv}/{case}: value exceeds {MAX_VALUE_BYTES} bytes")
+        if (tlv, case) in seen:
+            raise FixtureError(f"{name}: duplicate row {tlv}/{case}")
+        seen.add((tlv, case))
+        rows.append((tlv, case, fields, hex_text))
+    if not rows:
+        raise FixtureError(f"{name}: no rows")
+    return rows
+
+
+def compare_builds(rows_a, rows_b):
+    """List every difference between the two builds. An empty list means they agree."""
+    keys_a = [row[:2] for row in rows_a]
+    keys_b = [row[:2] for row in rows_b]
+    problems = []
+    for tlv, case in keys_a:
+        if (tlv, case) not in keys_b:
+            problems.append(f"{tlv}/{case}: only in build A")
+    for tlv, case in keys_b:
+        if (tlv, case) not in keys_a:
+            problems.append(f"{tlv}/{case}: only in build B")
+    if problems:
+        return problems
+    if keys_a != keys_b:
+        return ["the two builds list the same rows in a different order"]
+    for row_a, row_b in zip(rows_a, rows_b):
+        tlv, case, fields_a, hex_a = row_a
+        _, _, fields_b, hex_b = row_b
+        if fields_a != fields_b:
+            problems.append(f"{tlv}/{case}: fields differ\n  A: {fields_a}\n  B: {fields_b}")
+        if hex_a != hex_b:
+            problems.append(f"{tlv}/{case}: hex differs\n  A: {hex_a}\n  B: {hex_b}")
+    return problems
+
+
+def build_fixture(group, data_a, data_b):
+    """Validate both builds and return the fixture bytes."""
+    name_a, name_b = f"{group}.a.tsv", f"{group}.b.tsv"
+    rows_a = parse_build(name_a, data_a)
+    rows_b = parse_build(name_b, data_b)
+    problems = compare_builds(rows_a, rows_b)
+    if problems:
+        raise FixtureError(f"group {group}: builds disagree\n" + "\n".join(problems))
+    header = ["# Generated by tools/check-body-fixtures; do not edit.\n",
+              "# The two builds agree on every row (case, fields and bytes); how each was made is recorded in its own header.\n",
+              f"# Build A: {name_a} sha256 {hashlib.sha256(data_a).hexdigest()}\n",
+              f"# Build B: {name_b} sha256 {hashlib.sha256(data_b).hexdigest()}\n",
+              f"# Command: python3 tools/check-body-fixtures --group {group}\n",
+              f"# Check: python3 tools/check-body-fixtures --check --group {group}\n",
+              COLUMN_LINE + "\n"]
+    body = ["\t".join(row) + "\n" for row in rows_a]
+    return "".join(header + body).encode("utf-8")
+
+
+def read_file(path):
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise UsageError(f"cannot read {path}: {exc}") from exc
+
+
+def find_groups(directory):
+    names = set()
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                for suffix in (".a.tsv", ".b.tsv", ".tsv"):
+                    if entry.name.endswith(suffix):
+                        names.add(entry.name[:-len(suffix)])
+                        break
+    except FileNotFoundError:
+        pass
+    return sorted(names)
+
+
+def validate_group(group):
+    if (not group or group.endswith((".a", ".b")) or "/" in group or "\\" in group
+            or any(unicodedata.category(char) in ("Cc", "Zl", "Zp") for char in group)):
+        raise UsageError(f"invalid group name {group!r}")
+
+
+def file_exists(path):
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def write_atomically(path, data):
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+        os.chmod(name, 0o644)
+        os.replace(name, path)
+    except BaseException:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def run(directory, groups, check):
+    """Build every group in memory first, then check or write them. Returns the exit code."""
+    selected = groups if groups else find_groups(directory)
+    for group in selected:
+        validate_group(group)
+    if not selected:
+        if check:
+            print("ok: no fixture groups")
+            return 0
+        raise UsageError(f"no fixture groups in {directory}")
+
+    missing_groups = []
+    for group in selected:
+        missing = [f"{group}.{build}.tsv" for build in ("a", "b")
+                   if not file_exists(directory / f"{group}.{build}.tsv")]
+        if missing:
+            if groups and len(missing) == 2 and not file_exists(directory / f"{group}.tsv"):
+                raise UsageError(f"group {group}: no fixture files in {directory}")
+            missing_groups.append(f"group {group}: missing build files: {', '.join(missing)}")
+    if missing_groups:
+        for failure in missing_groups:
+            print(f"error: {failure}", file=sys.stderr)
+        return 1
+
+    fixtures = {}
+    failures = []
+    for group in selected:
+        data_a = read_file(directory / f"{group}.a.tsv")
+        data_b = read_file(directory / f"{group}.b.tsv")
+        try:
+            fixtures[group] = build_fixture(group, data_a, data_b)
+        except FixtureError as exc:
+            failures.append(str(exc))
+    if failures:
+        for failure in failures:
+            print(f"error: {failure}", file=sys.stderr)
+        return 1
+    if check:
+        for group, data in fixtures.items():
+            path = directory / f"{group}.tsv"
+            try:
+                current = path.read_bytes()
+            except FileNotFoundError:
+                current = None
+            if current != data:
+                failures.append(f"group {group}: fixture {path} is missing or stale")
+        for failure in failures:
+            print(f"error: {failure}", file=sys.stderr)
+        return 1 if failures else 0
+    for group, data in fixtures.items():
+        write_atomically(directory / f"{group}.tsv", data)
+        print(f"ok: wrote {group}.tsv")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dir", type=Path, default=DEFAULT_DIR,
+                        help="directory with the <group>.a.tsv and <group>.b.tsv builds")
+    parser.add_argument("--group", action="append", default=[],
+                        help="group to process (repeatable); default is every group found")
+    parser.add_argument("--check", action="store_true",
+                        help="compare the committed fixture with a fresh build; write nothing")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return 2 if exc.code else 0
+    try:
+        return run(args.dir, args.group, args.check)
+    except (UsageError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,221 @@
+# cac group, build A (note 0009 D7.1, B06). Builder A, 2026-11-20.
+# Sources: EasyMesh through the usp-spec MCP server (doc easymesh): §3.1.2 Conventions (bit/byte order per [2] = IEEE
+#   1905.1, multi-octet integers big-endian; reserved objects set to zero by the sender, ignored by the recipient),
+#   §17.2.42 Table 64, §17.2.43 Table 65, §17.2.44 Table 66, §17.2.45 Table 67, §17.2.87 Table 109, §17.2.88 Table 110,
+#   §17.2.89 Table 111, §17.2.90 Table 112, §17.2.91 Table 113, §17.2.104 Table 126, §17.2.105 Table 127.
+#   TLV codes from the tables match em-types codes.rs:306-308 (0xad-0xaf), 310 (0xb1), 347-351 (0xd6-0xda) and
+#   362-363 (0xe8, 0xe9).
+#   Upstream (pinned ba4180b, read from an extracted copy): em_channel.cpp:1367-1464 (0xb1 sender: three count+list
+#   sections, htons Minutes/Duration, 3-octet Countdown most significant first at :1449-1451), :1466-1507 (0xaf sender:
+#   one group per local radio, op class/channel/status/pairs copied from one global record; Num_Radio 0 when the data
+#   model has no radios), callers :1559-1574; :944-968 (0xd8) and :1166-1194 (0xd9) senders with no caller;
+#   :1649-1663 (0xe8/0xe9: 8 uninitialised octets, no JSON). No upstream sender for 0xad, 0xae, 0xd6, 0xd7, 0xda.
+# Audit rows (docs/data/tlv-spec-audit.tsv lines): 153-155 (0xad), 156-157 (0xae), 158-159 (0xaf), 160-162 (0xb1),
+#   259-261 (0xd6), 262-264 (0xd7), 265-266 (0xd8), 267-268 (0xd9), 269 (0xda), 297-298 (0xe8), 299-300 (0xe9).
+#   Every port_rule is SPEC (line 160: "-", no difference). Note 0009 D2 (raw reserved values, zero counts), D4, D5
+#   (JSON objects are raw octets), D8; 0008 D4 (0xb1 3-octet countdown). No table in this group says "one or more",
+#   so every zero count here is a spec case.
+# Wire layouts (hex = tlvValue only; multi-octet integers big-endian per §3.1.2):
+#   0xad: Num_Radio(1), Num_Radio x { RUID(6), OpClass(1), Channel(1), octet: CAC Method b7-5, CAC Completion Action
+#         b4-3, Reserved b2-0 }. Method 4-7 and Action 2-3 are reserved values, carried raw (D2). (The table lists
+#         "011" both as Time sliced CAC and in the reserved range "011"-"111"; 3 is read as Time sliced.)
+#   0xae: Num_Radio(1), Num_Radio x { RUID(6), OpClass(1), Channel(1) }.
+#   0xaf: Num_Radio(1), Num_Radio x { RUID(6), OpClass(1), Channel(1), CAC Completion Status(1; 0x06-0xff reserved,
+#         raw), Num_Pair(1), Num_Pair x { OpClass(1), Channel(1) } }. Num_Pair has no cap (audit 158; upstream caps 4).
+#   0xb1: Num_Available(1), n x { OpClassA(1), ChannelA(1), Minutes(2, BE) }, Num_PairNon(1), n x { OpClassN(1),
+#         ChannelN(1), Duration(2, BE) }, Num_PairActive(1), n x { OpClassC(1), ChannelC(1), Countdown(3, BE) }.
+#         All three counts may be 0: minimum value 3 octets (audit 162).
+#   0xd6: Num_OpClass(1), Num_OpClass x { OpClass(1), Num_Chan(1), Num_Chan x Channel(1), Reserved(4) }. Counts may be
+#         0 (Num_Chan 0 = all channels).
+#   0xd7: OpClass(1), Channel(1), Reference BSSID(6), Num_Usage(1), Num_Usage x { Burst Start Time(4, BE), Burst
+#         Length(4, BE), Repetitions(4, BE), Burst Interval(4, BE), RU Bitmask Length(1), RU Bitmask(RU Bitmask Length
+#         octets, raw), Transmitter identifier(6), Power Level(1, signed; 0xff = unknown), Channel Usage Reason(1;
+#         5-254 reserved, raw; 255 = BSS non-usage), Reserved(4) }. Num_Usage may be 0 (9 octets, audit 264).
+#   0xd8: RUID(6), octet: Reserved b7-6, BSS Color b5-0; octet: Reserved b7-5, HESIGA_Spatial_reuse_value15_allowed b4,
+#         SRG Information Valid b3, Non-SRG Offset Valid b2, Reserved b1, PSR Disallowed b0; Non-SRG OBSSPD Max
+#         Offset(1), SRG OBSSPD Min Offset(1), SRG OBSSPD Max Offset(1), SRG BSS Color Bitmap(8, raw), SRG Partial
+#         BSSID Bitmap(8, raw), Reserved(2). Exactly 29 octets. Offsets and bitmaps are always present and carried as
+#         found whatever the valid flags say.
+#   0xd9: RUID(6), octet: Reserved b7, Partial BSS Color b6, BSS Color b5-0; flags octet as 0xd8; the three offsets,
+#         SRG BSS Color Bitmap(8), SRG Partial BSSID Bitmap(8), NeighborBSSColorInUseBitmap(8), Reserved(2). Exactly 37.
+#   0xda: RUID(6), Response_Code(1; 0x02-0xff reserved, raw). Exactly 7.
+#   0xe8 / 0xe9: the whole value is one JSON object, carried as raw octets (D5); no length prefix, not parsed.
+# Field-reading rules (this group):
+#   (1) Items are written in the listed order. Widths: ruid, rN_ruid, ref_bssid, uK_tx_id are 6-octet MACs (12 hex
+#       digits). aK_minutes, nK_duration, tail_reserved: 2 octets BE. cK_countdown: 3 octets BE. uK_start, uK_length,
+#       uK_reps, uK_interval, uK_reserved, oK_reserved: 4 octets BE. uK_power: signed decimal written as one 2's
+#       complement octet (-1 = 0xff, the "unknown" value). Every other integer item is 1 octet. Values are decimal or
+#       0x-hex.
+#   (2) Byte-string items srg_color_bitmap, srg_bssid_bitmap, neighbor_bitmap, uK_ru and json are hex: raw octets,
+#       written exactly as given with NO length octet in front (uK_ru's length is the separate uK_ru_len item).
+#   (3) Count items (radios, rN_pairs, avail, nonocc, active, opclasses, oK_chans, usages) and length items (uK_ru_len)
+#       are written as given; only the entries listed follow (a count or length above the listed data = overstated).
+#       Entry names: 0xad/0xae/0xaf rN_*, 0xaf pairs rN_pK_class/rN_pK_ch; 0xb1 aK_* (available), nK_* (non-occupancy),
+#       cK_* (active CAC); 0xd6 oK_class, oK_chans, oK_chJ, oK_reserved; 0xd7 uK_*.
+#   (4) Reserved octet items (oK_reserved, uK_reserved: 4 octets; tail_reserved: 2 octets) are integers like any other
+#       item, listed explicitly in every complete entry (0 = zero octets) and written at their own position. A row in
+#       which one is not listed has no octets for it (a cut entry, rule 6).
+#   (5) Bit-field octets: each group below is ONE octet, written at the position of the group's first listed item;
+#       values are unshifted; a reserved mask is given in octet position and ORed in (absent = 0):
+#       0xad {rN_method b7-5, rN_action b4-3, rN_reserved b2-0}; 0xd8 {color_reserved b7-6, bss_color b5-0} and
+#       {hesiga15 b4, srg_valid b3, non_srg_valid b2, psr_disallowed b0, flags_reserved b7-5,b1}; 0xd9 {color_reserved
+#       b7, partial_color b6, bss_color b5-0} and the same flags group. A case that sets a reserved mask or reserved
+#       octets: the decoder ignores them; the encoder writes zero (canonical bytes = the *-clear sibling / same fields
+#       with the reserved items 0).
+#   (6) An item given as hex: where it normally takes a MAC or integer is a cut field: exactly those raw octets are
+#       written (hex: alone = nothing written). An item not listed is absent from the bytes.
+#   (7) trailing=hex: raw octets appended after the listed fields.
+# Choices (for the coordinator): (a) every cut field, partial entry or overstated count/length is error=Truncated (as
+#   B01-B05); extra octets after a complete layout are TrailingBytes. (b) Zero Num_Radio in 0xad, 0xae and 0xaf is
+#   kind=spec (no "one or more" in Tables 64-66; same reading as B05). (c) 0xaf success-with-pairs (status 0x00,
+#   Num_Pair 1) and radar-no-pairs (status 0x01, Num_Pair 0) are kind=spec: well-formed bytes, the "shall be set to
+#   zero if radar was not detected" rule is a value rule for the consumer (not the 0xa6 omitted-fields precedent).
+#   (d) 0xd7 ru-len-4-unlisted (RU Bitmask Length 4 with 4 octets) is kind=spec: the length describes the bytes (D2);
+#   conflicting precedent: D3 line 222 rejected unlisted MCS NSS lengths as InvalidLength. (e) 0xd7
+#   interval-without-reps (Repetitions 0, Burst Interval non-zero; "set to zero if Repetitions field is zero") is
+#   kind=spec, a value rule for the consumer. (f) 0xe8/0xe9: the codec does not parse JSON (D5), so non-JSON octets
+#   (upstream's 8 uninitialised octets are of this kind) are kind=spec; the empty value is kind=invalid;error=Truncated
+#   because the table requires one JSON object. (g) 0xd8/0xd9 bitmaps and offsets are carried when the valid flags
+#   are 0 (kind=spec). (h) 0xb1 counts above 255 cannot be written; the encoder's CountTooLarge (0008 D4) has no
+#   fixture row. (i) The 0xad Method value 3 typo is read as Time sliced CAC; the codec carries the raw value anyway.
+tlv	case	fields	hex
+0xad	golden	radios=2;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=1;r0_action=1;r1_ruid=02a0b1c2d3f0;r1_class=128;r1_ch=58;r1_method=3;r1_action=0	0202a0b1c2d3e079642802a0b1c2d3f0803a60
+0xad	zero-radios	radios=0	00
+0xad	continuous-remain	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=52;r0_method=0;r0_action=0	0102a0b1c2d3e0793400
+0xad	mimo-return	radios=1;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=64;r0_method=2;r0_action=1	0102a0b1c2d3f0764048
+0xad	method-reserved-4	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=4;r0_action=0	0102a0b1c2d3e0796480
+0xad	method-reserved-7	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=7;r0_action=1	0102a0b1c2d3e07964e8
+0xad	action-reserved-2	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=1;r0_action=2	0102a0b1c2d3e0796430
+0xad	action-reserved-3	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=0;r0_action=3	0102a0b1c2d3e0796418
+0xad	three-radios	radios=3;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=0;r0_action=0;r1_ruid=02a0b1c2d3f0;r1_class=122;r1_ch=106;r1_method=1;r1_action=1;r2_ruid=02a0b1c2d3c1;r2_class=129;r2_ch=50;r2_method=3;r2_action=0	0302a0b1c2d3e079640002a0b1c2d3f07a6a2802a0b1c2d3c1813260
+0xad	reserved-bits-set	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=3;r0_action=1;r0_reserved=0x07	0102a0b1c2d3e079646f
+0xad	reserved-bits-clear	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=3;r0_action=1;r0_reserved=0x00	0102a0b1c2d3e0796468
+0xad	reserved-bits-set-zero-fields	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=0;r0_action=0;r0_reserved=0x05	0102a0b1c2d3e0796405
+0xad	empty	kind=invalid;error=Truncated	-
+0xad	cut-ruid	radios=1;r0_ruid=hex:02a0b1c2;kind=invalid;error=Truncated	0102a0b1c2
+0xad	missing-method-octet	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;kind=invalid;error=Truncated	0102a0b1c2d3e07964
+0xad	radios-overstated	radios=2;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=1;r0_action=1;kind=invalid;error=Truncated	0202a0b1c2d3e0796428
+0xad	trailing-bytes	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_method=1;r0_action=1;trailing=hex:a5;kind=invalid;error=TrailingBytes	0102a0b1c2d3e0796428a5
+0xad	zero-radios-trailing	radios=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	00a5
+0xae	golden	radios=2;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=116;r1_ruid=02a0b1c2d3f0;r1_class=129;r1_ch=50	0202a0b1c2d3e0797402a0b1c2d3f08132
+0xae	zero-radios	radios=0	00
+0xae	one-radio	radios=1;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=60	0102a0b1c2d3f0763c
+0xae	three-radios	radios=3;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r1_ruid=02a0b1c2d3f0;r1_class=122;r1_ch=106;r2_ruid=02a0b1c2d3c1;r2_class=128;r2_ch=138	0302a0b1c2d3e0796402a0b1c2d3f07a6a02a0b1c2d3c1808a
+0xae	empty	kind=invalid;error=Truncated	-
+0xae	cut-ruid	radios=1;r0_ruid=hex:02a0b1c2d3;kind=invalid;error=Truncated	0102a0b1c2d3
+0xae	missing-channel	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;kind=invalid;error=Truncated	0102a0b1c2d3e079
+0xae	radios-overstated	radios=3;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=116;r1_ruid=02a0b1c2d3f0;r1_class=129;r1_ch=50;kind=invalid;error=Truncated	0302a0b1c2d3e0797402a0b1c2d3f08132
+0xae	trailing-bytes	radios=1;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=60;trailing=hex:a5;kind=invalid;error=TrailingBytes	0102a0b1c2d3f0763ca5
+0xaf	golden	radios=2;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x01;r0_pairs=2;r0_p0_class=121;r0_p0_ch=100;r0_p1_class=122;r0_p1_ch=106;r1_ruid=02a0b1c2d3f0;r1_class=128;r1_ch=42;r1_status=0x00;r1_pairs=0	0202a0b1c2d3e07964010279647a6a02a0b1c2d3f0802a0000
+0xaf	zero-radios	radios=0	00
+0xaf	success-no-pairs	radios=1;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=56;r0_status=0x00;r0_pairs=0	0102a0b1c2d3f076380000
+0xaf	upstream-all-zero-groups	radios=2;r0_ruid=02a0b1c2d3e0;r0_class=0;r0_ch=0;r0_status=0x00;r0_pairs=0;r1_ruid=02a0b1c2d3f0;r1_class=0;r1_ch=0;r1_status=0x00;r1_pairs=0	0202a0b1c2d3e00000000002a0b1c2d3f000000000
+0xaf	status-codes-2-to-5	radios=4;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x02;r0_pairs=0;r1_ruid=02a0b1c2d3f0;r1_class=121;r1_ch=104;r1_status=0x03;r1_pairs=0;r2_ruid=02a0b1c2d3c1;r2_class=121;r2_ch=108;r2_status=0x04;r2_pairs=0;r3_ruid=02a0b1c2d3d2;r3_class=121;r3_ch=112;r3_status=0x05;r3_pairs=0	0402a0b1c2d3e07964020002a0b1c2d3f07968030002a0b1c2d3c1796c040002a0b1c2d3d279700500
+0xaf	status-reserved-06	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x06;r0_pairs=0	0102a0b1c2d3e079640600
+0xaf	status-reserved-ff	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0xff;r0_pairs=0	0102a0b1c2d3e07964ff00
+0xaf	five-pairs	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=128;r0_ch=106;r0_status=0x01;r0_pairs=5;r0_p0_class=121;r0_p0_ch=100;r0_p1_class=121;r0_p1_ch=104;r0_p2_class=121;r0_p2_ch=108;r0_p3_class=121;r0_p3_ch=112;r0_p4_class=122;r0_p4_ch=102	0102a0b1c2d3e0806a010579647968796c79707a66
+0xaf	success-with-pairs	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x00;r0_pairs=1;r0_p0_class=121;r0_p0_ch=104	0102a0b1c2d3e0796400017968
+0xaf	radar-no-pairs	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x01;r0_pairs=0	0102a0b1c2d3e079640100
+0xaf	empty	kind=invalid;error=Truncated	-
+0xaf	cut-ruid	radios=1;r0_ruid=hex:02a0b1;kind=invalid;error=Truncated	0102a0b1
+0xaf	missing-pairs-count	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x01;kind=invalid;error=Truncated	0102a0b1c2d3e0796401
+0xaf	pairs-overstated	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x01;r0_pairs=2;r0_p0_class=121;r0_p0_ch=100;kind=invalid;error=Truncated	0102a0b1c2d3e0796401027964
+0xaf	cut-pair	radios=1;r0_ruid=02a0b1c2d3e0;r0_class=121;r0_ch=100;r0_status=0x01;r0_pairs=1;r0_p0_class=121;kind=invalid;error=Truncated	0102a0b1c2d3e07964010179
+0xaf	radios-overstated	radios=2;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=56;r0_status=0x00;r0_pairs=0;kind=invalid;error=Truncated	0202a0b1c2d3f076380000
+0xaf	trailing-zero-pair	radios=1;r0_ruid=02a0b1c2d3f0;r0_class=118;r0_ch=56;r0_status=0x00;r0_pairs=0;trailing=hex:0000;kind=invalid;error=TrailingBytes	0102a0b1c2d3f0763800000000
+0xb1	golden	avail=2;a0_class=115;a0_ch=36;a0_minutes=0;a1_class=121;a1_ch=100;a1_minutes=4660;nonocc=1;n0_class=118;n0_ch=52;n0_duration=1800;active=1;c0_class=121;c0_ch=116;c0_countdown=0x0a1b2c	02732400007964123401763407080179740a1b2c
+0xb1	all-zero	avail=0;nonocc=0;active=0	000000
+0xb1	avail-only	avail=1;a0_class=121;a0_ch=104;a0_minutes=258;nonocc=0;active=0	01796801020000
+0xb1	nonocc-only	avail=0;nonocc=2;n0_class=121;n0_ch=100;n0_duration=1795;n1_class=122;n1_ch=106;n1_duration=0x0e0f;active=0	0002796407037a6a0e0f00
+0xb1	active-only	avail=0;nonocc=0;active=2;c0_class=121;c0_ch=120;c0_countdown=0x010203;c1_class=128;c1_ch=122;c1_countdown=600	0000027978010203807a000258
+0xb1	countdown-bounds	avail=0;nonocc=0;active=2;c0_class=121;c0_ch=100;c0_countdown=0;c1_class=121;c1_ch=104;c1_countdown=0xffffff	00000279640000007968ffffff
+0xb1	minutes-duration-max	avail=1;a0_class=121;a0_ch=100;a0_minutes=0xffff;nonocc=1;n0_class=121;n0_ch=104;n0_duration=0xffff;active=0	017964ffff017968ffff00
+0xb1	empty	kind=invalid;error=Truncated	-
+0xb1	avail-count-only	avail=0;kind=invalid;error=Truncated	00
+0xb1	missing-active-count	avail=0;nonocc=0;kind=invalid;error=Truncated	0000
+0xb1	avail-overstated	avail=2;a0_class=121;a0_ch=100;a0_minutes=4660;nonocc=0;active=0;kind=invalid;error=Truncated	02796412340000
+0xb1	nonocc-overstated	avail=0;nonocc=2;n0_class=118;n0_ch=52;n0_duration=1800;active=0;kind=invalid;error=Truncated	00027634070800
+0xb1	active-overstated	avail=0;nonocc=0;active=2;c0_class=121;c0_ch=116;c0_countdown=0x0a1b2c;kind=invalid;error=Truncated	00000279740a1b2c
+0xb1	cut-minutes	avail=1;a0_class=121;a0_ch=100;a0_minutes=hex:12;kind=invalid;error=Truncated	01796412
+0xb1	cut-countdown	avail=0;nonocc=0;active=1;c0_class=121;c0_ch=116;c0_countdown=hex:0a1b;kind=invalid;error=Truncated	00000179740a1b
+0xb1	trailing-bytes	avail=0;nonocc=0;active=1;c0_class=121;c0_ch=116;c0_countdown=0x0a1b2c;trailing=hex:a5;kind=invalid;error=TrailingBytes	00000179740a1b2ca5
+0xd6	golden	opclasses=2;o0_class=115;o0_chans=2;o0_ch0=36;o0_ch1=48;o0_reserved=0;o1_class=128;o1_chans=1;o1_ch0=42;o1_reserved=0	02730224300000000080012a00000000
+0xd6	zero-opclasses	opclasses=0	00
+0xd6	zero-chans-all-channels	opclasses=1;o0_class=81;o0_chans=0;o0_reserved=0	01510000000000
+0xd6	mixed-zero-chans	opclasses=2;o0_class=121;o0_chans=0;o0_reserved=0;o1_class=118;o1_chans=3;o1_ch0=52;o1_ch1=56;o1_ch2=64;o1_reserved=0	02790000000000760334384000000000
+0xd6	reserved-octets-set	opclasses=1;o0_class=115;o0_chans=1;o0_ch0=40;o0_reserved=0x01020304	0173012801020304
+0xd6	reserved-octets-clear	opclasses=1;o0_class=115;o0_chans=1;o0_ch0=40;o0_reserved=0	0173012800000000
+0xd6	reserved-octets-set-second	opclasses=2;o0_class=81;o0_chans=0;o0_reserved=0;o1_class=128;o1_chans=1;o1_ch0=106;o1_reserved=0xff00a55a	0251000000000080016aff00a55a
+0xd6	empty	kind=invalid;error=Truncated	-
+0xd6	missing-reserved	opclasses=1;o0_class=115;o0_chans=1;o0_ch0=40;o0_reserved=hex:;kind=invalid;error=Truncated	01730128
+0xd6	cut-reserved	opclasses=1;o0_class=115;o0_chans=1;o0_ch0=40;o0_reserved=hex:0000;kind=invalid;error=Truncated	017301280000
+0xd6	chans-overstated	opclasses=1;o0_class=115;o0_chans=6;o0_ch0=36;o0_ch1=40;kind=invalid;error=Truncated	0173062428
+0xd6	opclasses-overstated	opclasses=2;o0_class=81;o0_chans=0;o0_reserved=0;kind=invalid;error=Truncated	02510000000000
+0xd6	trailing-bytes	opclasses=1;o0_class=81;o0_chans=0;o0_reserved=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	01510000000000a5
+0xd7	golden	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=2;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0;u1_start=0x0a0b0c0d;u1_length=1000;u1_reps=0;u1_interval=0;u1_ru_len=2;u1_ru=hex:0301;u1_tx_id=000000000000;u1_power=-1;u1_reason=4;u1_reserved=0	802a3c1d2e3f4a51021234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e211400000000000a0b0c0d000003e80000000000000000020301000000000000ff0400000000
+0xd7	zero-usages	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=0	802a3c1d2e3f4a5100
+0xd7	ru-len-3-40mhz	op_class=116;channel=36;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=3;u0_ru=hex:ff0f02;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0	74243c1d2e3f4a51011234567800004e200000000a0001900003ff0f027a6b5c4d3e21140000000000
+0xd7	ru-len-10-160mhz	op_class=129;channel=50;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=10;u0_ru=hex:0123456789abcdef1e3f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0	81323c1d2e3f4a51011234567800004e200000000a000190000a0123456789abcdef1e3f7a6b5c4d3e21140000000000
+0xd7	tx-id-bss-color	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=00000000002d;u0_power=20;u0_reason=3;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f00000000002d140300000000
+0xd7	reps-indefinite	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=0xffffffff;u0_interval=51200;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=2;u0_reserved=0	802a3c1d2e3f4a51011234567800004e20ffffffff0000c80005ffffffff1f7a6b5c4d3e21140200000000
+0xd7	power-negative	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=-7;u0_reason=1;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e21f90100000000
+0xd7	power-max	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=127;u0_reason=0;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e217f0000000000
+0xd7	reason-reserved-5	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=5;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e21140500000000
+0xd7	reason-reserved-254	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=254;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e2114fe00000000
+0xd7	reason-bss-non-usage-255	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=000000000000;u0_power=-1;u0_reason=255;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f000000000000ffff00000000
+0xd7	reserved-octets-set	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0xa1b2c3d4	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e211400a1b2c3d4
+0xd7	reserved-octets-clear	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e21140000000000
+0xd7	interval-without-reps	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=0;u0_interval=5000;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0	802a3c1d2e3f4a51011234567800004e20000000000000138805ffffffff1f7a6b5c4d3e21140000000000
+0xd7	ru-len-4-unlisted	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=4;u0_ru=hex:ffff7f00;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0	802a3c1d2e3f4a51011234567800004e200000000a0001900004ffff7f007a6b5c4d3e21140000000000
+0xd7	empty	kind=invalid;error=Truncated	-
+0xd7	cut-ref-bssid	op_class=128;channel=42;ref_bssid=hex:3c1d2e;kind=invalid;error=Truncated	802a3c1d2e
+0xd7	missing-num-usage	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;kind=invalid;error=Truncated	802a3c1d2e3f4a51
+0xd7	usages-overstated	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=2;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0;kind=invalid;error=Truncated	802a3c1d2e3f4a51021234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e21140000000000
+0xd7	ru-len-overstated	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=7;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=0;kind=invalid;error=Truncated	802a3c1d2e3f4a51011234567800004e200000000a0001900007ffffffff1f7a6b5c4d3e21140000000000
+0xd7	cut-reserved	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=1;u0_start=0x12345678;u0_length=20000;u0_reps=10;u0_interval=102400;u0_ru_len=5;u0_ru=hex:ffffffff1f;u0_tx_id=7a6b5c4d3e21;u0_power=20;u0_reason=0;u0_reserved=hex:0000;kind=invalid;error=Truncated	802a3c1d2e3f4a51011234567800004e200000000a0001900005ffffffff1f7a6b5c4d3e2114000000
+0xd7	trailing-bytes	op_class=128;channel=42;ref_bssid=3c1d2e3f4a51;usages=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	802a3c1d2e3f4a5100a5
+0xd8	golden	ruid=02a0b1c2d3e0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=0	02a0b1c2d3e02d1c1404120123456789abcdeffedcba98765432100000
+0xd8	psr-disallowed-only	ruid=02a0b1c2d3f0;bss_color=1;hesiga15=0;srg_valid=0;non_srg_valid=0;psr_disallowed=1;non_srg_max=0;srg_min=0;srg_max=0;srg_color_bitmap=hex:0000000000000000;srg_bssid_bitmap=hex:0000000000000000;tail_reserved=0	02a0b1c2d3f00101000000000000000000000000000000000000000000
+0xd8	srg-invalid-fields-carried	ruid=02a0b1c2d3e0;bss_color=7;hesiga15=0;srg_valid=0;non_srg_valid=0;psr_disallowed=0;non_srg_max=33;srg_min=2;srg_max=40;srg_color_bitmap=hex:8000000000000001;srg_bssid_bitmap=hex:00ff00ff00ff1234;tail_reserved=0	02a0b1c2d3e00700210228800000000000000100ff00ff00ff12340000
+0xd8	bss-color-63	ruid=02a0b1c2d3e0;bss_color=63;hesiga15=1;srg_valid=0;non_srg_valid=1;psr_disallowed=1;non_srg_max=11;srg_min=0;srg_max=0;srg_color_bitmap=hex:0000000000000000;srg_bssid_bitmap=hex:0000000000000000;tail_reserved=0	02a0b1c2d3e03f150b0000000000000000000000000000000000000000
+0xd8	bss-color-0	ruid=02a0b1c2d3e0;bss_color=0;hesiga15=0;srg_valid=1;non_srg_valid=0;psr_disallowed=0;non_srg_max=0;srg_min=5;srg_max=25;srg_color_bitmap=hex:0102030405060708;srg_bssid_bitmap=hex:1112131415161718;tail_reserved=0	02a0b1c2d3e00008000519010203040506070811121314151617180000
+0xd8	reserved-set	ruid=02a0b1c2d3e0;color_reserved=0xc0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;flags_reserved=0xe2;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=0xa55a	02a0b1c2d3e0edfe1404120123456789abcdeffedcba9876543210a55a
+0xd8	reserved-clear	ruid=02a0b1c2d3e0;color_reserved=0x00;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;flags_reserved=0x00;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=0	02a0b1c2d3e02d1c1404120123456789abcdeffedcba98765432100000
+0xd8	reserved-bits-set-zero-flags	ruid=02a0b1c2d3f0;color_reserved=0x40;bss_color=0;hesiga15=0;srg_valid=0;non_srg_valid=0;psr_disallowed=0;flags_reserved=0x20;non_srg_max=0;srg_min=0;srg_max=0;srg_color_bitmap=hex:0000000000000000;srg_bssid_bitmap=hex:0000000000000000;tail_reserved=0x0001	02a0b1c2d3f04020000000000000000000000000000000000000000001
+0xd8	empty	kind=invalid;error=Truncated	-
+0xd8	cut-ruid	ruid=hex:02a0b1c2;kind=invalid;error=Truncated	02a0b1c2
+0xd8	cut-bitmap	ruid=02a0b1c2d3e0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba98;kind=invalid;error=Truncated	02a0b1c2d3e02d1c1404120123456789abcdeffedcba98
+0xd8	missing-tail-reserved	ruid=02a0b1c2d3e0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=hex:;kind=invalid;error=Truncated	02a0b1c2d3e02d1c1404120123456789abcdeffedcba9876543210
+0xd8	cut-tail-reserved	ruid=02a0b1c2d3e0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=hex:00;kind=invalid;error=Truncated	02a0b1c2d3e02d1c1404120123456789abcdeffedcba987654321000
+0xd8	trailing-bytes	ruid=02a0b1c2d3e0;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;tail_reserved=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e02d1c1404120123456789abcdeffedcba98765432100000a5
+0xd9	golden	ruid=02a0b1c2d3e0;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c0000a00001;tail_reserved=0	02a0b1c2d3e06d1c1404120123456789abcdeffedcba987654321000000c0000a000010000
+0xd9	partial-color-0	ruid=02a0b1c2d3f0;partial_color=0;bss_color=12;hesiga15=0;srg_valid=0;non_srg_valid=1;psr_disallowed=1;non_srg_max=9;srg_min=0;srg_max=0;srg_color_bitmap=hex:0000000000000000;srg_bssid_bitmap=hex:0000000000000000;neighbor_bitmap=hex:8000000000000000;tail_reserved=0	02a0b1c2d3f00c050900000000000000000000000000000000000080000000000000000000
+0xd9	srg-invalid-fields-carried	ruid=02a0b1c2d3e0;partial_color=0;bss_color=7;hesiga15=1;srg_valid=0;non_srg_valid=0;psr_disallowed=0;non_srg_max=33;srg_min=2;srg_max=40;srg_color_bitmap=hex:8000000000000001;srg_bssid_bitmap=hex:00ff00ff00ff1234;neighbor_bitmap=hex:0000000000000000;tail_reserved=0	02a0b1c2d3e00710210228800000000000000100ff00ff00ff123400000000000000000000
+0xd9	bss-color-63-all-flags	ruid=02a0b1c2d3e0;partial_color=1;bss_color=63;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=1;non_srg_max=255;srg_min=0;srg_max=255;srg_color_bitmap=hex:ffffffffffffffff;srg_bssid_bitmap=hex:0f0e0d0c0b0a0908;neighbor_bitmap=hex:fffffffffffffffe;tail_reserved=0	02a0b1c2d3e07f1dff00ffffffffffffffffff0f0e0d0c0b0a0908fffffffffffffffe0000
+0xd9	reserved-set	ruid=02a0b1c2d3e0;color_reserved=0x80;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;flags_reserved=0xe2;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c0000a00001;tail_reserved=0x5aa5	02a0b1c2d3e0edfe1404120123456789abcdeffedcba987654321000000c0000a000015aa5
+0xd9	reserved-clear	ruid=02a0b1c2d3e0;color_reserved=0x00;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;flags_reserved=0x00;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c0000a00001;tail_reserved=0	02a0b1c2d3e06d1c1404120123456789abcdeffedcba987654321000000c0000a000010000
+0xd9	reserved-bit7-set-zero-color	ruid=02a0b1c2d3f0;color_reserved=0x80;partial_color=0;bss_color=0;hesiga15=0;srg_valid=0;non_srg_valid=0;psr_disallowed=0;flags_reserved=0x02;non_srg_max=0;srg_min=0;srg_max=0;srg_color_bitmap=hex:0000000000000000;srg_bssid_bitmap=hex:0000000000000000;neighbor_bitmap=hex:0000000000000000;tail_reserved=0x0100	02a0b1c2d3f080020000000000000000000000000000000000000000000000000000000100
+0xd9	empty	kind=invalid;error=Truncated	-
+0xd9	cut-ruid	ruid=hex:02a0b1c2d3;kind=invalid;error=Truncated	02a0b1c2d3
+0xd9	request-length-29	ruid=02a0b1c2d3e0;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:;tail_reserved=0;kind=invalid;error=Truncated	02a0b1c2d3e06d1c1404120123456789abcdeffedcba98765432100000
+0xd9	cut-neighbor-bitmap	ruid=02a0b1c2d3e0;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c;kind=invalid;error=Truncated	02a0b1c2d3e06d1c1404120123456789abcdeffedcba987654321000000c
+0xd9	missing-tail-reserved	ruid=02a0b1c2d3e0;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c0000a00001;tail_reserved=hex:;kind=invalid;error=Truncated	02a0b1c2d3e06d1c1404120123456789abcdeffedcba987654321000000c0000a00001
+0xd9	trailing-bytes	ruid=02a0b1c2d3e0;partial_color=1;bss_color=45;hesiga15=1;srg_valid=1;non_srg_valid=1;psr_disallowed=0;non_srg_max=20;srg_min=4;srg_max=18;srg_color_bitmap=hex:0123456789abcdef;srg_bssid_bitmap=hex:fedcba9876543210;neighbor_bitmap=hex:00000c0000a00001;tail_reserved=0;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e06d1c1404120123456789abcdeffedcba987654321000000c0000a000010000a5
+0xda	golden	ruid=02a0b1c2d3e0;code=0x00	02a0b1c2d3e000
+0xda	decline	ruid=02a0b1c2d3f0;code=0x01	02a0b1c2d3f001
+0xda	reserved-02	ruid=02a0b1c2d3e0;code=0x02	02a0b1c2d3e002
+0xda	reserved-ff	ruid=02a0b1c2d3e0;code=0xff	02a0b1c2d3e0ff
+0xda	empty	kind=invalid;error=Truncated	-
+0xda	cut-ruid	ruid=hex:02a0b1;kind=invalid;error=Truncated	02a0b1
+0xda	ruid-only	ruid=02a0b1c2d3e0;kind=invalid;error=Truncated	02a0b1c2d3e0
+0xda	trailing-bytes	ruid=02a0b1c2d3e0;code=0x01;trailing=hex:a5;kind=invalid;error=TrailingBytes	02a0b1c2d3e001a5
+0xe8	golden	json=hex:7b22726571756573744964223a2237222c2264657669636544657363726970746f72223a7b2273657269616c4e756d626572223a22534e2d3432227d7d	7b22726571756573744964223a2237222c2264657669636544657363726970746f72223a7b2273657269616c4e756d626572223a22534e2d3432227d7d
+0xe8	minimal-object	json=hex:7b7d	7b7d
+0xe8	whitespace-utf8	json=hex:7b202272657175657374496422203a202272c3a9712d3122207d0a	7b202272657175657374496422203a202272c3a9712d3122207d0a
+0xe8	non-json-octets	json=hex:00112233445566ff	00112233445566ff
+0xe8	empty	kind=invalid;error=Truncated	-
+0xe9	golden	json=hex:7b22726571756573744964223a2237222c22726573706f6e7365223a7b22726573706f6e7365436f6465223a307d2c22617661696c61626c654368616e6e656c496e666f223a5b5d7d	7b22726571756573744964223a2237222c22726573706f6e7365223a7b22726573706f6e7365436f6465223a307d2c22617661696c61626c654368616e6e656c496e666f223a5b5d7d
+0xe9	minimal-object	json=hex:7b7d	7b7d
+0xe9	whitespace-utf8	json=hex:7b0922726571756573744964223a2022c3bc2d32227d0d0a	7b0922726571756573744964223a2022c3bc2d32227d0d0a
+0xe9	non-json-octets	json=hex:ff665544332211a0	ff665544332211a0
+0xe9	empty	kind=invalid;error=Truncated	-

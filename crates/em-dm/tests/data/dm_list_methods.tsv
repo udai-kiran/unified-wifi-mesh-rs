@@ -1,0 +1,95 @@
+# Upstream list-layer definitions at unified-wifi-mesh ba4180b: the 62 members of dm_easy_mesh_list_t (inc/dm_easy_mesh_list.h, src/dm/dm_easy_mesh_list.cpp)
+# and the MODEL-OP / DERIVED-READ residue of the dm_*_list_t classes (update_list, delete_list, the inline get_first/get_next of the side maps). Source: research/list-layer-report.txt.
+# Row count: 91 (62 dm_easy_mesh_list_t + 29 residue; key = Class::name@cpp:LINE for an out-of-line definition, Class::name@h:LINE for an inline one).
+key	owner	name	h_line	cpp_line	class	behaviour
+dm_easy_mesh_list_t::get_data_model@cpp:1806	dm_easy_mesh_list_t	get_data_model	52	1806	DERIVED-READ	hash lookup of net@mac
+dm_easy_mesh_list_t::create_data_model@cpp:1656	dm_easy_mesh_list_t	create_data_model	71	1656	NODE-CREATION	new node with controller/agent setup, default op classes and policies, network and SSID copy
+dm_easy_mesh_list_t::delete_data_model@cpp:1639	dm_easy_mesh_list_t	delete_data_model	83	1639	MODEL-OP	remove from m_list, deinit and delete
+dm_easy_mesh_list_t::delete_all_data_models@cpp:1613	dm_easy_mesh_list_t	delete_all_data_models	92	1613	MODEL-OP	remove every node except the controller's
+dm_easy_mesh_list_t::debug_probe@cpp:894	dm_easy_mesh_list_t	debug_probe	102	894	OTHER	iterates the nodes, no effect
+dm_easy_mesh_list_t::init@cpp:1819	dm_easy_mesh_list_t	init	114	1819	OTHER	creates m_list, stores mgr and the controller AL interface
+dm_easy_mesh_list_t::get_first_dm@h:128	dm_easy_mesh_list_t	get_first_dm	128	none	DERIVED-READ	hash_map_get_first
+dm_easy_mesh_list_t::get_next_dm@h:144	dm_easy_mesh_list_t	get_next_dm	144	none	DERIVED-READ	hash_map_get_next
+dm_easy_mesh_list_t::get_first_network@cpp:48	dm_easy_mesh_list_t	get_first_network	157	48	DERIVED-READ	first node whose network id prefix-matches m_network_list[0]
+dm_easy_mesh_list_t::get_next_network@cpp:71	dm_easy_mesh_list_t	get_next_network	171	71	DERIVED-READ	next entry of m_network_list
+dm_easy_mesh_list_t::get_network@cpp:105	dm_easy_mesh_list_t	get_network	188	105	DERIVED-READ	first node whose network id starts with key
+dm_easy_mesh_list_t::remove_network@cpp:124	dm_easy_mesh_list_t	remove_network	199	124	MODEL-OP	EMPTY STUB
+dm_easy_mesh_list_t::put_network@cpp:129	dm_easy_mesh_list_t	put_network	211	129	MODEL-OP	create the controller node or copy the record into every node; controller-id mismatch
+dm_easy_mesh_list_t::get_first_device@cpp:178	dm_easy_mesh_list_t	get_first_device	224	178	DERIVED-READ	first node's device
+dm_easy_mesh_list_t::get_next_device@cpp:190	dm_easy_mesh_list_t	get_next_device	238	190	DERIVED-READ	pointer walk over the nodes
+dm_easy_mesh_list_t::get_device@cpp:210	dm_easy_mesh_list_t	get_device	251	210	DERIVED-READ	parse the key, get_data_model, device
+dm_easy_mesh_list_t::remove_device@cpp:226	dm_easy_mesh_list_t	remove_device	262	226	MODEL-OP	3-part key never matches the 2-part node key
+dm_easy_mesh_list_t::put_device@cpp:235	dm_easy_mesh_list_t	put_device	274	235	MODEL-OP	reuse the controller device or create the node; copy; num_of_devices++
+dm_easy_mesh_list_t::update_device@cpp:267	dm_easy_mesh_list_t	update_device	275	267	MODEL-OP	replace the device keeping uptime, memory, cpu_load and cpu_temp
+dm_easy_mesh_list_t::get_first_radio@cpp:306	dm_easy_mesh_list_t	get_first_radio	287	306	DERIVED-READ	first radio of the first node with radios
+dm_easy_mesh_list_t::get_next_radio@cpp:324	dm_easy_mesh_list_t	get_next_radio	301	324	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_radio@cpp:365	dm_easy_mesh_list_t	get_radio	315	365	DERIVED-READ	first radio with this MAC across all networks
+dm_easy_mesh_list_t::remove_radio@cpp:394	dm_easy_mesh_list_t	remove_radio	329	394	MODEL-OP	EMPTY STUB
+dm_easy_mesh_list_t::put_radio@cpp:399	dm_easy_mesh_list_t	put_radio	342	399	MODEL-OP	insert or replace, seed two policies, m_mgr->create_node
+dm_easy_mesh_list_t::get_first_radio@cpp:476	dm_easy_mesh_list_t	get_first_radio	357	476	DERIVED-READ	radio 0 of the node (net, al)
+dm_easy_mesh_list_t::get_next_radio@cpp:488	dm_easy_mesh_list_t	get_next_radio	372	488	DERIVED-READ	next radio of the node (net, al)
+dm_easy_mesh_list_t::get_first_bss@cpp:514	dm_easy_mesh_list_t	get_first_bss	383	514	DERIVED-READ	first BSS of the first node with BSSs
+dm_easy_mesh_list_t::get_next_bss@cpp:533	dm_easy_mesh_list_t	get_next_bss	397	533	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_bss@cpp:571	dm_easy_mesh_list_t	get_bss	416	571	DERIVED-READ	parse the key, get_data_model, find_matching_bss
+dm_easy_mesh_list_t::get_first_bss@cpp:588	dm_easy_mesh_list_t	get_first_bss	398	588	DERIVED-READ	first BSS of the agent (GLOBAL_NET_ID hard-coded)
+dm_easy_mesh_list_t::get_next_bss@cpp:600	dm_easy_mesh_list_t	get_next_bss	399	600	DERIVED-READ	next BSS of the agent (GLOBAL_NET_ID hard-coded)
+dm_easy_mesh_list_t::remove_bss@cpp:625	dm_easy_mesh_list_t	remove_bss	427	625	MODEL-OP	match the BSSID only, remove_bss_by_index
+dm_easy_mesh_list_t::put_bss@cpp:648	dm_easy_mesh_list_t	put_bss	439	648	MODEL-OP	insert at m_bss[m_num_bss] with no capacity check, or replace
+dm_easy_mesh_list_t::get_first_sta@cpp:673	dm_easy_mesh_list_t	get_first_sta	452	673	DERIVED-READ	first station of the first node with stations
+dm_easy_mesh_list_t::get_next_sta@cpp:690	dm_easy_mesh_list_t	get_next_sta	466	690	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_sta@cpp:714	dm_easy_mesh_list_t	get_sta	479	714	DERIVED-READ	node that owns the radio, then m_sta_map
+dm_easy_mesh_list_t::remove_sta@cpp:758	dm_easy_mesh_list_t	remove_sta	490	758	MODEL-OP	EMPTY STUB
+dm_easy_mesh_list_t::put_sta@cpp:763	dm_easy_mesh_list_t	put_sta	502	763	MODEL-OP	node that owns the radio; copy_sta_info or insert
+dm_easy_mesh_list_t::get_first_network_ssid@cpp:812	dm_easy_mesh_list_t	get_first_network_ssid	511	812	DERIVED-READ	last node's slot 0 (no break)
+dm_easy_mesh_list_t::get_next_network_ssid@cpp:829	dm_easy_mesh_list_t	get_next_network_ssid	525	829	DERIVED-READ	walks all slots of all nodes, empty ones included
+dm_easy_mesh_list_t::get_network_ssid@cpp:869	dm_easy_mesh_list_t	get_network_ssid	538	869	DERIVED-READ	exact id across the nodes
+dm_easy_mesh_list_t::remove_network_ssid@cpp:908	dm_easy_mesh_list_t	remove_network_ssid	549	908	MODEL-OP	prefix match, zeroed hole, count lowered on every node
+dm_easy_mesh_list_t::put_network_ssid@cpp:937	dm_easy_mesh_list_t	put_network_ssid	561	937	MODEL-OP	fan-out of the record into every node of the network
+dm_easy_mesh_list_t::get_first_op_class@cpp:989	dm_easy_mesh_list_t	get_first_op_class	574	989	DERIVED-READ	first op class of the first node with op classes
+dm_easy_mesh_list_t::get_next_op_class@cpp:1008	dm_easy_mesh_list_t	get_next_op_class	588	1008	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_op_class@cpp:1047	dm_easy_mesh_list_t	get_op_class	601	1047	DERIVED-READ	node that owns the op class, then the op class
+dm_easy_mesh_list_t::remove_op_class@cpp:1172	dm_easy_mesh_list_t	remove_op_class	612	1172	MODEL-OP	EMPTY STUB
+dm_easy_mesh_list_t::put_op_class@cpp:1177	dm_easy_mesh_list_t	put_op_class	627	1177	MODEL-OP	node that owns the op class; update or append; silent success without a node
+dm_easy_mesh_list_t::get_first_pre_set_op_class_by_type@cpp:1115	dm_easy_mesh_list_t	get_first_pre_set_op_class_by_type	641	1115	DERIVED-READ	first node only
+dm_easy_mesh_list_t::get_next_pre_set_op_class_by_type@cpp:1140	dm_easy_mesh_list_t	get_next_pre_set_op_class_by_type	658	1140	DERIVED-READ	first node only
+dm_easy_mesh_list_t::get_first_policy@cpp:1255	dm_easy_mesh_list_t	get_first_policy	670	1255	DERIVED-READ	first policy of the first node with a policy map
+dm_easy_mesh_list_t::get_next_policy@cpp:1277	dm_easy_mesh_list_t	get_next_policy	684	1277	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_policy@cpp:1300	dm_easy_mesh_list_t	get_policy	698	1300	DERIVED-READ	node (net, dev), then the policy map
+dm_easy_mesh_list_t::remove_policy@cpp:1335	dm_easy_mesh_list_t	remove_policy	709	1335	MODEL-OP	hash_map_remove and delete
+dm_easy_mesh_list_t::put_policy@cpp:1369	dm_easy_mesh_list_t	put_policy	722	1369	MODEL-OP	the key finds the node; set_policy
+dm_easy_mesh_list_t::get_first_scan_result@cpp:1385	dm_easy_mesh_list_t	get_first_scan_result	735	1385	DERIVED-READ	first scan result of the first node with a scan map
+dm_easy_mesh_list_t::get_next_scan_result@cpp:1403	dm_easy_mesh_list_t	get_next_scan_result	749	1403	DERIVED-READ	pointer walk across the nodes
+dm_easy_mesh_list_t::get_scan_result@cpp:1428	dm_easy_mesh_list_t	get_scan_result	763	1428	DERIVED-READ	node (net, dev), 6-field key
+dm_easy_mesh_list_t::remove_scan_result@cpp:1453	dm_easy_mesh_list_t	remove_scan_result	774	1453	MODEL-OP	removes the whole record; station beacon report edit
+dm_easy_mesh_list_t::put_scan_result@cpp:1524	dm_easy_mesh_list_t	put_scan_result	787	1524	MODEL-OP	create the record or replace/append a neighbor; station beacon report
+dm_easy_mesh_list_t::dm_easy_mesh_list_t@cpp:1827	dm_easy_mesh_list_t	dm_easy_mesh_list_t	797	1827	OTHER	empty constructor
+dm_easy_mesh_list_t::~dm_easy_mesh_list_t@cpp:1832	dm_easy_mesh_list_t	~dm_easy_mesh_list_t	806	1832	OTHER	empty destructor, m_list leaked
+dm_network_list_t::update_list@cpp:123	dm_network_list_t	update_list	none	123	MODEL-OP	apply the database operation to the in-memory list
+dm_network_list_t::delete_list@cpp:148	dm_network_list_t	delete_list	none	148	MODEL-OP	remove every record
+dm_device_list_t::update_list@cpp:146	dm_device_list_t	update_list	none	146	MODEL-OP	apply the database operation to the in-memory list
+dm_device_list_t::delete_list@cpp:174	dm_device_list_t	delete_list	none	174	MODEL-OP	remove every record
+dm_bss_list_t::update_list@cpp:149	dm_bss_list_t	update_list	none	149	MODEL-OP	apply the database operation to the in-memory list
+dm_bss_list_t::delete_list@cpp:187	dm_bss_list_t	delete_list	none	187	MODEL-OP	remove every record
+dm_radio_list_t::update_list@cpp:146	dm_radio_list_t	update_list	none	146	MODEL-OP	apply the database operation to the in-memory list
+dm_radio_list_t::delete_list@cpp:181	dm_radio_list_t	delete_list	none	181	MODEL-OP	remove every record
+dm_sta_list_t::update_list@cpp:148	dm_sta_list_t	update_list	none	148	MODEL-OP	apply the database operation to the in-memory list
+dm_sta_list_t::delete_list@cpp:179	dm_sta_list_t	delete_list	none	179	MODEL-OP	remove every record
+dm_op_class_list_t::update_list@cpp:214	dm_op_class_list_t	update_list	none	214	MODEL-OP	apply the database operation to the in-memory list
+dm_op_class_list_t::delete_list@cpp:243	dm_op_class_list_t	delete_list	none	243	MODEL-OP	remove every record
+dm_policy_list_t::update_list@cpp:223	dm_policy_list_t	update_list	none	223	MODEL-OP	apply the database operation to the in-memory list
+dm_policy_list_t::delete_list@cpp:258	dm_policy_list_t	delete_list	none	258	MODEL-OP	remove every record
+dm_scan_result_list_t::update_list@cpp:167	dm_scan_result_list_t	update_list	none	167	MODEL-OP	apply the database operation to the in-memory list
+dm_scan_result_list_t::delete_list@cpp:207	dm_scan_result_list_t	delete_list	none	207	MODEL-OP	remove every record
+dm_network_ssid_list_t::update_list@cpp:174	dm_network_ssid_list_t	update_list	none	174	MODEL-OP	apply the database operation to the in-memory list
+dm_network_ssid_list_t::delete_list@cpp:193	dm_network_ssid_list_t	delete_list	none	193	MODEL-OP	remove every record
+dm_radio_cap_list_t::update_list@cpp:111	dm_radio_cap_list_t	update_list	none	111	MODEL-OP	apply the database operation to the in-memory list
+dm_radio_cap_list_t::delete_list@cpp:139	dm_radio_cap_list_t	delete_list	none	139	MODEL-OP	remove every record
+dm_ieee_1905_security_list_t::update_list@cpp:127	dm_ieee_1905_security_list_t	update_list	none	127	MODEL-OP	apply the database operation to the in-memory list
+dm_ieee_1905_security_list_t::delete_list@cpp:156	dm_ieee_1905_security_list_t	delete_list	none	156	MODEL-OP	remove every record
+dm_ssid_2_vid_map_t::update_list@cpp:94	dm_ssid_2_vid_map_t	update_list	none	94	MODEL-OP	insert a new record or return none/update
+dm_radio_cap_list_t::get_first@h:58	dm_radio_cap_list_t	get_first	58	none	DERIVED-READ	inline hash_map_get_first over the class's own m_list
+dm_radio_cap_list_t::get_next@h:72	dm_radio_cap_list_t	get_next	72	none	DERIVED-READ	inline hash_map_get_next over the class's own m_list
+dm_ieee_1905_security_list_t::get_first@h:67	dm_ieee_1905_security_list_t	get_first	67	none	DERIVED-READ	inline hash_map_get_first over the class's own m_list
+dm_ieee_1905_security_list_t::get_next@h:82	dm_ieee_1905_security_list_t	get_next	82	none	DERIVED-READ	inline hash_map_get_next over the class's own m_list
+dm_ssid_2_vid_map_t::get_first@h:69	dm_ssid_2_vid_map_t	get_first	69	none	DERIVED-READ	inline hash_map_get_first over the class's own m_list
+dm_ssid_2_vid_map_t::get_next@h:83	dm_ssid_2_vid_map_t	get_next	83	none	DERIVED-READ	inline hash_map_get_next over the class's own m_list
