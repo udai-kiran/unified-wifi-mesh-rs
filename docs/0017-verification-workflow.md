@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V9. Amended by A1 and A2 (2026-11-24). **Since A2, proofs only for `LoopCore` and the `Reassembler`; spec and tests for the rest** |
+| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V10. Amended by A1, A2 and A3 (2026-11-24). **Since A3, proofs only for `LoopCore` (frozen); spec and tests for the rest** |
 | Date | 2026-11-23 |
 | Follows | [0016](0016-sans-io-cores.md) D7, D8, errata E1 to E9; the Aeneas spike (tracking folder `aeneas-spike/report.md`) |
 | Amends | 0016 D7 (how verification is done and reviewed), D8 step 3 (starts with an approved English spec) |
@@ -108,6 +108,7 @@ The user approves G1 to G3 as tables in English; G4 and G5 are pass/fail.
 | V6 | 2026-11-23 | C1: proof files live inside each proven crate, `crates/<name>/verify/` (spec, Lean, extract script) |
 | V7 | 2026-11-23 | C2: the Lean checks run locally in the Docker toolchain until 0016 C11 is decided |
 | V8 | 2026-11-23 | C3: a Claude or Codex implementer writes the proofs, chosen per brief |
+| V10 | 2026-11-24 | A3: the `Reassembler` proofs are deferred; tests are enough for now |
 | V9 | 2026-11-24 | A2: the full proof workflow is too much for a hobby project. Proofs only for the very core: `LoopCore` (frozen) and the `Reassembler`; spec and tests for the rest; lighter review set |
 
 ## Choices (all decided: V6 to V8)
@@ -188,8 +189,16 @@ missed by tests and costly; the spec is worth it everywhere.
   with the low Codex findings on the gate scripts left open (`STATUS.md`, 2026-11-24). They apply again to the `Reassembler`. Every other core uses the standard checks only: `cargo test`, clippy (pedantic) on stable and
   1.85.0, `fmt`, `doc`.
 
+### A3 (2026-11-24, start of 0016 D8 step 4b): `Reassembler` proofs deferred
+
+This amends A2 (a) and (e). User decision V10: the `Reassembler` is not proved for now; tests are enough. It gets the A2 (b)
+treatment (unit tests and a seeded model test against a reference model, covering 0016 P0 to P3 and P5, and P2' as a
+counter-example test), and the spike's proofs stay in the tracking folder. Until the user decides otherwise, the only
+proven core is `LoopCore`, frozen (A2 (c)). No Aeneas style is required in `em-transport`.
+
 ## Revision history
 
+- A3 (2026-11-24): `Reassembler` proofs deferred, tests only (V10); see the amendment above.
 - A2 (2026-11-24): proofs only for `LoopCore` (frozen) and the `Reassembler`; spec and tests for every other core;
   lighter review set (V9); see the amendment above.
 - A1 (2026-11-24): the gate redesign of step 3b; see the amendment above.

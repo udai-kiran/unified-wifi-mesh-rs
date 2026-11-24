@@ -518,6 +518,108 @@ async fn continuation_from_another_peer_is_dropped_and_the_session_goes_on() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn fragment_set_over_1_mib_is_refused_counted_once_and_the_session_goes_on() {
+    // intentional-difference:rx-sdu-cap-1mib
+    // Upstream has no cap below the framing limit (`al_service_access_point.cpp:224-300`).
+    // 16 fragments of 65 517 octets fit 1 MiB, the 17th does not. The set is counted once in
+    // `dropped_receive_too_large`; its remaining fragments are skipped without counting.
+    let (_service, mut session, mut client) = registered(Role::Agent).await;
+    let payload = vec![0x5a; 65_517];
+
+    for id in 0..19_u8 {
+        let is_last = u8::from(id == 18);
+        session
+            .write_data(&sdu_frame(
+                SERVICE_MAC,
+                PEER_MAC,
+                [1, is_last, id],
+                &payload,
+            ))
+            .await;
+    }
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, UNFRAGMENTED, b"whole"))
+        .await;
+    // nothing of the refused set was delivered before this one
+    expect_received(&mut client, sdu(SERVICE_MAC, PEER_MAC, b"whole")).await;
+
+    let counters = *client.counters.borrow();
+    assert_eq!(counters.registrations, 1);
+    assert_eq!(counters.dropped_receive_too_large, 1);
+    assert_eq!(counters.dropped_receive_fragments, 0);
+    assert_eq!(counters.sdus_received, 1);
+}
+
+/// The actor's cap, `policy::RX_SDU_CAP`, which an integration test cannot import.
+const RX_SDU_CAP: usize = 1_048_576;
+
+/// A set of 16 full fragments and a last one of `last_len` octets, written to the service
+/// side. Returns the joined payload that was sent. Octets count up, so a wrong order or a
+/// wrong join shows in the delivered bytes.
+async fn write_set_of_16_full_fragments_and_a_last_of(
+    session: &mut ServiceSession,
+    last_len: usize,
+) -> Vec<u8> {
+    let total = 16 * MAX_FRAGMENT_PAYLOAD + last_len;
+    let joined: Vec<u8> = (0..total)
+        .map(|index| u8::try_from(index % 251).unwrap())
+        .collect();
+    let chunks: Vec<&[u8]> = joined.chunks(MAX_FRAGMENT_PAYLOAD).collect();
+    let last_index = chunks.len() - 1;
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let is_last = u8::from(index == last_index);
+        let id = u8::try_from(index).unwrap();
+        session
+            .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, [1, is_last, id], chunk))
+            .await;
+    }
+    joined
+}
+
+#[tokio::test(start_paused = true)]
+async fn fragment_set_of_exactly_1_mib_is_delivered() {
+    // intentional-difference:rx-sdu-cap-1mib
+    // The cap is 1 MiB of joined payload: 16 fragments of 65 517 octets and a last one of 304
+    // make exactly 1 048 576, which passes.
+    let (_service, mut session, mut client) = registered(Role::Agent).await;
+    let last_len = RX_SDU_CAP - 16 * MAX_FRAGMENT_PAYLOAD;
+    assert_eq!(last_len, 304);
+
+    let joined = write_set_of_16_full_fragments_and_a_last_of(&mut session, last_len).await;
+    assert_eq!(joined.len(), RX_SDU_CAP);
+    expect_received(&mut client, sdu(SERVICE_MAC, PEER_MAC, &joined)).await;
+
+    let counters = *client.counters.borrow();
+    assert_eq!(counters.registrations, 1);
+    assert_eq!(counters.sdus_received, 1);
+    assert_eq!(counters.dropped_receive_too_large, 0);
+    assert_eq!(counters.dropped_receive_fragments, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn fragment_set_of_1_mib_plus_one_octet_is_refused_and_the_session_goes_on() {
+    // intentional-difference:rx-sdu-cap-1mib
+    // The same set with a last fragment of 305 octets is 1 048 577: refused once, none of it
+    // delivered, and the next whole frame still arrives.
+    let (_service, mut session, mut client) = registered(Role::Agent).await;
+    let last_len = RX_SDU_CAP - 16 * MAX_FRAGMENT_PAYLOAD + 1;
+    assert_eq!(last_len, 305);
+
+    write_set_of_16_full_fragments_and_a_last_of(&mut session, last_len).await;
+    session
+        .write_data(&sdu_frame(SERVICE_MAC, PEER_MAC, UNFRAGMENTED, b"whole"))
+        .await;
+    // nothing of the refused set was delivered before this one
+    expect_received(&mut client, sdu(SERVICE_MAC, PEER_MAC, b"whole")).await;
+
+    let counters = *client.counters.borrow();
+    assert_eq!(counters.registrations, 1);
+    assert_eq!(counters.sdus_received, 1);
+    assert_eq!(counters.dropped_receive_too_large, 1);
+    assert_eq!(counters.dropped_receive_fragments, 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn oversize_frame_is_skipped_and_the_stream_stays_in_step() {
     // intentional-difference:oversize-skipped
     // Upstream throws on a length above `SOCKET_MTU - 4` before reading the body

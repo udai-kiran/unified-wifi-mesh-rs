@@ -34,6 +34,7 @@
 
 mod actor;
 mod frame_reader;
+mod policy;
 mod wire;
 
 use std::fmt;
@@ -196,6 +197,11 @@ pub struct TransportCounters {
     pub dropped_receive_malformed: u64,
     /// Fragments out of order, and fragment sets that never finished.
     pub dropped_receive_fragments: u64,
+    /// Fragment sets refused because their joined payload would pass 1 MiB, counted once per
+    /// set when the fragment that would pass the cap arrives. None of the set's frames is
+    /// delivered, and the rest of the set is skipped without counting. Not in
+    /// `dropped_receive_fragments` and not in `sdus_received` (0016 D4, U2, U6).
+    pub dropped_receive_too_large: u64,
 }
 
 /// The task [`spawn`] starts: ends with `Ok` on a normal stop.

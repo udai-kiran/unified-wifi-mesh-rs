@@ -17,6 +17,7 @@ use tokio::sync::watch;
 use tokio::time::{Instant, sleep, sleep_until, timeout_at};
 
 use crate::frame_reader::{Frame, FrameReader};
+use crate::policy;
 use crate::wire::{
     self, RESULT_SUCCESS, Reassembler, ReassemblyStep, decode_registration_response,
     decode_sdu_frame, encode_registration_request, encode_sdu_frames,
@@ -298,7 +299,7 @@ impl Actor {
 
         let (read_half, mut write_half) = data.into_split();
         let mut reader: FrameReader<OwnedReadHalf> = FrameReader::new(read_half);
-        let mut reassembler = Reassembler::default();
+        let mut reassembler = Reassembler::new(policy::RX_SDU_CAP);
 
         // The select's output borrows `self`, so the arms only decide and the work follows it.
         let exit = loop {
@@ -388,7 +389,7 @@ async fn send_sdu(
 }
 
 /// Handles one frame of the data socket. Receive errors drop the frame and keep
-/// the session (0011 D3 step 6).
+/// the session (0011 D3 step 6; a refused oversized set is one more, 0016 D4).
 fn handle_frame(
     queue: &mut VecDeque<Sdu>,
     counters: &watch::Sender<TransportCounters>,
@@ -415,12 +416,23 @@ fn handle_frame(
         return;
     };
 
-    let ReassemblyStep { sdu, dropped } = reassembler.push(sdu_frame);
+    let ReassemblyStep {
+        sdu,
+        dropped,
+        too_large,
+    } = reassembler.push(sdu_frame);
     if dropped > 0 {
         tracing::warn!(
             "{dropped} fragment(s) dropped: out of order, address mismatch or incomplete set"
         );
         count(counters, |c| c.dropped_receive_fragments += dropped);
+    }
+    if too_large {
+        tracing::warn!(
+            "fragment set refused: joined payload would pass {} octets",
+            policy::RX_SDU_CAP
+        );
+        count(counters, |c| c.dropped_receive_too_large += 1);
     }
     let Some(sdu) = sdu else {
         return;
