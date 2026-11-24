@@ -34,7 +34,15 @@
 
 mod actor;
 mod frame_reader;
+mod frame_splitter;
+// The three modules below are built in 0016 D8 step 4b-2a and used by `TransportCore` from 4b-2b.
+#[allow(dead_code)]
+mod outbound_buffer;
 mod policy;
+#[allow(dead_code)]
+mod received_queue;
+#[cfg(test)]
+mod test_prng;
 mod wire;
 
 use std::fmt;

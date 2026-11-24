@@ -18,7 +18,10 @@ No `unsafe`, no clones.
 | `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event. `dropped_receive_too_large` counts fragment sets refused over the 1 MiB cap | |
 | `wire` (private) | Length framing, registration, SDU header, fragment split and join | `al_service_utils.cpp:68-82`, `al_service_access_point.cpp:138-196`, `:224-300` |
 | `policy` (private) | The numbers the mechanisms take as arguments: `RX_SDU_CAP`, 1 MiB (0016 U15, U31) | |
-| `frame_reader` (private) | Cancel-safe frame reader that skips an oversize frame by its length | |
+| `frame_reader` (private) | Cancel-safe async frame reader that skips an oversize frame by its length; delegates the byte-to-frame logic to `frame_splitter` | |
+| `frame_splitter` (private) | `FrameSplitter` and `Frame`: sync byte-to-frame logic (`push_bytes`, `next_frame`, `has_frame`). No tokio. Built in 0016 D8 step 4b-2a; `FrameReader` uses it now, `has_frame` is used from 4b-2b | |
+| `received_queue` (private) | `ReceivedQueue`: sync queue of received SDUs with an SDU limit and a byte limit (sum of `cmdu.len()`), drop oldest, an SDU above the byte limit dropped alone (0016 U1, E6, U34). Difference `rx-queue-1024-4mib`. Built in 4b-2a, used from 4b-2b/4c; the actor keeps its own 256-SDU queue | |
+| `outbound_buffer` (private) | `OutboundBuffer`: sync per-session write queue with partial-write tracking, a byte limit, drop oldest not started, and the session-end counts (0016 U12, D3b). Difference `tx-buffer`. Built in 4b-2a, used from 4b-2b/4c; the actor still writes with `send_sdu` | |
 
 ## Behaviour in short
 
@@ -103,6 +106,15 @@ receiver (0011 A5 stop path).
 Tests tagged `intentional-difference:<id>` pin the places where this client differs from upstream's:
 `agent-rejection-fatal`, `retry-connect`, `split-response`, `zero-al-mac`, `reconnect-after-disconnect`,
 `fragment-resync`, `continuation-mac`, `oversize-skipped`, `bad-header-dropped`, `rx-sdu-cap-1mib`.
+Two more are pinned by the building blocks and are "built, used from 4b-2b/4c": `rx-queue-1024-4mib`
+(`ReceivedQueue`: 1024 SDUs and 4 MiB; the old queue held 256 SDUs, count only) and `tx-buffer`
+(`OutboundBuffer`: 4 MiB, drop the oldest SDU not yet started; the old `PendingFrames` held 64). The
+limits are arguments; the numbers live in `policy` from 4b-2b.
+
+`FrameSplitter`, `ReceivedQueue` and `OutboundBuffer` each have unit tests and a seeded model test
+(`src/test_prng.rs`, xorshift, no dependency) against a plain reference model: random byte streams cut at
+random points (frames and `has_frame` at every step); random push/pop with small limits; random push,
+partial advance and `end_session` with small limits (chunks, finished SDUs and every count).
 
 Every wait is bounded. `bounded` fails a test after 60 s of paused time, and `join_within` after its
 own limit (5 s for the six real-time tests). A watchdog thread aborts the test process when a
@@ -119,7 +131,7 @@ with the encoder's limit as cap), P2' (`A0 B0 A1` from one peer delivers an SDU 
 counter-example), P3 (abandoned set 1, stray 1, broken continuation 2) and P5 (the partial payload never passes
 the cap, a refusal counts once, nothing of the set is delivered).
 
-Test counts: 50 unit tests (`cargo test -p em-transport --lib`) and 66 in `tests/session.rs`.
+Test counts: 84 unit tests (`cargo test -p em-transport --lib`) and 66 in `tests/session.rs`.
 
 Run `cargo test -p em-transport --locked`, and `cargo +1.85.0 test -p em-transport --locked` for MSRV.
 

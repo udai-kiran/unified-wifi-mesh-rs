@@ -16,7 +16,8 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, sleep_until, timeout_at};
 
-use crate::frame_reader::{Frame, FrameReader};
+use crate::frame_reader::FrameReader;
+use crate::frame_splitter::Frame;
 use crate::policy;
 use crate::wire::{
     self, RESULT_SUCCESS, Reassembler, ReassemblyStep, decode_registration_response,
