@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E9 after the Aeneas spike. User decisions U1 to U36; verification workflow in [0017](0017-verification-workflow.md); open: C7 (deferred), C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E10. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |
@@ -341,6 +341,8 @@ Kept, no difference: the 100 ms linger (U3); the 1 s stop bound (U8); no role in
 | U34 | 2026-11-23 | (E6) An SDU larger than the byte limit is dropped alone, counted; the queue is unchanged |
 | U35 | 2026-11-23 | (E7) `Serve` clears ready and `Deadline` clears the deadline; the caller re-arms them |
 | U36 | 2026-11-23 | C6: logging in proven cores goes through a project macro compiled out under `cfg(aeneas)`; the real `tracing` crate is not probed |
+| U37 | 2026-11-23 | (E10) No "until not ready" budget; a source or handler number that does not exist panics; `begin_pass` during a pass abandons it; `has_ready_source` ignores budget-0 sources (`em-event-loop` spec rev 3) |
+| U38 | 2026-11-23 | Timers: one deadline per handler in `em-event-loop`, set by the application wiring with a fixed `HandlerId`; "none" cancels. No timer ids in the loop. A separate `TimerTable` with ids is a possible later component. The wiring syncs every handler's `next_deadline()` after every turn |
 
 ## Open choices (the user's)
 
@@ -388,6 +390,9 @@ no `sorry`, only Lean's standard axioms. These errata change the text above wher
 - **E9 (C6, C11 inputs).** Logging: a project macro expanding to `#[cfg(not(aeneas))] { tracing::… }` keeps logging out of
   the proofs (the real `tracing` crate was not tried). CI cost: about 19 GB of cached image and volume, a pinned Aeneas
   commit with its own Rust nightly next to the 1.85 MSRV, about 1 minute per proof check. C6 and C11 stay open.
+- **E10 (budgets, write source → U37).** The budget "until not ready" is removed (`em-event-loop` spec rev 3): every budget
+  is a number, so a pass always ends. In D2 and D3b read the write source as `Count(1)`. Its ready condition is defined in
+  the `TransportCore` brief; it must not stay ready while the socket is known to be blocked, or the driver would spin.
 
 ## Revision history
 

@@ -1,0 +1,62 @@
+# Rule map: English rule to Lean theorem
+
+Spec: `../spec-en.md` (rev 4, frozen). Model and step relations: `StepSpec.lean`. All theorems below are in
+`Rules.lean` (all proved, no `sorry`) and take `hops : ops.Meets`, so they hold for any
+operations that meet the step spec. Line numbers are of the `theorem` line.
+
+| Rule | Theorem | Line |
+|---|---|---|
+| S1 Start | `S1_new_loop_is_idle` | 48 |
+| | `S1_next_turn_before_begin_pass` | 256 |
+| | `S1_first_answer_after_new_is_done` | 270 |
+| S2 Budget | `S2_served_at_most_budget` | 706 |
+| S3 Order and shape | `S3_source_numbers_never_go_down` | 815 |
+| | `S3_no_serve_after_a_non_serve` | 823 |
+| | `S3_handler_numbers_strictly_go_up` | 840 |
+| | `S3_pass_done_stays_done` | 848 |
+| S4 Checked at each answer | `S4_served_source_was_eligible` | 865 |
+| | `S4_run_handler_was_due` | 869 |
+| S5 Paused means never | `S5_paused_source_never_served` | 875 |
+| | `S5_paused_handler_never_runs` | 886 |
+| | `S5_pausing_a_source_keeps_ready` | 897 |
+| | `S5_pausing_a_handler_keeps_deadline` | 906 |
+| S6 Sources are not skipped | `S6_no_eligible_source_skipped` | 916 |
+| | `S6_first_non_serve_leaves_no_eligible_source` | 921 |
+| | `S6_no_source_behind_the_position_is_served` | 926 |
+| S7 Serving clears ready | `S7_serving_clears_ready_and_nothing_else` | 993 |
+| | `S7_served_again_only_if_made_ready_again` | 1011 |
+| S8 Deadlines are not skipped | `S8_no_due_handler_jumped_over` | 1030 |
+| | `S8_first_pass_done_leaves_no_due_handler` | 1035 |
+| | `S8_due_handler_runs_exactly_once` | 1042 |
+| S9 Running a deadline clears it | `S9_running_clears_deadline_and_nothing_else` | 1080 |
+| | `S9_handler_runs_at_most_once_per_pass` | 1102 |
+| S10 Time is fixed per pass | `S10_run_deadline_not_later_than_now` | 1109 |
+| S11 A pass always ends | `S11_pass_ends_within_bound` | 1123 |
+| S12 Next deadline | `S12_none_means_no_armed_handler` | 1140 |
+| | `S12_some_is_the_earliest_armed_deadline` | 1152 |
+| S13 More work | `S13_has_ready_source_exactly_when` | 1169 |
+| | `S13_ignores_budget_used_in_the_pass` | 1177 |
+| S14 Nothing else changes | `S14_next_turn_keeps_pause_flags_and_budgets` | 1187 |
+| | `S14_next_turn_keeps_other_sources` | 1194 |
+| | `S14_next_turn_keeps_other_handlers` | 1210 |
+| S15 Never fails | `S15_never_fails_for_existing_numbers` | 1232 |
+| | `S15_nonexistent_number_panics` (the panic half) | 1268 |
+| S16 Starting again | `S16_begin_pass_restarts` | 1285 |
+| | `S16_begin_pass_forgets_the_old_pass` | 1295 |
+| S17 Setters change only their target | `S17_set_ready_changes_only_its_target` | 1310 |
+| | `S17_set_paused_changes_only_its_target` | 1319 |
+| | `S17_set_deadline_changes_only_its_target` | 1328 |
+| | `S17_set_deadline_paused_changes_only_its_target` | 1338 |
+
+Not theorems of `Rules.lean` (proved, no `sorry`, in `Reference.lean`): `refOps_meets` (line 264, the reference meets
+the step spec), `*_exactly_one` (lines 373 to 404, one result per call), `nextTurn_unique`, `nextDeadline_unique` and
+the other uniqueness lemmas (lines 300 to 371).
+
+Examples: `Examples.lean`, one section per rule (section headers at lines S1 51, S2 62, S3 70, S4 76, S5 82, S6 93,
+S7 104, S8 113, S9 163, S10 176, S11 182, S12 192, S13 200, S16 211, S17 217). The S8 "exactly once" hypothesis check
+(`twoDueTrace`, and the check that the prototype's "due at every call" form does not apply) is at lines 119 to 161.
+
+Gates G2 and G3 (not in the lakefile; compile with `lake env lean <file>` after `lake build`):
+`CounterExamples.lean` has one `ce_S<rule>_<short>` theorem per counter-example of the spec, each derived from the
+rule theorem above; `PlantedBugs.lean` has `bug<N>_caught : ¬ bug<N>.Meets` for planted defects, each proved by
+applying a rule theorem to a concrete bad run.
