@@ -175,6 +175,9 @@ pub(crate) struct ReassemblyStep {
     pub(crate) sdu: Option<Sdu>,
     /// Frames and incomplete sets thrown away because of this frame.
     pub(crate) dropped: u64,
+    /// True if this frame made the set in progress pass the size cap, so the set was refused.
+    /// Counted apart from `dropped` (0016 D4 "size cap").
+    pub(crate) too_large: bool,
 }
 
 /// A fragment set being joined.
@@ -185,6 +188,16 @@ struct PartialSdu {
     /// The fragment id the next frame must carry. A `u16` so that it can pass 255.
     next_id: u16,
     payload: Vec<u8>,
+}
+
+/// A refused set whose remaining fragments are thrown away without counting. It has the
+/// same shape as a set being joined, but holds no payload.
+#[derive(Debug)]
+struct SkippedSet {
+    local: MacAddr,
+    remote: MacAddr,
+    /// The fragment id the next frame of the set carries.
+    next_id: u16,
 }
 
 /// Joins fragments into SDUs (0011 D3 step 6).
@@ -198,12 +211,31 @@ struct PartialSdu {
 /// `continuation-mac`). Upstream never compares them. The check only separates SDUs
 /// from different peers. Two fragmented SDUs from the same peer carry identical
 /// addresses, and `A0 B0 A1` still joins B0 with A1: the frame has no message id.
-#[derive(Debug, Default)]
+///
+/// A fragmented set whose joined payload would pass the cap is refused (0016 D4 "size cap",
+/// U2, U6; `rx-sdu-cap-1mib`): upstream has no cap. The cap is a number passed in (U15). A
+/// refused set is reported in `ReassemblyStep::too_large` and none of it is delivered. Its
+/// remaining fragments are skipped without counting, until its last fragment. A frame with id
+/// 0 or an unfragmented one ends the skip and is handled as usual. A continuation that does
+/// not match the skipped set ends the skip and is a stray. Unfragmented frames have no cap
+/// here: the frame limit bounds them (0016 E5, U33).
+#[derive(Debug)]
 pub(crate) struct Reassembler {
+    /// Largest joined payload of a set, in octets.
+    cap: usize,
     current: Option<PartialSdu>,
+    skipping: Option<SkippedSet>,
 }
 
 impl Reassembler {
+    pub(crate) fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            current: None,
+            skipping: None,
+        }
+    }
+
     pub(crate) fn push(&mut self, frame: SduFrame) -> ReassemblyStep {
         let mut dropped = 0;
 
@@ -217,6 +249,7 @@ impl Reassembler {
             return ReassemblyStep {
                 sdu: Some(sdu),
                 dropped,
+                too_large: false,
             };
         }
 
@@ -230,11 +263,31 @@ impl Reassembler {
             });
         }
 
+        if let Some(skipped) = self.skipping.as_mut() {
+            let in_skipped_set = u16::from(frame.fragment_id) == skipped.next_id
+                && frame.local == skipped.local
+                && frame.remote == skipped.remote;
+            if in_skipped_set {
+                skipped.next_id += 1;
+                if frame.is_last_fragment == 1 {
+                    self.skipping = None;
+                }
+                return ReassemblyStep {
+                    sdu: None,
+                    dropped,
+                    too_large: false,
+                };
+            }
+            // Not part of the refused set: the skip ends and the frame is handled below.
+            self.skipping = None;
+        }
+
         let Some(partial) = self.current.as_mut() else {
             // A fragment with id above 0 and no set in progress.
             return ReassemblyStep {
                 sdu: None,
                 dropped: dropped + 1,
+                too_large: false,
             };
         };
         let continues_the_set = u16::from(frame.fragment_id) == partial.next_id
@@ -245,32 +298,65 @@ impl Reassembler {
             return ReassemblyStep {
                 sdu: None,
                 dropped: dropped + 2,
+                too_large: false,
+            };
+        }
+        // `partial.payload` is at most the cap, so the subtraction cannot underflow and the
+        // sum of two lengths is never formed.
+        if frame.payload.len() > self.cap - partial.payload.len() {
+            let refused = SkippedSet {
+                local: partial.local,
+                remote: partial.remote,
+                next_id: partial.next_id + 1,
+            };
+            self.current = None;
+            if frame.is_last_fragment != 1 {
+                self.skipping = Some(refused);
+            }
+            return ReassemblyStep {
+                sdu: None,
+                dropped,
+                too_large: true,
             };
         }
         partial.payload.extend_from_slice(&frame.payload);
         partial.next_id += 1;
 
         if frame.is_last_fragment != 1 {
-            return ReassemblyStep { sdu: None, dropped };
+            return ReassemblyStep {
+                sdu: None,
+                dropped,
+                too_large: false,
+            };
         }
         let sdu = self.current.take().map(|done| Sdu {
             local: done.local,
             remote: done.remote,
             cmdu: done.payload,
         });
-        ReassemblyStep { sdu, dropped }
+        ReassemblyStep {
+            sdu,
+            dropped,
+            too_large: false,
+        }
     }
 
     /// Throws away the set in progress, for example when the session ends.
-    /// Returns 1 if there was one.
+    /// Returns 1 if there was one. A set being skipped was counted when it was refused, so it
+    /// is forgotten and returns 0.
     pub(crate) fn abandon_set(&mut self) -> u64 {
+        self.skipping = None;
         u64::from(self.current.take().is_some())
     }
 }
 
 #[cfg(test)]
+mod model_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::RX_SDU_CAP as CAP;
 
     const LOCAL: MacAddr = MacAddr::new([0x02, 0, 0, 0, 0, 0x0a]);
     const REMOTE: MacAddr = MacAddr::new([0x02, 0, 0, 0, 0, 0x0b]);
@@ -372,13 +458,14 @@ mod tests {
 
     #[test]
     fn fragments_join_in_order() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         let first = joiner.push(fragment(1, 0, 0, b"ab"));
         assert_eq!(
             first,
             ReassemblyStep {
                 sdu: None,
-                dropped: 0
+                dropped: 0,
+                too_large: false
             }
         );
         let second = joiner.push(fragment(1, 0, 1, b"cd"));
@@ -386,7 +473,8 @@ mod tests {
             second,
             ReassemblyStep {
                 sdu: None,
-                dropped: 0
+                dropped: 0,
+                too_large: false
             }
         );
         let third = joiner.push(fragment(1, 1, 2, b"e"));
@@ -396,7 +484,7 @@ mod tests {
 
     #[test]
     fn fragment_out_of_order_drops_the_set_and_id_zero_resyncs() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         // id 2 where 1 was expected: the frame and the set are dropped
         let bad = joiner.push(fragment(1, 0, 2, b"xx"));
@@ -404,7 +492,8 @@ mod tests {
             bad,
             ReassemblyStep {
                 sdu: None,
-                dropped: 2
+                dropped: 2,
+                too_large: false
             }
         );
         // the tail of the old set has nothing to join
@@ -413,7 +502,8 @@ mod tests {
             stray,
             ReassemblyStep {
                 sdu: None,
-                dropped: 1
+                dropped: 1,
+                too_large: false
             }
         );
         // id 0 starts over
@@ -442,14 +532,15 @@ mod tests {
     #[test]
     fn continuation_with_a_different_local_drops_the_set() {
         // intentional-difference:continuation-mac
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         let bad = joiner.push(fragment_from(OTHER_MAC, REMOTE, 0, 1, b"cd"));
         assert_eq!(
             bad,
             ReassemblyStep {
                 sdu: None,
-                dropped: 2
+                dropped: 2,
+                too_large: false
             }
         );
         // the set is gone, so the right fragment after it has nothing to join
@@ -461,14 +552,15 @@ mod tests {
     #[test]
     fn continuation_with_a_different_remote_drops_the_set() {
         // intentional-difference:continuation-mac
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         let bad = joiner.push(fragment_from(LOCAL, OTHER_MAC, 0, 1, b"cd"));
         assert_eq!(
             bad,
             ReassemblyStep {
                 sdu: None,
-                dropped: 2
+                dropped: 2,
+                too_large: false
             }
         );
         // a new set starts at id 0 as usual
@@ -481,7 +573,7 @@ mod tests {
     fn interleaved_peers_a0_b0_a1_deliver_nothing() {
         // intentional-difference:continuation-mac
         // A's fragment 1 carries the expected id and the last flag, but B's set is open.
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         let a0 = joiner.push(fragment(1, 0, 0, b"a0"));
         let b0 = joiner.push(fragment_from(LOCAL, OTHER_MAC, 0, 0, b"b0"));
         let a1 = joiner.push(fragment(1, 1, 1, b"a1"));
@@ -491,7 +583,8 @@ mod tests {
             a1,
             ReassemblyStep {
                 sdu: None,
-                dropped: 2
+                dropped: 2,
+                too_large: false
             }
         );
         assert_eq!(a0.sdu, None);
@@ -502,7 +595,7 @@ mod tests {
     fn known_limit_same_address_a0_b0_a1_still_joins_b0_with_a1() {
         // The check cannot tell two SDUs from one peer apart: the frame has no message id
         // (0011 A8, "Limits"). This pins the limit, not a wanted behaviour.
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"a0"));
         let b0 = joiner.push(fragment(1, 0, 0, b"b0"));
         assert_eq!(b0.dropped, 1);
@@ -513,7 +606,7 @@ mod tests {
 
     #[test]
     fn unfragmented_frame_abandons_a_set_in_progress() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         let step = joiner.push(fragment(0, 1, 0, b"whole"));
         assert_eq!(step.sdu, Some(sdu(b"whole".to_vec())));
@@ -522,14 +615,15 @@ mod tests {
 
     #[test]
     fn id_zero_while_a_set_is_open_restarts_it() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         let restarted = joiner.push(fragment(1, 0, 0, b"cd"));
         assert_eq!(
             restarted,
             ReassemblyStep {
                 sdu: None,
-                dropped: 1
+                dropped: 1,
+                too_large: false
             }
         );
         let done = joiner.push(fragment(1, 1, 1, b"e"));
@@ -538,7 +632,7 @@ mod tests {
 
     #[test]
     fn single_fragment_set_completes() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         let step = joiner.push(fragment(1, 1, 0, b"only"));
         assert_eq!(step.sdu, Some(sdu(b"only".to_vec())));
     }
@@ -554,13 +648,14 @@ mod tests {
     fn frame_that_is_not_the_last_and_not_a_fragment_starts_a_set() {
         // Only is_fragment 0 with is_last_fragment 1 is a whole CMDU
         // (`al_service_access_point.cpp:250`).
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         let first = joiner.push(fragment(0, 0, 0, b"ab"));
         assert_eq!(
             first,
             ReassemblyStep {
                 sdu: None,
-                dropped: 0
+                dropped: 0,
+                too_large: false
             }
         );
         let second = joiner.push(fragment(1, 1, 1, b"cd"));
@@ -583,7 +678,7 @@ mod tests {
 
     #[test]
     fn completed_set_does_not_survive_its_last_fragment() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         let done = joiner.push(fragment(1, 1, 1, b"cd"));
         assert_eq!(done.sdu, Some(sdu(b"abcd".to_vec())));
@@ -594,7 +689,8 @@ mod tests {
                 stray,
                 ReassemblyStep {
                     sdu: None,
-                    dropped: 1
+                    dropped: 1,
+                    too_large: false
                 },
                 "stray fragment with id {id}"
             );
@@ -603,7 +699,7 @@ mod tests {
 
     #[test]
     fn unfragmented_frame_closes_the_set_it_abandons() {
-        let mut joiner = Reassembler::default();
+        let mut joiner = Reassembler::new(CAP);
         joiner.push(fragment(1, 0, 0, b"ab"));
         joiner.push(fragment(0, 1, 0, b"whole"));
         let stray = joiner.push(fragment(1, 1, 1, b"cd"));
@@ -611,8 +707,133 @@ mod tests {
             stray,
             ReassemblyStep {
                 sdu: None,
-                dropped: 1
+                dropped: 1,
+                too_large: false
             }
         );
+    }
+
+    /// A reassembler with a cap of 4 octets, and fragments of 2 octets for it.
+    fn small() -> Reassembler {
+        Reassembler::new(4)
+    }
+
+    fn step(sdu: Option<Sdu>, dropped: u64, too_large: bool) -> ReassemblyStep {
+        ReassemblyStep {
+            sdu,
+            dropped,
+            too_large,
+        }
+    }
+
+    #[test]
+    fn set_at_the_cap_is_delivered() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"ab"));
+        let done = joiner.push(fragment(1, 1, 1, b"cd"));
+        assert_eq!(done, step(Some(sdu(b"abcd".to_vec())), 0, false));
+    }
+
+    #[test]
+    fn fragment_that_would_pass_the_cap_refuses_the_set_once() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"ab"));
+        joiner.push(fragment(1, 0, 1, b"cd"));
+        let refused = joiner.push(fragment(1, 0, 2, b"e"));
+        assert_eq!(refused, step(None, 0, true));
+        // the rest of the set is skipped without counting, up to its last fragment
+        assert_eq!(joiner.push(fragment(1, 0, 3, b"fg")), step(None, 0, false));
+        assert_eq!(joiner.push(fragment(1, 1, 4, b"h")), step(None, 0, false));
+        // the skip is over: a continuation is a stray
+        assert_eq!(joiner.push(fragment(1, 1, 5, b"i")), step(None, 1, false));
+    }
+
+    #[test]
+    fn fragment_zero_alone_over_the_cap_refuses_at_once() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        let refused = joiner.push(fragment(1, 0, 0, b"abcde"));
+        assert_eq!(refused, step(None, 0, true));
+        assert_eq!(joiner.push(fragment(1, 1, 1, b"f")), step(None, 0, false));
+    }
+
+    #[test]
+    fn refused_last_fragment_leaves_nothing_to_skip() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abc"));
+        assert_eq!(joiner.push(fragment(1, 1, 1, b"de")), step(None, 0, true));
+        // no skip is left, so the next continuation is a stray
+        assert_eq!(joiner.push(fragment(1, 1, 2, b"f")), step(None, 1, false));
+    }
+
+    #[test]
+    fn unfragmented_frame_over_the_cap_is_delivered() {
+        // E5: the cap applies to fragmented sets only; the frame limit bounds a whole frame.
+        let mut joiner = small();
+        let done = joiner.push(fragment(0, 1, 0, b"abcdefgh"));
+        assert_eq!(done, step(Some(sdu(b"abcdefgh".to_vec())), 0, false));
+    }
+
+    #[test]
+    fn id_zero_ends_the_skip_and_starts_a_new_set() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abcde"));
+        // a new set, not counted as an abandoned one: the refused set was counted already
+        assert_eq!(joiner.push(fragment(1, 0, 0, b"12")), step(None, 0, false));
+        let done = joiner.push(fragment(1, 1, 1, b"3"));
+        assert_eq!(done, step(Some(sdu(b"123".to_vec())), 0, false));
+    }
+
+    #[test]
+    fn unfragmented_frame_ends_the_skip_and_is_delivered() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abcde"));
+        let done = joiner.push(fragment(0, 1, 0, b"whole"));
+        assert_eq!(done, step(Some(sdu(b"whole".to_vec())), 0, false));
+        assert_eq!(joiner.push(fragment(1, 1, 1, b"x")), step(None, 1, false));
+    }
+
+    #[test]
+    fn continuation_with_the_wrong_id_ends_the_skip_as_a_stray() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abcde"));
+        assert_eq!(joiner.push(fragment(1, 0, 3, b"x")), step(None, 1, false));
+        // the skip is over: the frame that was in order is a stray too
+        assert_eq!(joiner.push(fragment(1, 0, 1, b"y")), step(None, 1, false));
+    }
+
+    #[test]
+    fn continuation_from_another_peer_ends_the_skip_as_a_stray() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abcde"));
+        let other = fragment_from(OTHER_MAC, REMOTE, 0, 1, b"x");
+        assert_eq!(joiner.push(other), step(None, 1, false));
+        assert_eq!(joiner.push(fragment(1, 0, 1, b"y")), step(None, 1, false));
+    }
+
+    #[test]
+    fn abandon_set_returns_0_for_a_set_being_skipped() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"abcde"));
+        assert_eq!(joiner.abandon_set(), 0);
+        // and the skip is gone with it
+        assert_eq!(joiner.push(fragment(1, 0, 1, b"x")), step(None, 1, false));
+    }
+
+    #[test]
+    fn id_zero_over_the_cap_abandons_an_open_set_and_refuses_the_new_one() {
+        // intentional-difference:rx-sdu-cap-1mib
+        let mut joiner = small();
+        joiner.push(fragment(1, 0, 0, b"ab"));
+        let refused = joiner.push(fragment(1, 0, 0, b"abcde"));
+        assert_eq!(refused, step(None, 1, true));
     }
 }

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E10. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 (proofs only for `LoopCore` and the `Reassembler`; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E10. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 and A3 (proofs only for `LoopCore`, frozen; the `Reassembler` is tested, not proved; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |

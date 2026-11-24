@@ -15,8 +15,9 @@ No `unsafe`, no clones.
 | `OutboundSdu { session, sdu }` | An SDU for the actor to send, with the `LinkState::session` it was built for. The role actor copies `link.borrow()` when it builds the SDU; the actor writes it only into that session (0011 A6) | |
 | `LinkState` | `Copy { session: u64, al_mac: Option<MacAddr> }`: a latest value. `session` counts registrations; `al_mac` is `Some` while registered | |
 | `TransportError` | A rejected registration, or a socket error that a reconnect cannot fix | `em_ctrl.cpp:1800-1803` |
-| `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event | |
+| `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event. `dropped_receive_too_large` counts fragment sets refused over the 1 MiB cap | |
 | `wire` (private) | Length framing, registration, SDU header, fragment split and join | `al_service_utils.cpp:68-82`, `al_service_access_point.cpp:138-196`, `:224-300` |
+| `policy` (private) | The numbers the mechanisms take as arguments: `RX_SDU_CAP`, 1 MiB (0016 U15, U31) | |
 | `frame_reader` (private) | Cancel-safe frame reader that skips an oversize frame by its length | |
 
 ## Behaviour in short
@@ -37,6 +38,13 @@ No `unsafe`, no clones.
   are dropped (0011 A8). This only separates SDUs from different peers: two fragmented SDUs from the
   same peer have identical addresses and the frame has no message id, so interleaved sets still join
   wrongly.
+- A fragmented set whose joined payload would pass 1 MiB (`policy::RX_SDU_CAP`) is refused when the
+  fragment that would pass it arrives (a fragment 0 alone over the cap is refused at once). It counts once in
+  `dropped_receive_too_large`, not in `dropped_receive_fragments` or `sdus_received`, and none of its frames is
+  delivered. The `Reassembler` then skips the rest of the set without counting, until its last fragment; a frame
+  with id 0 or an unfragmented frame ends the skip and is handled as usual, and a continuation that does not match
+  the set (id or addresses) ends it and is a stray. The session goes on (0016 D4, U2, U6; amends 0011 D3 step 6).
+  The cap applies to fragmented sets only (0016 E5, U33): an unfragmented frame is at most 65 536 octets.
 - The `received` channel carries only SDUs. When the role actor does not read, up to 256 wait in the actor
   beyond the channel's 64; when the queue is full the oldest is dropped and counted.
 - A failed write ends the session without reading further (0011 A7). Every received frame not yet read,
@@ -94,13 +102,24 @@ receiver (0011 A5 stop path).
 
 Tests tagged `intentional-difference:<id>` pin the places where this client differs from upstream's:
 `agent-rejection-fatal`, `retry-connect`, `split-response`, `zero-al-mac`, `reconnect-after-disconnect`,
-`fragment-resync`, `continuation-mac`, `oversize-skipped`, `bad-header-dropped`.
+`fragment-resync`, `continuation-mac`, `oversize-skipped`, `bad-header-dropped`, `rx-sdu-cap-1mib`.
 
 Every wait is bounded. `bounded` fails a test after 60 s of paused time, and `join_within` after its
 own limit (5 s for the six real-time tests). A watchdog thread aborts the test process when a
 guarded wait does not finish in real time: 20 s for `bounded`, the limit plus 5 s for `join_within`,
 and 10 s for the retry tests. No timeout on the test's own thread can interrupt an actor that spins
 without yielding, so the watchdog is the only stop for that case.
+
+`src/wire/model_tests.rs` has a seeded model test of the `Reassembler` (a small xorshift, no dependency): 300
+seeds of 200 random frames and `abandon_set` calls (six peers, each a pair of one of two local and one of three remote addresses, fragmented and whole frames, out-of-order ids, caps
+of 1 to 8 octets) are fed to the `Reassembler` and to a reference model that keeps the joined parts in a `Vec` and
+sums their lengths. Every step must give the same delivered SDU (local, remote and payload bytes, which count up so order shows), `dropped` and refusal flag, and `abandon_set` the same
+count. The same file holds the properties of 0016 D7 (0017 A3): P0 round trip under the cap (up to 256 fragments
+with the encoder's limit as cap), P2' (`A0 B0 A1` from one peer delivers an SDU equal to neither, as a
+counter-example), P3 (abandoned set 1, stray 1, broken continuation 2) and P5 (the partial payload never passes
+the cap, a refusal counts once, nothing of the set is delivered).
+
+Test counts: 50 unit tests (`cargo test -p em-transport --lib`) and 66 in `tests/session.rs`.
 
 Run `cargo test -p em-transport --locked`, and `cargo +1.85.0 test -p em-transport --locked` for MSRV.
 
