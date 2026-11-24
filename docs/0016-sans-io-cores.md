@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E10. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md); open: C7 (deferred), C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E10. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 (proofs only for `LoopCore` and the `Reassembler`; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |
@@ -395,6 +395,11 @@ no `sorry`, only Lean's standard axioms. These errata change the text above wher
   the `TransportCore` brief; it must not stay ready while the socket is known to be blocked, or the driver would spin.
 
 ## Revision history
+
+- 0017 A2 (2026-11-24): D7's transport proof targets narrowed to the `Reassembler` (P0 to P3, P5); the `LoopCore` (P6)
+  proofs stay, frozen; P4 (received queue) dropped, its
+  model-based test stays. D8 steps 4
+  and 5: Codex review plus the user, plan review on request. Recorded in 0017 A2, not by editing the text above.
 
 - errata E1 to E9 (2026-11-23): after the Aeneas spike; U32 to U36.
 - rev 5 (2026-11-23, accepted): the step-by-step walk with the user: step 1 accepted: U9 (name `em-event-loop`), U10 (handler scope); step 2 accepted: U11 (pass order), U12 (outbound buffer); U13 to U15 (general-purpose loop, driver in the crate, all policy in the applications): D2 and D3 split into mechanism (D3) and EasyMesh configuration (D3b); P4 to P6 stated for any policy. Step 3 accepted: U16 to U20 (time type, D4, counters, `Io` in `em-transport`, probe and tests on the loop). Step 4 accepted: U21 to U25 (D5, measurement clock, random type parameter, `BTreeMap`, logging after the spike). Step 5 accepted: U26 (D6 to D8), U27 (enforcement). Walk complete. Final review applied: U28 to U31; deadlines pausable and pauses immediate (from U7); readiness reported by the application for internal sources; the driver rule; leftover "backend" and D3 references fixed; AC3 attribution and the outbound measure.

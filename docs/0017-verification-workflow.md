@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V8. Amended by A1 (2026-11-24) |
+| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V9. Amended by A1 and A2 (2026-11-24). **Since A2, proofs only for `LoopCore` and the `Reassembler`; spec and tests for the rest** |
 | Date | 2026-11-23 |
 | Follows | [0016](0016-sans-io-cores.md) D7, D8, errata E1 to E9; the Aeneas spike (tracking folder `aeneas-spike/report.md`) |
 | Amends | 0016 D7 (how verification is done and reviewed), D8 step 3 (starts with an approved English spec) |
@@ -108,6 +108,7 @@ The user approves G1 to G3 as tables in English; G4 and G5 are pass/fail.
 | V6 | 2026-11-23 | C1: proof files live inside each proven crate, `crates/<name>/verify/` (spec, Lean, extract script) |
 | V7 | 2026-11-23 | C2: the Lean checks run locally in the Docker toolchain until 0016 C11 is decided |
 | V8 | 2026-11-23 | C3: a Claude or Codex implementer writes the proofs, chosen per brief |
+| V9 | 2026-11-24 | A2: the full proof workflow is too much for a hobby project. Proofs only for the very core: `LoopCore` (frozen) and the `Reassembler`; spec and tests for the rest; lighter review set |
 
 ## Choices (all decided: V6 to V8)
 
@@ -144,8 +145,53 @@ This amends D4 (G4, G5) and D5. The text above stays as it was; where it differs
   core and its gate tooling (scripts and the audit). Correctness and adversarial reviewers stay for unproven sensitive
   code (the driver and transport). User decision, 2026-11-24.
 
+### A2 (2026-11-24, after the `em-event-loop` retro): proofs only for the very core; spec and tests for the rest
+
+This amends D1, D5, D6 and the acceptance criteria. The text above stays as it was; where it differs from this
+amendment, this amendment applies. User decision V9.
+
+**Why.** The full workflow cost about 6,000 lines of Lean, scripts and fixtures for 283 lines of Rust, plus two review
+rounds spent on the gate scripts. The proofs found no defect in the Rust, and the Rust tests also caught all 25 planted
+bugs. The lasting gain was the precise English spec: writing it settled several rules before any code (0016 U37, U38;
+S8, S11, S15). For a hobby project the proofs are worth that cost only for the few cores where a hidden bug is both likely to be
+missed by tests and costly; the spec is worth it everywhere.
+
+- **(a) Proofs only for the very core (amends D1).** Aeneas proofs are kept for small, stable code that the project
+  writes itself, that sits on the security or reliability path, and is hard to test exhaustively: code that handles
+  bytes from the network, or code that every message waits on (the scheduler). The list, by user decision:
+  `em-event-loop`'s `LoopCore` (done, frozen, (c)) and the `em-transport`
+  `Reassembler`, with its size cap (0016 P0 to P3 and P5, proved in the spike; brought into the repository at 0016 D8
+  step 4 with the D6 steps, using a copy of the `em-event-loop` gate tooling in its own `verify/`). The received queue (P4) is no longer a proof
+  target; 0016 D7's model-based tests and AC3 cover it. `em-crypto` is not on the list: the primitives (AES, SHA,
+  HMAC, the curves) are in the RustCrypto crates, which Aeneas cannot see into, and the project's own constructions on
+  top of them (the 802.11 and WPS KDF block loops, about 80 lines) are checked with test vectors generated from the pinned upstream code
+  (`tools/upstream-crypto-vectors/`).
+  Any other core is added only by a user decision.
+- **(b) The default for every other pure core.** A short `spec-en.md` in plain English (words used, numbered rules) approved by
+  the user, with an example and a counter-example for each rule whose meaning is subtle; then Rust with unit tests that
+  cover every example and counter-example, and a seeded model test against a simple reference model. No Lean, no
+  extraction, no gates. The Aeneas-friendly code style (0016 E8, U36) is needed only in the cores of (a); the 0016 core
+  rule (no clock, randomness or I/O in cores) stays everywhere, for testability.
+- **(c) `em-event-loop`'s proofs are frozen.** `crates/em-event-loop/verify/` stays in the repository as it is, as the
+  record of what was proved for `LoopCore` at commit `a286628`. It is not part of the standard checks, and its low gate
+  items (`STATUS.md`) will not be fixed. While `src/lib.rs` is unchanged the proofs still hold. If a later change to
+  `LoopCore` breaks them, the proof files (everything under `verify/` except `spec-en.md`) are deleted in that change,
+  not repaired; `spec-en.md` stays the contract and is updated, with the user's approval, when a rule changes. The Rust
+  tests are the safety net either way.
+- **(d) Review set (amends D5 and A1 (d), and 0016 D8's "full review set").** One Codex review of every change, plus the
+  user's own reading. A second reviewer (correctness) is added only for security-sensitive code: keys, secure
+  onboarding, encryption and authentication (secure-onboarding Stages 5 to 8). This also applies to the `em-event-loop`
+  driver, `TransportCore` and the `em-agent`/`em-ctrl` moves (0016 D8 steps 4 and 5), which were to get correctness and
+  adversarial reviewers. A plan review is run when the user asks for one. The contrarian rule (a plan that fails twice)
+  is unchanged. The proven cores of (a) keep A1 (d): the Codex Lean verifier.
+- **(e) Acceptance (amends the acceptance criteria).** The criteria above applied to `em-event-loop` and were met,
+  with the low Codex findings on the gate scripts left open (`STATUS.md`, 2026-11-24). They apply again to the `Reassembler`. Every other core uses the standard checks only: `cargo test`, clippy (pedantic) on stable and
+  1.85.0, `fmt`, `doc`.
+
 ## Revision history
 
+- A2 (2026-11-24): proofs only for `LoopCore` (frozen) and the `Reassembler`; spec and tests for every other core;
+  lighter review set (V9); see the amendment above.
 - A1 (2026-11-24): the gate redesign of step 3b; see the amendment above.
 - accepted (2026-11-23): V6 to V8.
 - rev 2 (2026-11-23): after the trial on the spike's `LoopCore` (tracking folder `aeneas-spike/loopcore/trial-results.md`):
