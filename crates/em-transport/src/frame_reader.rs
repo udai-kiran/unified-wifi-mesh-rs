@@ -6,45 +6,29 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::wire::{LENGTH_PREFIX_LEN, MAX_FRAME_LEN};
+use crate::frame_splitter::{Frame, FrameSplitter};
 
 /// Octets asked from the stream per read.
 const READ_CHUNK: usize = 16 * 1024;
 
-/// One thing read from the stream.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Frame {
-    /// A frame body, without its length prefix.
-    Complete(Vec<u8>),
-    /// A frame longer than [`MAX_FRAME_LEN`]. Its whole body was read and thrown away,
-    /// so the stream is at the start of the next frame (0011 D3 step 6).
-    Oversize { length: u32 },
-}
-
 /// Reads frames from `reader`.
 ///
-/// Octets that arrive are kept in `buffer`, and `read` is the only await point that
+/// Octets that arrive are kept in the splitter, and `read` is the only await point that
 /// waits for the stream. Dropping the future of [`FrameReader::next_frame`] between
 /// polls therefore loses no data.
 pub(crate) struct FrameReader<R> {
     reader: R,
-    buffer: Vec<u8>,
+    splitter: FrameSplitter,
     /// Where one read lands. On the heap so that the futures stay small.
     chunk: Box<[u8]>,
-    /// Octets of an oversize body still to throw away.
-    skip_remaining: u64,
-    /// Length of the oversize frame being skipped.
-    skipping_length: u32,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
     pub(crate) fn new(reader: R) -> Self {
         Self {
             reader,
-            buffer: Vec::new(),
+            splitter: FrameSplitter::new(),
             chunk: vec![0; READ_CHUNK].into_boxed_slice(),
-            skip_remaining: 0,
-            skipping_length: 0,
         }
     }
 
@@ -54,53 +38,14 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     /// Cancel safe.
     pub(crate) async fn next_frame(&mut self) -> io::Result<Frame> {
         loop {
-            if let Some(frame) = self.take_frame() {
+            if let Some(frame) = self.splitter.next_frame() {
                 return Ok(frame);
             }
             let count = self.reader.read(&mut self.chunk).await?;
             if count == 0 {
                 return Err(io::ErrorKind::UnexpectedEof.into());
             }
-            self.buffer.extend_from_slice(&self.chunk[..count]);
-        }
-    }
-
-    /// Takes one frame from the buffer if it holds one.
-    fn take_frame(&mut self) -> Option<Frame> {
-        loop {
-            if self.skip_remaining > 0 {
-                // A remaining count too big for usize is certainly above the buffer length.
-                let discard = usize::try_from(self.skip_remaining)
-                    .map_or(self.buffer.len(), |remaining| {
-                        remaining.min(self.buffer.len())
-                    });
-                self.buffer.drain(..discard);
-                self.skip_remaining -= discard as u64;
-                if self.skip_remaining > 0 {
-                    return None;
-                }
-                return Some(Frame::Oversize {
-                    length: self.skipping_length,
-                });
-            }
-
-            let prefix: [u8; LENGTH_PREFIX_LEN] =
-                self.buffer.get(..LENGTH_PREFIX_LEN)?.try_into().ok()?;
-            let length = u32::from_be_bytes(prefix);
-            if length > MAX_FRAME_LEN {
-                self.buffer.drain(..LENGTH_PREFIX_LEN);
-                self.skip_remaining = u64::from(length);
-                self.skipping_length = length;
-                continue;
-            }
-
-            let end = LENGTH_PREFIX_LEN + usize::try_from(length).ok()?;
-            if self.buffer.len() < end {
-                return None;
-            }
-            let body = self.buffer[LENGTH_PREFIX_LEN..end].to_vec();
-            self.buffer.drain(..end);
-            return Some(Frame::Complete(body));
+            self.splitter.push_bytes(&self.chunk[..count]);
         }
     }
 }
@@ -113,6 +58,7 @@ mod tests {
     use tokio::task::JoinHandle;
 
     use super::*;
+    use crate::wire::MAX_FRAME_LEN;
 
     /// A broken reader waits for octets that never come, or loops on end of file. The
     /// tests run in real time, so that this limit also ends a loop that reads without waiting.
