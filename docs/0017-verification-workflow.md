@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V8 |
+| Status | **Accepted** (2026-11-23, user), rev 2, after the trial on the spike's `LoopCore`. User decisions V1 to V8. Amended by A1 (2026-11-24) |
 | Date | 2026-11-23 |
 | Follows | [0016](0016-sans-io-cores.md) D7, D8, errata E1 to E9; the Aeneas spike (tracking folder `aeneas-spike/report.md`) |
 | Amends | 0016 D7 (how verification is done and reviewed), D8 step 3 (starts with an approved English spec) |
@@ -117,8 +117,36 @@ The user approves G1 to G3 as tables in English; G4 and G5 are pass/fail.
 | C2 | Where the Lean checks run | (a) locally in the Docker toolchain until 0016 C11 is decided; (b) CI now | **(a)** |
 | C3 | Who writes the proofs | (a) a Claude implementer; (b) the Codex implementer; (c) either, per brief | **(c)**; the spike used Claude |
 
+## Amendments
+
+### A1 (2026-11-24, `em-event-loop` gate redesign, step 3b): how the gates decide
+
+This amends D4 (G4, G5) and D5. The text above stays as it was; where it differs from this amendment, this amendment applies.
+
+- **(a) The `native_decide` axiom.** On the container's toolchain (Lean v4.36.0), a theorem proved with `native_decide`
+  depends on the axiom `<decl>._native.native_decide.ax_*`, not on `Lean.ofReduceBool`. The G4 check allows that axiom
+  only for theorems of the named examples module (`ExtractedExamples`) and, on the planted-bug path only, of the
+  generated counter-example module. It is not allowed anywhere else.
+- **(b) Lean decides G4 and G5.** The checks read the elaborated Lean environment, not the source text.
+  `AuditAxioms.lean` collects the axioms of every theorem (`Lean.collectAxioms`), fails on `sorryAx` and on any user
+  `axiom`, and checks the exact number of theorems in each module, so a lost theorem fails. `check-modules.py` requires
+  every Lean file to be a lakefile root and every project module to be audited, and rejects only the lines that start with
+  `set_option debug.skipKernelTC` or `@[implemented_by`. Negative fixtures (a file with `sorry`, `admit`, a user
+  `axiom`, a `native_decide` outside the examples module, a lost theorem, a stray file) must each make the gate fail,
+  for their own reason.
+- **(c) A second frozen digest (G5).** G5 also freezes the refinement contract: `Abstraction.lean`, the nine `*_refines`
+  theorems, the four `*_fails` theorems, `RustChange`, `RustPassTrace`, `RustPassTrace_transfer` and every
+  `extracted_S*` theorem of `Transfer.lean`. Their statements are printed from the elaborated types and hashed:
+  `refinement 29 478acf91f57efc22b0a631e1add9447fc5ca938f7a060a6a2046514b5f59c0eb`. The value is recorded only after a
+  blind back-translation (G1 style) that the user accepts; the user accepted it on 2026-11-24. A change needs the user's
+  approval and a new back-translation.
+- **(d) Review set (confirms D5).** For this step, the Codex Lean verifier is the only Codex review, covering the proven
+  core and its gate tooling (scripts and the audit). Correctness and adversarial reviewers stay for unproven sensitive
+  code (the driver and transport). User decision, 2026-11-24.
+
 ## Revision history
 
+- A1 (2026-11-24): the gate redesign of step 3b; see the amendment above.
 - accepted (2026-11-23): V6 to V8.
 - rev 2 (2026-11-23): after the trial on the spike's `LoopCore` (tracking folder `aeneas-spike/loopcore/trial-results.md`):
   G1 pass with four English wording fixes; G2 pass (12 examples, 13 counter-examples); G3 code layer pass (8 of 8

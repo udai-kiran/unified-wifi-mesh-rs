@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/em-types", "crates/em-utils", "crates/em-msg", "crates/em-crypto", "crates/em-dm", "crates/em-db", "crates/em-transport", "crates/em-cmd", "crates/em-orch", "crates/em-easyconnect", "crates/em-core", "crates/em-agent", "crates/em-ctrl"]
+members = ["crates/em-types", "crates/em-utils", "crates/em-event-loop", "crates/em-msg", "crates/em-crypto", "crates/em-dm", "crates/em-db", "crates/em-transport", "crates/em-cmd", "crates/em-orch", "crates/em-easyconnect", "crates/em-core", "crates/em-agent", "crates/em-ctrl"]
 
 [workspace.package]
 edition = "2024"
