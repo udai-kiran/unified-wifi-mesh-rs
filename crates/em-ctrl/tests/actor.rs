@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests of the controller role actor against a fake AL-SAP service (0012 D9).
+//! Tests of the controller on the event loop against a fake AL-SAP service (0012 D9).
 
 mod support;
 
+use std::cell::RefCell;
+use std::io;
+use std::sync::Once;
 use std::time::Duration;
 
 use em_core::MsgIdCounter;
@@ -23,6 +26,46 @@ use support::{FakeService, NOT_SUPPORTED, SUCCESS, ServiceSession, bounded};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+thread_local! {
+    /// What the current test thread logged. The tests run on a current-thread runtime, so the
+    /// controller logs on the thread of the test.
+    static LOG: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+struct ThreadLog;
+
+impl io::Write for ThreadLog {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        LOG.with(|log| log.borrow_mut().push_str(&String::from_utf8_lossy(bytes)));
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Starts capturing the logs of this test thread, from INFO up, for [`captured_logs`].
+///
+/// The subscriber is global and installed once: a scoped one would miss the call sites that a
+/// test running in parallel had already seen without a subscriber. Each test thread has its own
+/// buffer, so the tests do not see each other's lines.
+fn capture_logs() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_writer(|| ThreadLog)
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .init();
+    });
+    LOG.with(|log| log.borrow_mut().clear());
+}
+
+fn captured_logs() -> String {
+    LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
+}
+
 const CONTROLLER: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 2]);
 const OTHER_CONTROLLER: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 9]);
 const AGENT: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 1]);
@@ -35,7 +78,7 @@ const RESET: &str = r#"{"wfa-dataelements:Reset": {"NetworkSSIDList": [
 
 type ActorResult = Result<(), ActorError>;
 
-/// A running controller actor and the way to stop it.
+/// A running controller and the way to stop it.
 struct Running {
     handle: JoinHandle<ActorResult>,
     stop: oneshot::Sender<()>,
@@ -94,6 +137,37 @@ async fn a_search_is_answered_with_a_response_for_the_current_session() {
     assert!(finished(running.handle).await.is_ok());
 }
 
+/// The role is told the link was lost before it is told about the new session (0016 D5). The
+/// log lines are the ones `docker/run-s1.sh` and `run-s2.sh` grep.
+#[tokio::test(start_paused = true)]
+async fn a_reconnect_logs_the_lost_link_before_the_new_session() {
+    capture_logs();
+    let service = FakeService::new();
+    let running = start(&service);
+    let mut first = service.accept_and_respond(CONTROLLER, SUCCESS).await;
+    expect_answered(&mut first, 1).await;
+    drop(first);
+    let mut second = service.accept_and_respond(CONTROLLER, SUCCESS).await;
+    expect_answered(&mut second, 2).await;
+    running.stop.send(()).unwrap();
+    assert!(finished(running.handle).await.is_ok());
+
+    let logs = captured_logs();
+    let registered = logs
+        .find("em_ctrl::actor: registered session=1")
+        .unwrap_or_else(|| panic!("no registered line in:\n{logs}"));
+    let lost = logs
+        .find("em_ctrl::actor: link lost, waiting to register")
+        .expect("no 'link lost' line");
+    let new_session = logs
+        .find("em_ctrl::actor: new session, same AL MAC")
+        .expect("no 'new session' line");
+    assert!(
+        registered < lost && lost < new_session,
+        "wrong order:\n{logs}"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_different_al_mac_on_a_later_session_is_fatal() {
     let service = FakeService::new();
@@ -118,6 +192,25 @@ async fn a_rejected_registration_ends_the_actor_with_an_error() {
     let running = start(&service);
     let _session = service.accept_and_respond(CONTROLLER, NOT_SUPPORTED).await;
 
+    match finished(running.handle).await {
+        Err(ActorError::Transport(TransportError::RegistrationRejected { result })) => {
+            assert_eq!(result, NOT_SUPPORTED);
+        }
+        other => panic!("expected a rejected registration, got {other:?}"),
+    }
+}
+
+/// The transport ends on its own, after the role was running for a session: `run` returns
+/// the transport's error.
+#[tokio::test(start_paused = true)]
+async fn a_rejected_registration_on_a_reconnect_ends_the_actor_with_an_error() {
+    let service = FakeService::new();
+    let running = start(&service);
+    let mut first = service.accept_and_respond(CONTROLLER, SUCCESS).await;
+    expect_answered(&mut first, 1).await;
+    drop(first);
+
+    let _second = service.accept_and_respond(CONTROLLER, NOT_SUPPORTED).await;
     match finished(running.handle).await {
         Err(ActorError::Transport(TransportError::RegistrationRejected { result })) => {
             assert_eq!(result, NOT_SUPPORTED);

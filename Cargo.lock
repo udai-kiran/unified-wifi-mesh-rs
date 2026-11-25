@@ -315,6 +315,7 @@ dependencies = [
  "em-crypto",
  "em-db",
  "em-dm",
+ "em-event-loop",
  "em-msg",
  "em-orch",
  "em-transport",
