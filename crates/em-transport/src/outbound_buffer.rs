@@ -15,11 +15,21 @@ struct Queued {
     frames: Vec<u8>,
     /// Octets of `frames` already written.
     written: usize,
+    /// A write of the rest of `frames` is outstanding: its octets are with the `Io` and the
+    /// result has not come back. Only the oldest SDU can have it.
+    in_flight: bool,
 }
 
 impl Queued {
+    /// Octets of this SDU have been written. Decides how a session end counts it.
     fn is_started(&self) -> bool {
         self.written > 0
+    }
+
+    /// `push` must keep this SDU: it is started, or its write is outstanding, and the result
+    /// of that write will be applied to it.
+    fn is_protected(&self) -> bool {
+        self.is_started() || self.in_flight
     }
 }
 
@@ -58,9 +68,15 @@ pub(crate) struct SessionEndOutcome {
 /// written included. 0016 U12 measures the sum of `cmdu.len()`; this counts the stored frames (at
 /// most 19 octets more per fragment) so that SDUs with an empty CMDU cannot grow the buffer
 /// without bound (coordinator decision). When a push would pass the limit, the oldest SDUs
-/// that are not started are dropped until it fits. An SDU that cannot fit even then (it is alone
-/// over the limit, or the started SDU and it together are) is refused, and nothing else is
+/// that are not protected are dropped until it fits. An SDU that cannot fit even then (it is alone
+/// over the limit, or the protected SDU and it together are) is refused, and nothing else is
 /// dropped: 0016 U12, coordinator decision for an SDU above the limit (mirrors E6).
+///
+/// **Protected SDU.** The oldest SDU is protected when it is started, or when its write is in
+/// flight ([`OutboundBuffer::mark_write_in_flight`]): the chunk was handed to the `Io`, and the
+/// result that follows is applied to that SDU, so it must still be the oldest when it arrives. A
+/// write in flight does not make the SDU "started" for [`OutboundBuffer::end_session`]: nothing
+/// is known to have left the socket, so it counts as not started.
 ///
 /// **Memory bound.** The buffer stores at most `max_bytes` octets of frames. While `push`
 /// encodes, the SDU and its frames exist twice for a moment (up to 16 MiB for the largest SDU).
@@ -91,28 +107,32 @@ impl OutboundBuffer {
         let frames = frames.concat();
         let stored_len = frames.len();
 
-        // Only the oldest SDU can be started: SDUs are written one after the other.
-        let oldest_started = self.is_oldest_started();
-        let started_bytes = match self.queue.front() {
-            Some(oldest) if oldest_started => oldest.frames.len(),
+        // Only the oldest SDU can be protected: SDUs are written one after the other.
+        let oldest_protected = self.queue.front().is_some_and(Queued::is_protected);
+        let protected_bytes = match self.queue.front() {
+            Some(oldest) if oldest_protected => oldest.frames.len(),
             _ => 0,
         };
-        if started_bytes + stored_len > self.max_bytes {
+        if protected_bytes + stored_len > self.max_bytes {
             outcome.overflow = 1;
             return outcome;
         }
 
-        let first_unstarted = usize::from(oldest_started);
+        let first_unprotected = usize::from(oldest_protected);
         while self.bytes + stored_len > self.max_bytes {
-            // The check above shows that dropping the unstarted SDUs is enough.
-            if let Some(dropped) = self.queue.remove(first_unstarted) {
+            // The check above shows that dropping the unprotected SDUs is enough.
+            if let Some(dropped) = self.queue.remove(first_unprotected) {
                 self.bytes -= dropped.frames.len();
             }
             outcome.overflow += 1;
         }
 
         self.bytes += stored_len;
-        self.queue.push_back(Queued { frames, written: 0 });
+        self.queue.push_back(Queued {
+            frames,
+            written: 0,
+            in_flight: false,
+        });
         outcome
     }
 
@@ -120,6 +140,23 @@ impl OutboundBuffer {
     pub(crate) fn next_chunk(&self) -> Option<&[u8]> {
         let oldest = self.queue.front()?;
         Some(&oldest.frames[oldest.written..])
+    }
+
+    /// Records that the `Io` was given [`OutboundBuffer::next_chunk`] to write. Until
+    /// [`OutboundBuffer::write_finished`] or `end_session`, `push` keeps the oldest SDU. Does
+    /// nothing when the buffer is empty.
+    pub(crate) fn mark_write_in_flight(&mut self) {
+        if let Some(oldest) = self.queue.front_mut() {
+            oldest.in_flight = true;
+        }
+    }
+
+    /// The result of the write in flight has come (or it will not come): the oldest SDU is no
+    /// longer protected for it. Call before [`OutboundBuffer::advance`] or instead of it.
+    pub(crate) fn write_finished(&mut self) {
+        if let Some(oldest) = self.queue.front_mut() {
+            oldest.in_flight = false;
+        }
     }
 
     /// Records that `written` octets of [`OutboundBuffer::next_chunk`] were written.
@@ -149,7 +186,7 @@ impl OutboundBuffer {
     /// True if the oldest SDU is partly written. Only the tests read it.
     #[cfg(test)]
     pub(crate) fn has_started(&self) -> bool {
-        self.is_oldest_started()
+        self.queue.front().is_some_and(Queued::is_started)
     }
 
     /// Empties the buffer at the end of a session and returns what it counts (0016 D3b).
@@ -175,10 +212,6 @@ impl OutboundBuffer {
     #[cfg(test)]
     pub(crate) fn byte_count(&self) -> usize {
         self.bytes
-    }
-
-    fn is_oldest_started(&self) -> bool {
-        self.queue.front().is_some_and(Queued::is_started)
     }
 }
 
@@ -322,6 +355,59 @@ mod tests {
         buffer.advance(first.len() - 1);
         let third = encoded(&sdu(3, 5));
         assert_eq!(buffer.next_chunk(), Some(&third[..]));
+    }
+
+    #[test]
+    fn overflow_keeps_the_sdu_whose_write_is_in_flight() {
+        // The head is not started, but its chunk is with the `Io`.
+        let mut buffer = OutboundBuffer::new(50);
+        buffer.push(&sdu(1, 4));
+        buffer.push(&sdu(2, 8));
+        buffer.mark_write_in_flight();
+        // 23 + 27 + 23 = 73: SDU 2 goes, SDU 1 stays.
+        assert_eq!(buffer.push(&sdu(3, 4)), overflow(1));
+        assert_eq!(buffer.byte_count(), 46);
+        let first = encoded(&sdu(1, 4));
+        assert_eq!(buffer.next_chunk(), Some(&first[..]));
+        assert_eq!(buffer.advance(first.len()), sent(1));
+        let third = encoded(&sdu(3, 4));
+        assert_eq!(buffer.next_chunk(), Some(&third[..]));
+    }
+
+    #[test]
+    fn sdu_that_fits_only_without_the_sdu_in_flight_is_refused() {
+        let mut buffer = OutboundBuffer::new(50);
+        buffer.push(&sdu(1, 4));
+        buffer.mark_write_in_flight();
+        // 23 + 28 = 51, one above the limit.
+        assert_eq!(buffer.push(&sdu(2, 9)), overflow(1));
+        assert_eq!(buffer.byte_count(), 23);
+    }
+
+    #[test]
+    fn a_finished_write_unprotects_the_head() {
+        let mut buffer = OutboundBuffer::new(50);
+        buffer.push(&sdu(1, 4));
+        buffer.push(&sdu(2, 8));
+        buffer.mark_write_in_flight();
+        buffer.write_finished();
+        assert_eq!(buffer.push(&sdu(3, 4)), overflow(1));
+        let second = encoded(&sdu(2, 8));
+        assert_eq!(buffer.next_chunk(), Some(&second[..]));
+    }
+
+    #[test]
+    fn end_session_counts_an_sdu_in_flight_as_not_started() {
+        let mut buffer = OutboundBuffer::new(100);
+        buffer.push(&sdu(1, 3));
+        buffer.mark_write_in_flight();
+        assert_eq!(
+            buffer.end_session(),
+            SessionEndOutcome {
+                send_failed: 0,
+                send_disconnected: 1
+            }
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ em-orch = { path = "../em-orch" }
 em-core = { path = "../em-core" }
 em-crypto = { path = "../em-crypto" }
 em-transport = { path = "../em-transport" }
+em-event-loop = { path = "../em-event-loop" }
 tokio = { version = "1.54.1", default-features = false, features = ["rt-multi-thread", "signal", "macros", "time", "sync"] }
 tracing = { version = "0.1.44", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }

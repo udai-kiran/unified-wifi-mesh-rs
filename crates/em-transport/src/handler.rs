@@ -30,7 +30,9 @@
 //! One [`TransportIoAction::Write`] is in flight at a time. It carries a copy of the core's chunk
 //! (at most one frame). The `Io` writes it as soon as the pass ends, so the result is reported to
 //! the core with the time of the pass that emitted the `Write` (the core's `wrote(now, ..)` rule:
-//! a result is judged at the time the write was performed).
+//! a result is judged at the time the write was performed). Until the result arrives the core
+//! keeps the SDU of the chunk (see [`TransportCore::write_issued`]), so a `send` in the same pass
+//! cannot evict it.
 //!
 //! # Closing a session
 //!
@@ -328,6 +330,7 @@ impl TransportHandler {
         let Some(chunk) = self.core.write_chunk(now).map(<[u8]>::to_vec) else {
             return;
         };
+        self.core.write_issued();
         self.write_issued_at = Some(now);
         actions.push(TransportIoAction::Write(chunk).into());
     }

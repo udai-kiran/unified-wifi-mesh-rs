@@ -18,7 +18,7 @@ No `unsafe`, no clones. The same transport also runs on the event loop (`Transpo
 | `TransportError` | A rejected registration, or a socket error that a reconnect cannot fix | `em_ctrl.cpp:1800-1803` |
 | `TransportCounters` | Drops and totals; errors go to `tracing`, there is no error event. `dropped_receive_too_large` counts fragment sets refused over the 1 MiB cap. `dropped_send_overflow` (0016 U12) is counted only by `TransportCore`: the actor never sets it | |
 | `wire` (private) | Length framing, registration, SDU header, fragment split and join | `al_service_utils.cpp:68-82`, `al_service_access_point.cpp:138-196`, `:224-300` |
-| `TransportCore`, `TransportPolicy`, `TransportAction`, `TransportOutcome`, `RegistrationStep`, `Frame` | The sync transport core (0016 D4, step 4b-2b); see "TransportCore" below. The handler and the tokio `Io` run it on the event loop (4b-3). The old actor stays until `em-agent` moves to the loop (4c). `Frame` is public because `registration_frame` takes the registration response as one | `actor.rs` (the behaviour it ports) |
+| `TransportCore`, `TransportPolicy`, `TransportAction`, `TransportOutcome`, `RegistrationStep`, `Frame` | The sync transport core (0016 D4, step 4b-2b); see "TransportCore" below. The handler and the tokio `Io` run it on the event loop (4b-3). `em-agent` runs on the loop (4c). The old actor stays until `em-ctrl` moves to the loop (step 5). `Frame` is public because `registration_frame` takes the registration response as one | `actor.rs` (the behaviour it ports) |
 | `policy` (private) | The numbers, in one place (0016 U15, U31): reconnect delay 2 s, received queue 1024 SDUs and 4 MiB, SDU cap 1 MiB, outbound buffer 4 MiB, write stall 5 s, stop write limit 900 ms, linger 100 ms. `TransportPolicy::easymesh()` gathers them; the actor uses `LINGER`, `TransportConfig::new` the reconnect delay | |
 | `transport_core` (private module) | `TransportCore` and its types, built on `FrameSplitter`, `Reassembler`, `ReceivedQueue` and `OutboundBuffer`. Tests in `src/transport_core/tests.rs` | |
 | `handler` (private module; `TransportHandler` and its types are public) | Synchronous composition of `TransportCore` into an `em-event-loop` application (0016 D2, D3b). `TransportSources` gives the ids of the read, registration and write sources and the timer. `TransportEvent`s come in; `TransportIoAction`s go out (`Connect`, `CloseSession`, `Read`, `Write(Vec<u8>)`). Reads are armed by `Read` only. One `Write` is in flight at a time, and its result is judged at the time of the pass that issued it. Tests in `src/handler/tests.rs` | |
@@ -26,7 +26,7 @@ No `unsafe`, no clones. The same transport also runs on the event loop (`Transpo
 | `frame_reader` (private) | Cancel-safe async frame reader that skips an oversize frame by its length; delegates the byte-to-frame logic to `frame_splitter` | |
 | `frame_splitter` (private) | `FrameSplitter` and `Frame`: sync byte-to-frame logic (`push_bytes`, `next_frame`, `has_frame`). No tokio. Built in 0016 D8 step 4b-2a; `FrameReader` and `TransportCore` use it | |
 | `received_queue` (private) | `ReceivedQueue`: sync queue of received SDUs with an SDU limit and a byte limit (sum of `cmdu.len()`), drop oldest, an SDU above the byte limit dropped alone (0016 U1, E6, U34). Difference `rx-queue-1024-4mib`. Built in 4b-2a, used by `TransportCore`; the actor keeps its own 256-SDU queue | |
-| `outbound_buffer` (private) | `OutboundBuffer`: sync per-session write queue with partial-write tracking, a byte limit, drop oldest not started, and the session-end counts (0016 U12, D3b). Difference `tx-buffer`. Built in 4b-2a, used by `TransportCore`; the actor still writes with `send_sdu` | |
+| `outbound_buffer` (private) | `OutboundBuffer`: sync per-session write queue with partial-write tracking, a byte limit, drop oldest not started (an SDU whose write is in flight is kept, 0016 E12 item 9), and the session-end counts (0016 U12, D3b). Difference `tx-buffer`. Built in 4b-2a, used by `TransportCore`; the actor still writes with `send_sdu` | |
 
 ## TransportCore
 
@@ -184,7 +184,7 @@ with the encoder's limit as cap), P2' (`A0 B0 A1` from one peer delivers an SDU 
 counter-example), P3 (abandoned set 1, stray 1, broken continuation 2) and P5 (the partial payload never passes
 the cap, a refusal counts once, nothing of the set is delivered).
 
-Test counts: 167 unit tests (`cargo test -p em-transport --lib`; 64 of them in `transport_core`, 19 in `handler`), 66 in `tests/loop_session.rs` and 66 in `tests/session.rs`.
+Test counts: 174 unit tests (`cargo test -p em-transport --lib`; 66 of them in `transport_core`, 20 in `handler`), 66 in `tests/loop_session.rs` and 66 in `tests/session.rs`.
 
 Run `cargo test -p em-transport --locked`, and `cargo +1.85.0 test -p em-transport --locked` for MSRV.
 

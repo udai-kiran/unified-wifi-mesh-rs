@@ -202,8 +202,8 @@ pub struct TransportCounters {
     pub dropped_send_disconnected: u64,
     /// SDUs that need more than 256 fragments, or whose write failed.
     pub dropped_send_failed: u64,
-    /// SDUs dropped because the outbound buffer was full: the oldest SDU not yet started, or the
-    /// new SDU when nothing could be dropped for it. Counted only by `TransportCore`, never by the
+    /// SDUs dropped because the outbound buffer was full: the oldest SDU not yet started (and not
+    /// being written), or the new SDU when nothing could be dropped for it. Counted only by `TransportCore`, never by the
     /// actor (0016 U12, difference `tx-buffer`).
     pub dropped_send_overflow: u64,
     /// Received SDUs dropped because the received queue was full (the oldest goes first).

@@ -250,6 +250,7 @@ dependencies = [
  "em-cmd",
  "em-core",
  "em-crypto",
+ "em-event-loop",
  "em-msg",
  "em-orch",
  "em-transport",
