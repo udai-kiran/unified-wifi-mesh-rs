@@ -10,6 +10,8 @@ use em_core::{AgentState, Outputs, configuration, wsc};
 use em_msg::{CmduHeader, readers};
 use em_types::MacAddr;
 
+use em_crypto::rand::RandomSource;
+
 use crate::{AgentCore, ApplyRadioConfig, Frame};
 
 /// The states in which upstream refuses a renew (`em_agent.cpp:2438-2447`).
@@ -20,7 +22,7 @@ fn renew_is_refused_in(state: AgentState) -> bool {
     )
 }
 
-impl AgentCore {
+impl<R: RandomSource> AgentCore<R> {
     /// An AP-Autoconfiguration WSC message: an M2 for the radio its AP Radio Identifier
     /// names (`em_agent.cpp:2423-2433`, `em_configuration.cpp:6553-6556`).
     pub(crate) fn handle_wsc(
@@ -50,9 +52,11 @@ impl AgentCore {
         let session = self.rules.wsc.session_mut(key);
         // The check runs on the loop task: its time is the loop's stall for the shared
         // secret, the KDF and the AES decryption (0013 D9).
-        let check_started = Instant::now();
+        let check_started = (self.measure_now)();
         let accepted = wsc::accept_m2(session, state, remote, cmdu);
-        let check_us = check_started.elapsed().as_micros();
+        let check_us = (self.measure_now)()
+            .saturating_duration_since(check_started)
+            .as_micros();
         let configs = match accepted {
             Ok(configs) => configs,
             Err(error) => {

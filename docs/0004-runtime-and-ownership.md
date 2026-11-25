@@ -180,3 +180,9 @@ These rules are enforced by the compiler and linter, not by memory:
   with no shared pointers.
 - `STATUS.md` lists 0004 as accepted, and lists these rules in the Approach section of the root
   `README.md`.
+
+## Errata
+
+- **E1 (2026-11-25, 0016 D8 step 6):** the workspace `clippy.toml` also carries the 0016 U27 bans on the clock,
+  OS randomness and hash maps; see [0016](0016-sans-io-cores.md) E15. The `clippy.toml` block in R7 shows only the
+  clone bans.

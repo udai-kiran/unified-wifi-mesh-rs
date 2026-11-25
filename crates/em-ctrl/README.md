@@ -44,6 +44,11 @@ table (the node table plus each radio's agent AL MAC and `ssid_mismatch` flag), 
 deadline per radio node and the 250 ms orchestrator deadline. `tick(now)`,
 `next_deadline()` and `unregistered()` mirror the agent's.
 
+`CtrlCore<R>` takes its random source as a type parameter, `R = OsRandom` by default.
+`CtrlCore::new` is the production constructor (OS randomness and the real clock).
+`CtrlCore::with_sources` takes any random source and a measurement clock, which the replay
+tests use. The clock is read only for the M2 build timing (`build_us`).
+
 - **M1 routing** (`em_ctrl.cpp:1240-1270`). The radio ID in an AP-Autoconfiguration WSC
   message selects the node. An existing node goes to `ctrl_wsc_m1_pending` unless it is in
   `wsc_m2_sent`. Otherwise the agent needs a peer model (a Search made it); without one
@@ -134,7 +139,7 @@ al_mac), `new session, same AL MAC`, `link lost, waiting to register`, `transpor
 
 ### Tests
 
-The package has 40 library tests, 7 in `tests/actor.rs` and 2 in `tests/binary.rs`.
+The package has 42 library tests, 7 in `tests/actor.rs` and 2 in `tests/binary.rs`.
 
 `tests/actor.rs` runs the controller against a fake AL-SAP service over UNIX sockets in a
 temporary directory (a trimmed copy of `em-transport`'s test support), in paused time: a
@@ -157,6 +162,13 @@ agent side accepts with the reset file's SSIDs, the output order (a radio in
 `topo_sync_pending` after a second M1), a failed hand-off, `--test-drop-first-m2`, the
 device-wide Query gate, a Topology Response, an SSID mismatch, the 40 s cancel with one
 renew per radio, the cancel scoped to one agent, and a new `em_config` after the cancel.
+
+The replay tests (`replay_same_seed_gives_identical_output`, `replay_core_seed_reaches_m2`, 0016
+AC3) run a scripted session through `CtrlCore::with_sources`, with a fixed clock, the `SeededRandom`
+source of `em-crypto` for the core, and a seeded test agent that builds the M1 (feature
+`test-random`, enabled only in dev-dependencies). Two runs with the same seeds must give the same
+frames and deadlines (the controller has no platform, so no platform requests). A run with a
+different core seed must change the core's M2. They check output determinism only.
 
 ## Open points
 

@@ -349,6 +349,10 @@ impl<E: Send> em_event_loop::Io<Instant> for TransportIo<E> {
     type Event = IoEvent<E>;
     type Action = IoAction;
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "TransportIo is the loop's I/O; its clock is the loop's clock (0016 U27)"
+    )]
     fn now(&mut self) -> Instant {
         tokio::time::Instant::now().into_std()
     }

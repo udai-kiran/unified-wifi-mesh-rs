@@ -134,6 +134,10 @@ macro_rules! tlv_newtype {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "tests use HashSet for uniqueness checks; 0016 U27 allows test modules"
+)]
 mod tests {
     use crate::bodies::TlvBody;
     use crate::body::{Reader, Writer};

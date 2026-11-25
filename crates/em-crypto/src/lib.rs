@@ -21,5 +21,9 @@ pub mod siv;
 
 pub use error::Error;
 pub use hash::HashAlgorithm;
+#[allow(
+    clippy::disallowed_types,
+    reason = "0016 U27: re-export of the production random source"
+)]
 pub use rand::{Nonce, OsRandom, RandomError, RandomSource};
 pub use secret::{SecretArray, SecretBytes};

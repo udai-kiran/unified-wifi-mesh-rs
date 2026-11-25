@@ -4,4 +4,23 @@ disallowed-methods = [
   { path = "core::iter::Iterator::cloned",  reason = "0004 R2: no .cloned(); use .copied() for Copy types or borrow" },
   { path = "core::option::Option::cloned",  reason = "0004 R2: no .cloned()" },
   { path = "core::result::Result::cloned",  reason = "0004 R2: no .cloned()" },
+  { path = "std::time::Instant::now", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "std::time::Instant::elapsed", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "std::time::SystemTime::now", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "std::time::SystemTime::elapsed", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "tokio::time::Instant::now", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "tokio::time::Instant::elapsed", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct clock read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "em_crypto::rand::OsRandom::new", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct randomness read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+  { path = "tokio::time::interval", reason = "0016 U27 / D5: reads the clock internally (tokio Instant::now); cores are synchronous and take deadlines as inputs; tokio timers belong in I/O modules and tests" },
+  { path = "tokio::time::sleep", reason = "0016 U27 / D5: reads the clock internally (tokio Instant::now); cores are synchronous and take deadlines as inputs; tokio timers belong in I/O modules and tests" },
+  { path = "tokio::time::timeout", reason = "0016 U27 / D5: reads the clock internally (tokio Instant::now); cores are synchronous and take deadlines as inputs; tokio timers belong in I/O modules and tests" },
+  { path = "getrandom::getrandom", reason = "0016 U27 / D5: cores take the clock and randomness as inputs; no direct randomness read; take it as an input (allowed only in the production constructors `new`, I/O modules and tests)" },
+]
+
+disallowed-types = [
+  { path = "em_crypto::rand::OsRandom", reason = "0016 U27 / D5: randomness comes from the RandomSource type parameter; name OsRandom only in production constructors" },
+  { path = "em_crypto::rand::SeededRandom", reason = "0016 U27 / D5: deterministic, for replay tests only; never in production code" },
+  { path = "std::hash::RandomState", reason = "0016 U27 / D5: seeds itself from the OS randomness; use a fixed hasher or a sorted container so output is deterministic" },
+  { path = "std::collections::HashMap", reason = "0016 U27 / D5: iteration order is random; use SortedVecMap or sorted Vec so output is deterministic" },
+  { path = "std::collections::HashSet", reason = "0016 U27 / D5: iteration order is random; use SortedVecMap or sorted Vec so output is deterministic" },
 ]

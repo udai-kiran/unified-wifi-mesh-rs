@@ -43,6 +43,11 @@ S1 library part (synchronous core, tested without sockets) and the tokio event l
 `take_platform_requests()`. After each input the loop hands the requests to the
 `Platform` and feeds confirmations back as inputs.
 
+`AgentCore<R>` takes its random source as a type parameter, `R = OsRandom` by default.
+`AgentCore::new` is the production constructor (OS randomness and the real clock).
+`AgentCore::with_sources` takes any random source and a measurement clock, which the replay
+tests use. The clock is read only for the D9 timings (`build_us`, `check_us`).
+
 - **M1.** A Response that moves a radio to `wsc_m2_pending` makes the core build M1 with
   `em_core::wsc::build_m1` (new MID, MAC Address = the agent's AL MAC), send it to the
   controller found in the Response and record the hand-off time. If M1 cannot be built
@@ -160,7 +165,7 @@ al_mac), `new session, same AL MAC`, `link lost, waiting to register`, `transpor
 
 ### Tests
 
-The package has 45 library tests and 10 in `tests/actor.rs`.
+The package has 47 library tests and 10 in `tests/actor.rs`.
 
 `tests/actor.rs` runs the agent against a fake AL-SAP service over UNIX sockets in a
 temporary directory (a trimmed copy of `em-transport`'s test support), in paused time:
@@ -185,6 +190,14 @@ otherwise, a renew followed by a lost M2, and two renews from the controller's 4
 timeout completing through the `onewifi_cb` restart, no stale `cfg_renew` in 60 s after
 that restart synchronizes, and a renew queued behind a running `dev_init` that runs once that `dev_init` is done
 with its radio, when no recovery is involved (upstream behaviour).
+
+The replay tests (`replay_same_seed_gives_identical_output`, `replay_core_seed_reaches_m1`, 0016
+AC3) run a scripted session through `AgentCore::with_sources`, with a fixed clock and the
+`SeededRandom` source of `em-crypto` (feature `test-random`, enabled only in dev-dependencies).
+Two runs with the same seeds must give the same frames, platform requests and deadlines. The
+platform requests are compared with each network key as a SHA-256 digest, since `Debug` redacts
+the key. A run with a different core seed must change the core's M1. They check output
+determinism only.
 
 ## Open points
 

@@ -224,6 +224,15 @@ upstream instead of by a generator.
 2. **Resolved (2026-11-18, user):** note 0004 was written first: async on tokio, no `.clone()`
    (including `Arc`), no `unsafe`.
 
+## Amendments
+
+- **A1 (2026-11-25, 0016 D8 step 6, U32):** `em-utils` also holds `sorted_map`:
+  `SortedVecMap<K: Ord, V>`, a map kept as a `Vec<(K, V)>` sorted by key, with the usual map
+  methods. The role cores use it in place of `HashMap`, so iteration order is fixed by the key. The
+  "no allocation" rule of D1 covers the rows above; `SortedVecMap` owns a `Vec` and allocates as it
+  grows. The crate still has no dependencies. D5 is unchanged: `monotonic_now` stays in runtime code,
+  and the role cores read the clock through their own input (0016 E15).
+
 ## Errata
 
 - **E1 (2026-11-21, Codex audit of `em-utils`):** two upstream cites at `ba4180b` are corrected here; the text

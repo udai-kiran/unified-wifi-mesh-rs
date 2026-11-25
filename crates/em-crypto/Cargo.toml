@@ -11,6 +11,11 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# `rand::SeededRandom`, a deterministic byte stream for replay tests. For tests only: enable it
+# only from `[dev-dependencies]`, never in a normal dependency entry.
+test-random = []
+
 # Every version is pinned with `=` and every feature list is explicit (note 0006 D2).
 # Features that would pull in an OS random generator (`getrandom`, `std`) are left off on
 # the crates below: all randomness comes from `em_crypto::rand`. `getrandom` itself is used

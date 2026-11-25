@@ -12,6 +12,12 @@
 //! fixture keys, freshly generated keys, and one compressed-point form of a generated key per
 //! curve.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: example uses OS randomness"
+)]
+
 use std::error::Error;
 use std::fmt::Write as _;
 
@@ -45,7 +51,7 @@ fn add_record(
     public: &PublicKey,
     message: &[u8],
 ) -> Result<(), Box<dyn Error>> {
-    let signature = private.sign(message, &mut OsRandom)?;
+    let signature = private.sign(message, &mut OsRandom::new())?;
     // The Rust verifier must agree before the upstream one is asked.
     public.verify(message, &signature)?;
     writeln!(
@@ -76,15 +82,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?;
 
         for length in MESSAGE_LENGTHS {
-            let private = PrivateKey::generate(curve, &mut OsRandom)?;
+            let private = PrivateKey::generate(curve, &mut OsRandom::new())?;
             let public = private.public_key()?;
             let mut message = vec![0; length];
-            OsRandom.fill(&mut message)?;
+            OsRandom::new().fill(&mut message)?;
             add_record(&mut records, &private, &public, &message)?;
         }
 
         // The same kind of key, exported with a compressed point.
-        let private = PrivateKey::generate(curve, &mut OsRandom)?;
+        let private = PrivateKey::generate(curve, &mut OsRandom::new())?;
         let uncompressed = private.public_key()?;
         let compressed = PublicKey::new(
             Point::from_xy(curve, uncompressed.point().as_xy())?,

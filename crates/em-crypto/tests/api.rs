@@ -2,6 +2,12 @@
 
 //! Behaviour of each module beyond the oracle rows: bounds, rejections and round trips.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: integration test uses OS randomness"
+)]
+
 mod common;
 
 use common::row;
@@ -472,8 +478,8 @@ fn dh_peer_parsing_is_total() {
 
 #[test]
 fn dh_two_parties_agree() {
-    let alice = DhPrivate::generate(&mut OsRandom).expect("alice");
-    let bob = DhPrivate::generate(&mut OsRandom).expect("bob");
+    let alice = DhPrivate::generate(&mut OsRandom::new()).expect("alice");
+    let bob = DhPrivate::generate(&mut OsRandom::new()).expect("bob");
     let alice_secret = alice
         .shared_secret(bob.public_key().as_bytes())
         .expect("alice side");

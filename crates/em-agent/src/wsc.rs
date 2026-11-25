@@ -5,7 +5,6 @@
 //! The fake platform has no real device identity or radio capabilities, so this module
 //! supplies fixed values. A `OneWifi` adapter would read them from the platform.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use em_cmd::NodeKey;
@@ -15,6 +14,7 @@ use em_msg::bodies::{
     Profile2ApCapability,
 };
 use em_types::{FreqBand, MacAddr};
+use em_utils::SortedVecMap;
 
 /// BSSs a fake radio can carry: one fronthaul and one backhaul, with room for more.
 const FAKE_MAX_BSS: u8 = 4;
@@ -29,18 +29,23 @@ struct RadioWsc {
 /// The WSC session of every radio, cleared on every terminal path (0013 D6).
 #[derive(Debug, Default)]
 pub(crate) struct WscSessions {
-    radios: HashMap<NodeKey, RadioWsc>,
+    radios: SortedVecMap<NodeKey, RadioWsc>,
 }
 
 impl WscSessions {
     /// The session of a radio, created empty on first use.
     pub(crate) fn session_mut(&mut self, key: NodeKey) -> &mut Session {
-        &mut self.radios.entry(key).or_default().session
+        &mut self
+            .radios
+            .get_or_insert_with(key, RadioWsc::default)
+            .session
     }
 
     /// Records the instant the radio's M1 was handed to the transport.
     pub(crate) fn record_m1_handoff(&mut self, key: NodeKey, now: Instant) {
-        self.radios.entry(key).or_default().m1_handed_off = Some(now);
+        self.radios
+            .get_or_insert_with(key, RadioWsc::default)
+            .m1_handed_off = Some(now);
     }
 
     /// When the radio's M1 was handed off, if its exchange is outstanding.

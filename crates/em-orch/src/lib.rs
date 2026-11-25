@@ -5,12 +5,12 @@
 //! The caller applies submission effects before admission. During a pass each
 //! hook's effects are applied before the next hook. All times come from the caller.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Instant;
 
 use em_cmd::{ActiveOp, ChainId, Command, CommandType, CommandView, NodeKey, OrchOp, OrchState};
 use em_types::FreqBand;
+use em_utils::SortedVecMap;
 
 /// A role change or a request to the role core.
 #[derive(Debug, Copy, PartialEq, Eq)]
@@ -230,11 +230,11 @@ struct Stats {
 /// Owns command chains, queues, per-type timers, and node orchestration state.
 pub struct Orchestrator<R: OrchRole> {
     next_chain: u64,
-    chains: HashMap<ChainId, Chain>,
+    chains: SortedVecMap<ChainId, Chain>,
     pending: Vec<StageId>,
     active: Vec<StageId>,
-    nodes: HashMap<NodeKey, NodeStatus>,
-    stats: HashMap<CommandType, Stats>,
+    nodes: SortedVecMap<NodeKey, NodeStatus>,
+    stats: SortedVecMap<CommandType, Stats>,
     role: PhantomData<fn() -> R>,
 }
 
@@ -242,11 +242,11 @@ impl<R: OrchRole> Default for Orchestrator<R> {
     fn default() -> Self {
         Self {
             next_chain: 0,
-            chains: HashMap::new(),
+            chains: SortedVecMap::new(),
             pending: Vec::new(),
             active: Vec::new(),
-            nodes: HashMap::new(),
-            stats: HashMap::new(),
+            nodes: SortedVecMap::new(),
+            stats: SortedVecMap::new(),
             role: PhantomData,
         }
     }
@@ -346,7 +346,7 @@ impl<R: OrchRole> Orchestrator<R> {
                     chain: id,
                     stage: index,
                 });
-                self.stats.entry(kind).or_default().count += 1;
+                self.stats.get_or_insert_with(kind, Stats::default).count += 1;
                 admitted = true;
             }
         }
@@ -693,4 +693,8 @@ impl<R: OrchRole> CommandView for Orchestrator<R> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "tests build inputs with the real clock; 0016 U27 allows test modules"
+)]
 mod tests;

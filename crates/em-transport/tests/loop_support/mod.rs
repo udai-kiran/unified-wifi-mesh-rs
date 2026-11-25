@@ -10,6 +10,11 @@
 //! registration verdict, the stop signal, the application channel, the received queue to the
 //! role, the data-socket write.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: test harness measures real time"
+)]
+
 use std::future::Future;
 use std::time::{Duration, Instant};
 

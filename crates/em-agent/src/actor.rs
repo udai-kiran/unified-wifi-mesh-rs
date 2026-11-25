@@ -390,6 +390,10 @@ async fn forward_confirmations(
 /// # Panics
 ///
 /// Never in practice: the loop ends only when the transport has finished or the AL MAC changed.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: the loop run reads the production clock once, as the loop's start time"
+)]
 pub async fn run(
     config: AgentConfig,
     mut platform: impl Platform,
@@ -453,6 +457,11 @@ pub async fn run(
 //   `outbound_buffer_of_4_mib_drops_the_oldest_unstarted_sdus_and_counts_them` (the loop, in
 //   `em-transport/tests/loop_session.rs`).
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: actor tests use the real clock and OS randomness"
+)]
 mod tests {
     use std::time::Duration;
 

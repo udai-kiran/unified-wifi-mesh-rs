@@ -11,6 +11,7 @@
 //! | [`akm`] | AKM name and suite selector map | `akm_to_oui`, `oui_to_akm`, `akm_to_bytes` |
 //! | [`time`] | UTC timestamp text | `get_date_time_rfc3399` |
 //! | [`hex`] | Hex dump text | `print_hex_dump` |
+//! | [`sorted_map`] | Map kept in key order, with deterministic iteration | none (a Rust-side map, used in place of `HashMap` in the role cores) |
 //!
 //! No dependencies, no `unsafe`.
 //!
@@ -21,9 +22,11 @@
 pub mod akm;
 pub mod chan;
 pub mod hex;
+pub mod sorted_map;
 pub mod time;
 
 pub use akm::{akm_to_suite, suite_to_akm};
 pub use chan::{FREQ_RANGES, FreqRange, chan_to_freq, freq_to_chan};
 pub use hex::HexDump;
+pub use sorted_map::SortedVecMap;
 pub use time::Rfc3339Utc;

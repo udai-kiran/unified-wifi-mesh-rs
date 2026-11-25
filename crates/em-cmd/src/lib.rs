@@ -8,7 +8,7 @@
 use em_types::{FreqBand, MacAddr};
 
 /// Identifies an AL or radio node, including when they share a MAC address.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeKey {
     /// Interface MAC address.
     pub mac: MacAddr,
@@ -17,7 +17,7 @@ pub struct NodeKey {
 }
 
 /// The two node kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NodeKind {
     /// 1905 AL interface.
     Al,
@@ -30,7 +30,7 @@ pub enum NodeKind {
 pub struct ChainId(pub u64);
 
 /// The command kinds supported through S2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CommandType {
     /// Initialize an agent's device and radio nodes.
     DevInit,

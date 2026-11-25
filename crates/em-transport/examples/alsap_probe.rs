@@ -35,6 +35,11 @@
 //! send multicast search            AP-Autoconfiguration Search to 01:80:c2:00:00:13
 //! ```
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: test tool with the real clock"
+)]
+
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};

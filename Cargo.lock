@@ -255,6 +255,7 @@ dependencies = [
  "em-orch",
  "em-transport",
  "em-types",
+ "em-utils",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -320,6 +321,7 @@ dependencies = [
  "em-orch",
  "em-transport",
  "em-types",
+ "em-utils",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -365,6 +367,7 @@ version = "0.1.0"
 dependencies = [
  "em-cmd",
  "em-types",
+ "em-utils",
  "tracing",
 ]
 

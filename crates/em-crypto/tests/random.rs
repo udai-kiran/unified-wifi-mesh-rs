@@ -3,6 +3,12 @@
 //! Random-source failures propagate as errors through the key-generation paths tested here.
 //! EC key generation and ECDSA signing are tested in `ec.rs`.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: integration test uses OS randomness"
+)]
+
 use em_crypto::dh::DhPrivate;
 use em_crypto::rand::{FailingRandom, OsRandom, random_secret};
 use em_crypto::{Error, Nonce, RandomError, RandomSource};
@@ -37,8 +43,8 @@ fn failing_source_fails_every_generator() {
 
 #[test]
 fn os_source_produces_fresh_bytes() {
-    let first = random_secret::<32>(&mut OsRandom).expect("os random");
-    let second = random_secret::<32>(&mut OsRandom).expect("os random");
+    let first = random_secret::<32>(&mut OsRandom::new()).expect("os random");
+    let second = random_secret::<32>(&mut OsRandom::new()).expect("os random");
     assert_ne!(first.expose(), &[0; 32]);
     assert_ne!(first.expose(), second.expose());
 }
