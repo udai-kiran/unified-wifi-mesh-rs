@@ -3,7 +3,7 @@
 General-purpose turn-by-turn scheduler core in the style of libae. It only answers "what should be done next?"
 (`LoopCore::next_turn`): serve a source, run a handler's deadline, or the pass is done.
 
-**Status:** Rust written and proved (refinement to the frozen step spec, note 0017 D6 step 3); the gates decide from Lean's own checks (note 0017 A1); the async driver `run` (over the `Io` and `App` traits, tested with a fake `Io`) is done (note 0016 D8 step 4a), with `Io::yield_now` for a source that stays ready (0016 E11); the tokio `Io` for the transport is in `em-transport` (step 4b-3).
+**Status:** Rust written and proved (refinement to the frozen step spec, note 0017 D6 step 3); the gates decide from Lean's own checks (note 0017 A1); the async driver `run` (over the `Io` and `App` traits, tested with a fake `Io`) is done (note 0016 D8 step 4a), with `Io::yield_now` for a source that stays ready (0016 E11); the tokio `Io` for the transport is in `em-transport` (step 4b-3). **Done:** `em-agent` and `em-ctrl` each run as one loop (0016 D8 steps 4c and 5, errata E12, E13), and the old transport actor is deleted (step 5b, E14).
 
 **The proofs are frozen (note 0017 A2).** `verify/` records what was proved for `LoopCore` at commit `a286628`. It is not part of
 the standard checks and is not maintained. While the `LoopCore` code is unchanged (re-extraction gives byte-identical `verify/lean/Extracted/` files; checked
@@ -33,7 +33,7 @@ required for code outside the proofs, such as the driver.
 
 ## Verification
 
-- Rust: `cargo test -p em-event-loop --locked` (44 unit tests, 9 of them for the driver), on stable and on 1.85.0.
+- Rust: `cargo test -p em-event-loop --locked` (45 unit tests: 34 spec examples, 10 for the driver, 1 model test), on stable and on 1.85.0.
 - Proofs and gates, from the container image `aeneas-spike:latest` (needs Docker and its two volumes):
   `verify/reproduce.sh` runs them in order and exits 0 only if every gate passes: extraction twice with a
   byte comparison, the Rust tests on nightly-2026-09-17, the file checks (`check-modules.py`),
