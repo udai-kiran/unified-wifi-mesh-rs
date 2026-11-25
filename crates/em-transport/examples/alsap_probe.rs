@@ -6,10 +6,16 @@
 //! alsap_probe --role agent|controller --control <path> --data <path> --fifo <path>
 //! ```
 //!
+//! Runs the transport on the event loop (note 0016 U20): a `LoopCore` with the D3b source
+//! order (data-socket read 64, registration 1, FIFO commands 1, received SDUs 1, data-socket
+//! write 1, one timer handler), a `TransportHandler`, a `TransportIo` whose application
+//! channel carries the FIFO lines, and a small `App` that prints the events.
+//!
 //! Registers, then stays connected. Every event is one line on stdout, flushed. The
 //! `REGISTERED` and `DISCONNECTED` lines come from the transport's link state, a latest
-//! value (note 0011 A5): leaving a registered state, to no AL MAC or to a new session,
-//! prints `DISCONNECTED`; reaching a new session with an AL MAC prints `REGISTERED`.
+//! value (note 0011 A5), checked after every event and every turn: leaving a registered
+//! state, to no AL MAC or to a new session, prints `DISCONNECTED`; reaching a new session
+//! with an AL MAC prints `REGISTERED`.
 //! Commands use the current link state, not the printed one, so each SDU carries the
 //! session it was built for (A6).
 //!
@@ -21,7 +27,8 @@
 //! ```
 //!
 //! Commands come from the FIFO, one per line (the probe creates it if missing and opens it
-//! again at end of file):
+//! again at end of file). When the FIFO reader stops, the probe stops the transport, prints
+//! nothing more to stdout and exits with a failure:
 //!
 //! ```text
 //! send <remote_mac> ap-cap-query   unicast AP Capability Query (0x8001)
@@ -32,15 +39,33 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::Instant;
 
+use em_event_loop::{App, HandlerId, LoopCore, SourceId, Turn, run};
 use em_msg::bodies::{
     AlMacAddress, AutoconfigFreqBand, FrequencyBand, Role as SearchedRoleCode, RoleValue,
     SearchedRole,
 };
 use em_msg::{AL_SAP_BUDGET, BuildError, CmduHeader, MsgBuilder, default_relay};
-use em_transport::{LinkState, OutboundSdu, Role, Sdu, Transport, TransportConfig, spawn};
+use em_transport::{
+    IoAction, IoEvent, LinkState, OutboundSdu, Role, Sdu, TransportConfig, TransportHandler,
+    TransportIo, TransportPolicy, TransportSources,
+};
 use em_types::{FreqBand, MacAddr, MsgType};
 use tokio::sync::mpsc;
+
+const READ: SourceId = SourceId(0);
+const REGISTRATION: SourceId = SourceId(1);
+const FIFO: SourceId = SourceId(2);
+const RECEIVED: SourceId = SourceId(3);
+const WRITE: SourceId = SourceId(4);
+const TIMER: HandlerId = HandlerId(0);
+
+/// Source budgets, in the order of the ids above (0016 D3b).
+const BUDGETS: [usize; 5] = [64, 1, 1, 1, 1];
+
+/// Command lines the FIFO reader may hold before it waits for the loop.
+const FIFO_QUEUE_LEN: usize = 16;
 
 struct Args {
     role: Role,
@@ -118,7 +143,7 @@ fn ensure_fifo(path: &Path) -> Result<(), String> {
 
 /// Reads command lines from the FIFO on a thread of its own (opening a FIFO blocks),
 /// and opens it again whenever the writer closes it.
-fn spawn_fifo_reader(path: PathBuf, lines: mpsc::UnboundedSender<String>) {
+fn spawn_fifo_reader(path: PathBuf, lines: mpsc::Sender<String>) {
     std::thread::spawn(move || {
         loop {
             let file = match File::open(&path) {
@@ -132,7 +157,7 @@ fn spawn_fifo_reader(path: PathBuf, lines: mpsc::UnboundedSender<String>) {
                 let Ok(line) = line else {
                     break;
                 };
-                if lines.send(line).is_err() {
+                if lines.blocking_send(line).is_err() {
                     return;
                 }
             }
@@ -242,6 +267,131 @@ fn print_link_change(previous: LinkState, current: LinkState) {
     }
 }
 
+/// The probe's role: owns the handler, prints the events and runs the FIFO commands.
+struct ProbeApp {
+    handler: TransportHandler,
+    /// The FIFO line the `Io` delivered, until the FIFO source runs.
+    arrived: Option<String>,
+    /// The FIFO reader stopped and the channel is closed.
+    fifo_closed: bool,
+    shown_link: LinkState,
+    next_msg_id: u16,
+}
+
+impl ProbeApp {
+    /// Prints a link change since the last call and refreshes the received source. After the
+    /// FIFO reader stopped nothing is printed: the transport is only winding down, and the
+    /// probe before the loop exited at once, without a line for that.
+    fn refresh(&mut self, core: &mut LoopCore<Instant>) {
+        core.set_ready(RECEIVED, self.handler.received_ready());
+        let current = self.handler.link();
+        if !self.fifo_closed {
+            print_link_change(self.shown_link, current);
+        }
+        self.shown_link = current;
+    }
+
+    fn run_command(&mut self, line: &str, now: Instant, core: &mut LoopCore<Instant>) {
+        if line.trim().is_empty() {
+            return;
+        }
+        // The SDU is built from the link as it is now, not from `shown_link`, which lags
+        // until the loop has printed the change (note 0011 A6).
+        let current_link = self.handler.link();
+        let Some(local) = current_link.al_mac else {
+            eprintln!("alsap_probe: not registered, command ignored: {line}");
+            return;
+        };
+        let command = match parse_command(line) {
+            Ok(command) => command,
+            Err(message) => {
+                eprintln!("alsap_probe: {message}");
+                return;
+            }
+        };
+        let msg_id = self.next_msg_id;
+        self.next_msg_id = self.next_msg_id.wrapping_add(1);
+        let (remote, msg_type, built) = build_command(&command, msg_id, local);
+        let cmdu = match built {
+            Ok(cmdu) => cmdu,
+            Err(error) => {
+                eprintln!("alsap_probe: cannot build the message: {error:?}");
+                return;
+            }
+        };
+        let outbound = OutboundSdu {
+            session: current_link.session,
+            sdu: Sdu {
+                local,
+                remote,
+                cmdu,
+            },
+        };
+        self.handler.send(now, outbound, core);
+        emit(&format!(
+            "SENT {remote} type=0x{:04x} mid={msg_id}",
+            msg_type.0
+        ));
+    }
+}
+
+impl App<Instant> for ProbeApp {
+    type Event = IoEvent<String>;
+    type Action = IoAction;
+
+    fn on_event(&mut self, event: Self::Event, core: &mut LoopCore<Instant>) {
+        match event {
+            IoEvent::Transport(event) => self.handler.on_event(event, core),
+            IoEvent::App(line) => {
+                self.arrived = Some(line);
+                core.set_ready(FIFO, true);
+            }
+            IoEvent::AppClosed => {
+                self.fifo_closed = true;
+                core.set_ready(FIFO, true);
+            }
+        }
+        self.refresh(core);
+    }
+
+    fn serve(
+        &mut self,
+        turn: Turn,
+        now: Instant,
+        core: &mut LoopCore<Instant>,
+        actions: &mut Vec<IoAction>,
+    ) {
+        if !self.handler.serve(turn, now, core, actions) {
+            match turn {
+                Turn::Serve(FIFO) if self.fifo_closed => {
+                    self.handler.stop(now, core, actions);
+                }
+                Turn::Serve(FIFO) => {
+                    if let Some(line) = self.arrived.take() {
+                        self.run_command(&line, now, core);
+                    }
+                    // The next receive is armed only now, so the FIFO feeds the loop one
+                    // line per turn.
+                    actions.push(IoAction::RecvApp);
+                }
+                Turn::Serve(RECEIVED) => {
+                    if let Some(sdu) = self.handler.take_received() {
+                        if !self.fifo_closed {
+                            print_received(&sdu);
+                        }
+                    }
+                }
+                Turn::Serve(_) | Turn::Deadline(_) | Turn::PassDone => {}
+            }
+        }
+        self.refresh(core);
+    }
+
+    fn finished(&self) -> bool {
+        self.handler.outcome().is_some()
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args = match parse_args() {
@@ -259,91 +409,47 @@ async fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let (commands_sender, mut commands) = mpsc::unbounded_channel();
-    spawn_fifo_reader(args.fifo, commands_sender);
+    let (lines_sender, lines) = mpsc::channel(FIFO_QUEUE_LEN);
+    spawn_fifo_reader(args.fifo, lines_sender);
 
     let config = TransportConfig::new(args.control, args.data, args.role);
-    let Transport {
-        sdus,
-        mut received,
-        mut link,
-        counters: _counters,
-        task: mut actor,
-    } = spawn(config);
+    let mut policy = TransportPolicy::easymesh();
+    policy.reconnect_delay = config.reconnect_delay;
 
-    let mut shown_link = LinkState::default();
-    let mut next_msg_id: u16 = 1;
+    let mut io = TransportIo::new(&config, lines);
+    let mut core = LoopCore::new(&BUDGETS, 1);
+    let sources = TransportSources {
+        read: READ,
+        registration: REGISTRATION,
+        write: WRITE,
+        timer: TIMER,
+    };
+    let now = tokio::time::Instant::now().into_std();
+    let handler = TransportHandler::new(policy, now, sources, &mut core);
+    let mut app = ProbeApp {
+        handler,
+        arrived: None,
+        fifo_closed: false,
+        shown_link: LinkState::default(),
+        next_msg_id: 1,
+    };
+    // The first turn of the FIFO source arms the first receive.
+    core.set_ready(FIFO, true);
 
-    loop {
-        tokio::select! {
-            sdu = received.recv() => {
-                let Some(sdu) = sdu else {
-                    break;
-                };
-                print_received(&sdu);
-            }
-            changed = link.changed() => {
-                // The actor ended and dropped the watch.
-                if changed.is_err() {
-                    break;
-                }
-                let current = *link.borrow_and_update();
-                print_link_change(shown_link, current);
-                shown_link = current;
-            }
-            line = commands.recv() => {
-                let Some(line) = line else {
-                    eprintln!("alsap_probe: the FIFO reader stopped");
-                    return ExitCode::FAILURE;
-                };
-                if line.trim().is_empty() {
-                    continue;
-                }
-                // The SDU is built from the link as it is now, not from `shown_link`, which
-                // lags until the loop has handled the change (note 0011 A6).
-                let current_link = *link.borrow();
-                let Some(local) = current_link.al_mac else {
-                    eprintln!("alsap_probe: not registered, command ignored: {line}");
-                    continue;
-                };
-                let command = match parse_command(&line) {
-                    Ok(command) => command,
-                    Err(message) => {
-                        eprintln!("alsap_probe: {message}");
-                        continue;
-                    }
-                };
-                let msg_id = next_msg_id;
-                next_msg_id = next_msg_id.wrapping_add(1);
-                let (remote, msg_type, built) = build_command(&command, msg_id, local);
-                let cmdu = match built {
-                    Ok(cmdu) => cmdu,
-                    Err(error) => {
-                        eprintln!("alsap_probe: cannot build the message: {error:?}");
-                        continue;
-                    }
-                };
-                let outbound = OutboundSdu {
-                    session: current_link.session,
-                    sdu: Sdu { local, remote, cmdu },
-                };
-                if sdus.send(outbound).await.is_err() {
-                    break;
-                }
-                emit(&format!("SENT {remote} type=0x{:04x} mid={msg_id}", msg_type.0));
-            }
-        }
+    run(&mut core, &mut io, &mut app).await;
+
+    if app.fifo_closed {
+        eprintln!("alsap_probe: the FIFO reader stopped");
+        return ExitCode::FAILURE;
     }
-
-    // The received channel or the link watch closed: the actor ended, normally or with an error.
-    match (&mut actor).await {
-        Ok(Ok(())) => ExitCode::SUCCESS,
-        Ok(Err(error)) => {
-            eprintln!("alsap_probe: {error}");
-            ExitCode::FAILURE
-        }
+    let outcome = app
+        .handler
+        .outcome()
+        .expect("the loop ends only when the transport has finished");
+    match io.into_result(outcome) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("alsap_probe: the transport task failed: {error}");
+            eprintln!("alsap_probe: {error}");
             ExitCode::FAILURE
         }
     }

@@ -158,7 +158,7 @@ impl Rig {
 
     /// Writes everything the buffer holds, as a socket that always accepts.
     fn write_all(&mut self) {
-        while let Some(length) = self.core.write_chunk().map(<[u8]>::len) {
+        while let Some(length) = self.core.write_chunk(self.now).map(<[u8]>::len) {
             self.core.wrote(self.now, length);
         }
     }
@@ -440,8 +440,8 @@ fn a_send_while_not_in_a_session_is_counted_as_disconnected() {
     rig.connect();
     rig.send(0, sdu(2, 1));
     assert_eq!(rig.counters().dropped_send_disconnected, 2);
-    assert!(!rig.core.write_ready());
-    assert_eq!(rig.core.write_chunk(), None);
+    assert!(!rig.core.write_ready(rig.now));
+    assert_eq!(rig.core.write_chunk(rig.now), None);
 }
 
 #[test]
@@ -454,10 +454,13 @@ fn an_sdu_for_another_session_is_dropped_and_the_current_one_is_written() {
     rig.send(1, sdu(1, 1));
     rig.send(3, sdu(2, 1));
     assert_eq!(rig.counters().dropped_send_disconnected, 2);
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     rig.send(2, sdu(3, 1));
-    assert!(rig.core.write_ready());
-    assert_eq!(rig.core.write_chunk(), Some(&wire_bytes(&sdu(3, 1))[..]));
+    assert!(rig.core.write_ready(rig.now));
+    assert_eq!(
+        rig.core.write_chunk(rig.now),
+        Some(&wire_bytes(&sdu(3, 1))[..])
+    );
 }
 
 #[test]
@@ -469,7 +472,7 @@ fn a_send_after_a_session_ended_is_disconnected_not_buffered() {
     rig.send(session, sdu(1, 1));
     assert_eq!(rig.counters().dropped_send_disconnected, 1);
     rig.reregister();
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
 }
 
 #[test]
@@ -478,14 +481,14 @@ fn writes_count_when_an_sdu_completes() {
     rig.register();
     rig.send_now(sdu(1, 10));
     let whole = wire_bytes(&sdu(1, 10));
-    assert_eq!(rig.core.write_chunk(), Some(&whole[..]));
+    assert_eq!(rig.core.write_chunk(rig.now), Some(&whole[..]));
     rig.core.wrote(rig.now, 10);
     assert_eq!(rig.counters().sdus_sent, 0);
-    assert_eq!(rig.core.write_chunk(), Some(&whole[10..]));
+    assert_eq!(rig.core.write_chunk(rig.now), Some(&whole[10..]));
     rig.core.wrote(rig.now, whole.len() - 10);
     assert_eq!(rig.counters().sdus_sent, 1);
-    assert_eq!(rig.core.write_chunk(), None);
-    assert!(!rig.core.write_ready());
+    assert_eq!(rig.core.write_chunk(rig.now), None);
+    assert!(!rig.core.write_ready(rig.now));
 }
 
 #[test]
@@ -495,7 +498,7 @@ fn wrote_ignores_zero_and_a_missing_chunk() {
     rig.core.wrote(rig.now, 5);
     rig.send_now(sdu(1, 10));
     rig.core.wrote(rig.now, 0);
-    assert_eq!(rig.core.write_chunk().map(<[u8]>::len), Some(29));
+    assert_eq!(rig.core.write_chunk(rig.now).map(<[u8]>::len), Some(29));
 }
 
 #[test]
@@ -503,15 +506,15 @@ fn the_write_source_is_not_ready_while_the_socket_is_blocked() {
     // 0016 E10.
     let mut rig = Rig::easymesh();
     rig.register();
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     rig.send_now(sdu(1, 10));
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
     rig.core.write_blocked();
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     // The chunk is still there for a caller that wants to look.
-    assert!(rig.core.write_chunk().is_some());
+    assert!(rig.core.write_chunk(rig.now).is_some());
     rig.core.writable();
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
 }
 
 #[test]
@@ -522,7 +525,7 @@ fn a_new_session_starts_with_a_writable_socket() {
     rig.read_ended();
     rig.reregister();
     rig.send_now(sdu(1, 1));
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
 }
 
 #[test]
@@ -538,7 +541,7 @@ fn the_outbound_buffer_overflow_counts_and_drops_the_oldest_not_started() {
     rig.send_now(sdu(5, 1_000_000));
     assert_eq!(rig.counters().dropped_send_overflow, 1);
     // SDU 1 went; SDU 2 is now the oldest. The chunk starts with the prefix and the local MAC.
-    let chunk = rig.core.write_chunk().unwrap();
+    let chunk = rig.core.write_chunk(rig.now).unwrap();
     assert_eq!(&chunk[4..10], &sdu(2, 0).local.octets());
     // Nothing else is counted yet.
     assert_eq!(rig.counters().dropped_send_failed, 0);
@@ -551,7 +554,7 @@ fn an_sdu_that_needs_more_than_256_fragments_counts_as_failed() {
     rig.register();
     rig.send_now(sdu(1, MAX_SDU_PAYLOAD + 1));
     assert_eq!(rig.counters().dropped_send_failed, 1);
-    assert_eq!(rig.core.write_chunk(), None);
+    assert_eq!(rig.core.write_chunk(rig.now), None);
     assert_eq!(rig.core.next_deadline(), None);
 }
 
@@ -605,6 +608,46 @@ fn progress_restarts_the_stall_clock() {
     assert_eq!(rig.take_actions(), [TransportAction::CloseSession]);
     // The partly written SDU is a failed one.
     assert_eq!(rig.counters().dropped_send_failed, 1);
+}
+
+#[test]
+fn a_write_one_tick_before_the_stall_deadline_is_allowed_and_resets_the_clock() {
+    let mut rig = Rig::easymesh();
+    rig.register();
+    rig.send_now(sdu(1, 10));
+    let started = rig.now;
+    rig.now = started + ms(4999);
+    assert!(rig.core.write_ready(rig.now));
+    assert!(rig.core.write_chunk(rig.now).is_some());
+    rig.core.wrote(rig.now, 1);
+    assert_eq!(rig.core.next_deadline(), Some(started + ms(4999 + 5000)));
+    // The old deadline passes without ending the session.
+    rig.advance(ms(1));
+    assert_eq!(rig.take_actions(), []);
+    assert!(rig.core.write_ready(rig.now));
+}
+
+#[test]
+fn a_due_stall_deadline_wins_over_a_write_at_the_same_now() {
+    // The event loop serves the write source before the deadline tick. At and after the stall
+    // deadline no write starts, so it cannot reset the clock of a session that stalled.
+    for late in [0, 1, 500] {
+        let mut rig = Rig::easymesh();
+        rig.register();
+        rig.send_now(sdu(1, 10));
+        rig.now += ms(5000 + late);
+        assert!(!rig.core.write_ready(rig.now), "late {late}");
+        assert_eq!(rig.core.write_chunk(rig.now), None, "late {late}");
+        rig.tick();
+        assert_eq!(
+            rig.take_actions(),
+            [TransportAction::CloseSession],
+            "late {late}"
+        );
+        assert_eq!(rig.counters().dropped_send_disconnected, 1, "late {late}");
+        assert_eq!(rig.counters().dropped_send_failed, 0, "late {late}");
+        assert_eq!(rig.counters().sdus_sent, 0, "late {late}");
+    }
 }
 
 #[test]
@@ -675,7 +718,7 @@ fn every_session_end_counts_by_the_same_rule() {
             "{cause:?}"
         );
         assert_eq!(rig.core.next_deadline(), Some(rig.now + ms(2000)));
-        assert!(!rig.core.write_ready());
+        assert!(!rig.core.write_ready(rig.now));
         assert!(!rig.core.read_ready());
 
         // The splitter starts again: the three octets of the old half frame are gone.
@@ -851,7 +894,7 @@ fn a_stop_writes_until_the_limit_then_lingers_then_finishes() {
     let mut rig = Rig::easymesh();
     stopping_with_two_sdus(&mut rig);
     let stopped_at = rig.now;
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
     assert_eq!(rig.core.next_deadline(), Some(stopped_at + ms(900)));
 
     // The first SDU leaves, the second does not.
@@ -860,14 +903,14 @@ fn a_stop_writes_until_the_limit_then_lingers_then_finishes() {
     assert_eq!(rig.counters().sdus_sent, 1);
     rig.advance(ms(899));
     assert_eq!(rig.take_actions(), []);
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
 
     // At the limit the rest is counted, the sockets stay open.
     rig.advance(ms(1));
     assert_eq!(rig.take_actions(), []);
     assert_eq!(rig.counters().dropped_send_disconnected, 1);
     assert_eq!(rig.counters().dropped_send_failed, 0);
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     assert!(rig.core.link().al_mac.is_some());
     assert_eq!(rig.core.next_deadline(), Some(stopped_at + ms(1000)));
 
@@ -952,8 +995,9 @@ fn a_write_that_empties_the_buffer_after_the_limit_is_not_accepted() {
     let mut rig = Rig::easymesh();
     stopping_with_two_sdus(&mut rig);
     let stopped_at = rig.now;
+    // The write was issued before the limit; its result comes late.
+    let everything = rig.core.write_chunk(rig.now).map(<[u8]>::len).unwrap();
     rig.now = stopped_at + ms(950);
-    let everything = rig.core.write_chunk().map(<[u8]>::len).unwrap();
     rig.core.wrote(rig.now, everything);
     // Nothing is written past the limit: the SDUs are counted by the rule, not as sent.
     assert_eq!(rig.counters().sdus_sent, 0);
@@ -972,6 +1016,42 @@ fn a_write_that_does_not_empty_the_buffer_after_the_limit_is_not_accepted() {
     assert_eq!(rig.counters().dropped_send_failed, 0);
     assert_eq!(rig.counters().dropped_send_disconnected, 2);
     assert_late_input_ends_the_stop_at_1000(&mut rig, stopped_at);
+}
+
+#[test]
+fn a_write_one_tick_before_the_stop_limit_is_allowed() {
+    let mut rig = Rig::easymesh();
+    stopping_with_two_sdus(&mut rig);
+    rig.now += ms(899);
+    assert!(rig.core.write_ready(rig.now));
+    assert!(rig.core.write_chunk(rig.now).is_some());
+    let first = wire_bytes(&sdu(1, 10)).len();
+    rig.core.wrote(rig.now, first);
+    assert_eq!(rig.counters().sdus_sent, 1);
+}
+
+#[test]
+fn a_due_stop_limit_wins_over_a_write_at_the_same_now() {
+    // At and after the limit no write starts, so the octets that did not leave are not counted
+    // as sent and the tick counts them by the rule.
+    for late in [0, 1, 50] {
+        let mut rig = Rig::easymesh();
+        stopping_with_two_sdus(&mut rig);
+        let stopped_at = rig.now;
+        rig.now = stopped_at + ms(900 + late);
+        assert!(!rig.core.write_ready(rig.now), "late {late}");
+        assert_eq!(rig.core.write_chunk(rig.now), None, "late {late}");
+        rig.tick();
+        assert_eq!(rig.take_actions(), [], "late {late}");
+        assert_eq!(rig.counters().sdus_sent, 0, "late {late}");
+        assert_eq!(rig.counters().dropped_send_disconnected, 2, "late {late}");
+        assert_eq!(rig.counters().dropped_send_failed, 0, "late {late}");
+        assert_eq!(
+            rig.core.next_deadline(),
+            Some(stopped_at + ms(1000)),
+            "late {late}"
+        );
+    }
 }
 
 #[test]
@@ -1032,7 +1112,7 @@ fn a_failed_write_while_stopping_still_lingers() {
     rig.write_failed();
     assert_eq!(rig.take_actions(), []);
     // Nothing more is written; the rest is counted by the rule.
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     assert_eq!(rig.counters().dropped_send_failed, 1);
     assert_eq!(rig.counters().dropped_send_disconnected, 1);
     assert_eq!(rig.core.next_deadline(), Some(rig.now + ms(100)));
@@ -1071,7 +1151,7 @@ fn the_role_gets_no_input_after_a_stop() {
     // Later sends are dropped and counted.
     rig.send_now(sdu(5, 1));
     assert_eq!(rig.counters().dropped_send_disconnected, 1);
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
 }
 
 #[test]
@@ -1174,9 +1254,9 @@ fn every_input_after_finish_is_ignored() {
     assert_eq!(rig.counters(), before);
     assert_eq!(rig.core.next_deadline(), None);
     assert!(!rig.core.read_ready());
-    assert!(!rig.core.write_ready());
+    assert!(!rig.core.write_ready(rig.now));
     assert!(!rig.core.received_ready());
-    assert_eq!(rig.core.write_chunk(), None);
+    assert_eq!(rig.core.write_chunk(rig.now), None);
     assert_eq!(rig.core.take_received(), None);
 
     // A send is not written; it is counted so that every send is counted once.
@@ -1375,8 +1455,8 @@ fn check_invariants(rig: &Rig, model: &Model, policy: TransportPolicy, seed: u64
     if core.read_ready() {
         assert_eq!(core.state, State::InSession, "seed {seed}");
     }
-    if core.write_ready() {
-        assert!(core.write_chunk().is_some(), "seed {seed}");
+    if core.write_ready(rig.now) {
+        assert!(core.write_chunk(rig.now).is_some(), "seed {seed}");
     }
     assert_eq!(
         core.received_ready(),
@@ -1396,7 +1476,7 @@ fn check_invariants(rig: &Rig, model: &Model, policy: TransportPolicy, seed: u64
 
     if finished {
         assert_eq!(core.next_deadline(), None, "seed {seed}");
-        assert!(!core.read_ready() && !core.write_ready() && !core.received_ready());
+        assert!(!core.read_ready() && !core.write_ready(rig.now) && !core.received_ready());
         assert!(core.outbound.is_empty(), "seed {seed}");
         // The send balance: every send is counted exactly once.
         assert_eq!(
@@ -1485,8 +1565,8 @@ fn run_random_seed(seed: u64) -> (Option<TransportOutcome>, u64) {
                 model.sends += 1;
             }
             75..=88 => {
-                if let Some(length) = rig.core.write_chunk().map(<[u8]>::len) {
-                    if rig.core.write_ready() || dice.below(4) == 0 {
+                if let Some(length) = rig.core.write_chunk(rig.now).map(<[u8]>::len) {
+                    if rig.core.write_ready(rig.now) || dice.below(4) == 0 {
                         let written = if dice.below(3) == 0 {
                             length
                         } else {
@@ -1494,7 +1574,8 @@ fn run_random_seed(seed: u64) -> (Option<TransportOutcome>, u64) {
                         };
                         rig.core.wrote(rig.now, written);
                     }
-                } else {
+                } else if rig.core.queued_chunk().is_none() {
+                    // Nothing queued: a stray result is ignored.
                     rig.core.wrote(rig.now, 1 + dice.below(5));
                 }
             }
@@ -1641,7 +1722,7 @@ fn a_deadline_that_does_not_fit_is_never_and_does_not_panic() {
     rig.stop();
     assert_eq!(rig.core.next_deadline(), None);
     rig.advance(ms(10_000));
-    assert!(rig.core.write_ready());
+    assert!(rig.core.write_ready(rig.now));
     rig.write_all();
     assert_eq!(rig.counters().sdus_sent, 1);
     assert_eq!(rig.core.next_deadline(), None);

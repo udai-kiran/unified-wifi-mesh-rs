@@ -3,7 +3,7 @@
 General-purpose turn-by-turn scheduler core in the style of libae. It only answers "what should be done next?"
 (`LoopCore::next_turn`): serve a source, run a handler's deadline, or the pass is done.
 
-**Status:** Rust written and proved (refinement to the frozen step spec, note 0017 D6 step 3); the gates decide from Lean's own checks (note 0017 A1); the async driver `run` (over the `Io` and `App` traits, tested with a fake `Io`) is done (note 0016 D8 step 4a); the tokio `Io` is step 4b.
+**Status:** Rust written and proved (refinement to the frozen step spec, note 0017 D6 step 3); the gates decide from Lean's own checks (note 0017 A1); the async driver `run` (over the `Io` and `App` traits, tested with a fake `Io`) is done (note 0016 D8 step 4a), with `Io::yield_now` for a source that stays ready (0016 E11); the tokio `Io` for the transport is in `em-transport` (step 4b-3).
 
 **The proofs are frozen (note 0017 A2).** `verify/` records what was proved for `LoopCore` at commit `a286628`. It is not part of
 the standard checks and is not maintained. While the `LoopCore` code is unchanged (re-extraction gives byte-identical `verify/lean/Extracted/` files; checked
@@ -16,7 +16,7 @@ breaks them, delete the proof files (everything under `verify/` except `spec-en.
 - Sources (ready flag, pause flag, per-pass budget) and handlers (one deadline, pause flag), numbered from 0.
 - One pass: sources in index order, then every due deadline once, then `PassDone`.
 - `next_deadline` and `has_ready_source` queries.
-- The async driver (`driver.rs`): `run`, `Io`, `App`. It runs passes, performs a pass's external actions in the order produced, delivers events, and waits only when no source is ready (driver rule, note 0016 D2, E3, U14). No dependencies, no tokio; the `wait` future is `Send`.
+- The async driver (`driver.rs`): `run`, `Io`, `App`. It runs passes, performs a pass's external actions in the order produced, delivers events, and waits only when no source is ready. When a source is still ready after a pass, it calls `Io::yield_now` (default: returns at once) and delivers the events that arrived during it before the next pass, so other tasks on the thread run (driver rule, note 0016 D2, E3, E11, U14). No dependencies, no tokio; the `wait` future is `Send`.
 
 ## Must not own
 
