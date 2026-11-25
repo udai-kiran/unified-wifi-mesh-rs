@@ -411,21 +411,36 @@ mod tests {
     use std::convert::Infallible;
     use std::time::Duration;
 
+    use em_core::MsgIdCounter;
     use em_core::configuration::build_search;
+    use em_core::wsc::{self, Identity, M1Params, Session};
+    use em_crypto::rand::OsRandom;
+    use em_db::load_reset_str;
     use em_event_loop::{App, LoopCore, Turn};
+    use em_msg::bodies::{
+        ApRadioAdvancedCapabilities, ApRadioBasicCapabilities, BasicOperatingClass,
+        Profile2ApCapability,
+    };
     use em_transport::{
         Frame, IoAction, IoEvent, LinkState, TransportEvent, TransportIoAction, TransportOutcome,
+        TransportPolicy,
     };
     use em_types::{FreqBand, MacAddr};
 
     use super::{BUDGETS, CtrlApp, HANDLER_COUNT, LinkChange, link_changes};
-    use crate::CtrlCore;
+    use crate::{CtrlCore, PROTO_IDLE};
 
     use std::time::Instant;
 
     const AL_MAC: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 2]);
     const OTHER_AL_MAC: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 9]);
     const AGENT: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 1]);
+    const RADIO: MacAddr = MacAddr::new([2, 0, 0, 0, 1, 2]);
+
+    /// One network, so that an M1 is answered with an M2.
+    const RESET: &str = r#"{"wfa-dataelements:Reset": {"NetworkSSIDList": [
+      {"SSID": "front", "PassPhrase": "front-pass", "Band": ["5"], "Enable": true,
+       "HaulType": ["Fronthaul"], "AuthType": "WPA2 Personal"}]}}"#;
 
     fn linked(session: u64, al_mac: Option<MacAddr>) -> LinkState {
         LinkState { session, al_mac }
@@ -494,9 +509,18 @@ mod tests {
 
     impl Rig {
         fn new() -> Self {
+            Self::with_role(CtrlCore::new(Vec::new(), false))
+        }
+
+        /// A rig whose reset file has a network, so that the role answers an M1 and then has a
+        /// protocol deadline.
+        fn with_network() -> Self {
+            Self::with_role(CtrlCore::new(load_reset_str(RESET).unwrap(), false))
+        }
+
+        fn with_role(role: CtrlCore) -> Self {
             let now = Instant::now();
             let mut loop_core = LoopCore::new(&BUDGETS, HANDLER_COUNT);
-            let role = CtrlCore::new(Vec::new(), false);
             let app = CtrlApp::new(role, now, &mut loop_core);
             Self {
                 loop_core,
@@ -555,14 +579,88 @@ mod tests {
         /// The data socket delivers a Search from the agent, as one unfragmented SDU frame.
         fn receive_search(&mut self) {
             let cmdu = build_search(AGENT, FreqBand::BAND_5_GHZ, 3, 1).unwrap();
+            self.receive_cmdu(&cmdu);
+        }
+
+        /// The data socket delivers a Search, then an M1, from the agent (the controller answers
+        /// an M1 only after a Search made the agent's model). The Response is fully written;
+        /// returns the actions of the pass that handled the M1, with the M2 write in them.
+        fn receive_search_then_m1(&mut self) -> Vec<IoAction> {
+            self.receive_search();
+            let response_pass = self.pass();
+            self.finish_writes(&response_pass);
+            self.receive_cmdu(&m1_cmdu());
+            self.pass()
+        }
+
+        /// Reports every `Write` of `actions` as fully written.
+        fn finish_writes(&mut self, actions: &[IoAction]) {
+            for action in actions {
+                if let IoAction::Transport(TransportIoAction::Write(octets)) = action {
+                    self.transport_event(TransportEvent::Wrote(octets.len()));
+                }
+            }
+            self.pass();
+        }
+
+        fn receive_cmdu(&mut self, cmdu: &[u8]) {
             let mut body = AL_MAC.octets().to_vec();
             body.extend_from_slice(&AGENT.octets());
             body.extend_from_slice(&[0, 1, 0]);
-            body.extend_from_slice(&cmdu);
+            body.extend_from_slice(cmdu);
             let mut frame = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
             frame.extend_from_slice(&body);
             self.transport_event(TransportEvent::Bytes(frame));
         }
+    }
+
+    fn m1_cmdu() -> Vec<u8> {
+        let params = M1Params {
+            al_mac: AGENT,
+            controller: AL_MAC,
+            band: FreqBand::BAND_5_GHZ,
+            identity: Identity {
+                uuid: [5; 16],
+                manufacturer: b"agent",
+                model: b"model",
+                serial: b"1",
+                primary_device_type: [0, 6, 0, 0x50, 0xf2, 4, 0, 1],
+            },
+            basic: ApRadioBasicCapabilities {
+                ruid: RADIO,
+                max_bss: 2,
+                operating_classes: vec![BasicOperatingClass {
+                    operating_class: 115,
+                    max_tx_power: 20,
+                    non_operable_channels: &[],
+                }],
+            },
+            profile2: Profile2ApCapability {
+                max_prioritization_rules: 0,
+                byte_counter_units: 0,
+                prioritization: false,
+                dpp_onboarding: false,
+                traffic_separation: false,
+                max_vids: 0,
+            },
+            advanced: ApRadioAdvancedCapabilities {
+                ruid: RADIO,
+                combined_front_back: false,
+                combined_profile_1_2: false,
+                mscs: false,
+                scs: false,
+                qos_map: false,
+                dscp_policy: false,
+                qm_scs_traffic_description: false,
+            },
+        };
+        wsc::build_m1(
+            &params,
+            &mut MsgIdCounter::new(),
+            &mut OsRandom,
+            &mut Session::new(),
+        )
+        .unwrap()
     }
 
     fn response(al_mac: MacAddr) -> Frame {
@@ -606,6 +704,38 @@ mod tests {
         rig.receive_search();
         let actions = rig.pass();
         assert!(has_write(&actions), "no Response on the new session");
+        assert_eq!(rig.app.handler.counters().dropped_send_disconnected, 0);
+    }
+
+    /// The M1 gives the role a Topology Query deadline. While the link is lost the role must
+    /// not run it (`unregistered()` switches the proto tick off); after the reconnect the
+    /// deadline, long past, fires at once. A role that missed `unregistered()` would build the
+    /// Query on the dead session, and the transport would count it dropped.
+    #[test]
+    fn a_protocol_deadline_waits_for_the_reconnect() {
+        let mut rig = Rig::with_network();
+        rig.register(AL_MAC);
+        let m2_pass = rig.receive_search_then_m1();
+        assert!(has_write(&m2_pass), "no M2 after the M1");
+        // The M2 sets the Topology Query deadline.
+        let query_due = rig.now + PROTO_IDLE;
+        rig.finish_writes(&m2_pass);
+
+        rig.lose_link();
+        // The test needs the deadline to fall due during the outage, before the reconnect.
+        let reconnect_at = rig.now + TransportPolicy::easymesh().reconnect_delay;
+        assert!(
+            query_due < reconnect_at,
+            "the premise no longer holds: the Query deadline is not inside the outage"
+        );
+        rig.advance(query_due.saturating_duration_since(rig.now));
+        let outage = rig.pass();
+        assert!(!has_write(&outage), "a frame was written during the outage");
+        assert_eq!(rig.app.handler.counters().dropped_send_disconnected, 0);
+
+        rig.reconnect(AL_MAC);
+        let after = rig.pass();
+        assert!(has_write(&after), "the Topology Query did not come back");
         assert_eq!(rig.app.handler.counters().dropped_send_disconnected, 0);
     }
 
@@ -663,12 +793,20 @@ mod tests {
         assert!(!pass.contains(&IoAction::Transport(TransportIoAction::CloseSession)));
     }
 
-    /// Planted-bug check: without the `role_is_active` guards the role would get input after
-    /// the stop.
+    /// The role has deadlines pending when the application channel closes, and the transport is
+    /// still draining a blocked write. The role must not run them: without the `stopping` check
+    /// in `role_is_active` the role timer would fire during the drain.
     #[test]
     fn the_role_gets_no_input_after_the_application_channel_closed() {
-        let mut rig = Rig::new();
+        let mut rig = Rig::with_network();
         rig.register(AL_MAC);
+        let m2_pass = rig.receive_search_then_m1();
+        assert!(has_write(&m2_pass), "no M2 after the M1");
+        rig.transport_event(TransportEvent::WriteBlocked);
+        rig.pass();
+        let pending = rig.app.role.next_deadline();
+        assert!(pending.is_some(), "the M1 left no role deadline");
+
         rig.event(IoEvent::AppClosed);
         let stop_pass = rig.pass();
         assert!(rig.app.stopping);
@@ -677,10 +815,18 @@ mod tests {
             "a receive was armed after the stop"
         );
 
-        // A Search that arrives after the stop is not answered.
-        rig.receive_search();
-        let later = rig.pass();
-        assert!(!has_write(&later));
+        // The test needs the earliest role deadline to fall due while the transport drains.
+        let pending_at = pending.expect("checked above");
+        let drain_ends = rig.now + TransportPolicy::easymesh().stop_write_limit;
+        assert!(
+            pending_at < drain_ends,
+            "the premise no longer holds: the role deadline is not inside the drain"
+        );
+        rig.advance(pending_at.saturating_duration_since(rig.now));
+        let drain = rig.pass();
+        assert!(!rig.app.finished(), "the drain is still running");
+        assert_eq!(rig.app.role.next_deadline(), pending, "the role ran");
+        assert!(!has_write(&drain));
     }
 
     /// A frame is in flight and its write is blocked when the stop comes: the transport writes

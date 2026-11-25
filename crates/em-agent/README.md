@@ -138,13 +138,17 @@ write. The timers are the transport's and the role's `next_deadline()`.
   link gives `unregistered()` and then `registered()`, also when the loop never saw the link
   lost in between.
 - **Frames.** A role frame goes straight into the transport's outbound buffer for the current
-  session, stamped with that session and the recorded AL MAC. The buffer holds 4 MiB and drops
-  the oldest frame not yet started (difference `tx-buffer`). There is no separate pending queue.
+  session, stamped with that session and the recorded AL MAC. The buffer holds 4 MiB of
+  stored encoded octets. When a frame does not fit, whole SDUs are dropped, oldest first,
+  never one that has started or whose write is in flight (0016 E12 item 9; difference
+  `tx-buffer`). If dropping cannot make room (the frame alone, or the frame and the protected
+  SDU, are over 4 MiB), the new frame is refused and nothing is dropped. There is no separate pending queue.
 - **Stop.** A forwarder future moves the platform's confirmations into the application channel
   and drops its sender when `stop` completes; the closed channel is the stop signal. The role
-  gets no further input. The transport then writes the frames it has queued for at most 900 ms
-  and keeps its sockets open for 100 ms. `run` returns `Ok` and logs `transport stopped`. A
-  closed platform channel is not a stop.
+  gets no further input. In a session the transport then writes the frames it has queued
+  for at most 900 ms and keeps its sockets open for 100 ms; without a session it finishes at
+  once. `run` returns `Ok` and logs `transport stopped`. A closed platform channel is not a
+  stop.
 - **Errors.** A transport that ends without a stop returns `ActorError::Transport` with its
   error. A changed AL MAC returns `ActorError::AlMacChanged` at once, without the transport
   stop.
@@ -198,10 +202,9 @@ with its radio, when no recovery is involved (upstream behaviour).
   or `topo_synchronized` and later), not "owconfig_pending or later".
 - Pre-processing gives the AL node the configured profile as well as the radios
   (0012 D10); upstream hard-codes 3 for both.
-- The stop takes at most 1 s (900 ms of writes, then 100 ms of linger; 0016 D3b, U8). Tests
-  run it on the virtual clock.
-- A transport that ends without a stop is always an error exit (1), even when it returned
-  `Ok`: the agent did not ask it to stop.
+- The stop in a session takes at most 1 s (900 ms of writes, then 100 ms of linger; 0016 D3b,
+  U8); without a session it finishes at once. Tests run it on the virtual clock.
+- A transport that ends without a stop is always an error exit (1).
 - `--help` is not special: it is an unknown option and exits 2.
 - `AgentConfig` has no reconnect delay: the transport's default of 2 s applies.
 - A renew compares the controller AL MAC in its AL MAC TLV with the one the radio
