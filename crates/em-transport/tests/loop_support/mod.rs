@@ -3,8 +3,9 @@
 //! A test role for the transport on the event loop (0016 D2, D3b): the loop `App` that owns a
 //! `TransportHandler`, and `start_loop`, which runs `em_event_loop::run` in a tokio task.
 //!
-//! The role has the same four ends as the old actor's `Transport` (`sdus`, `received`, `link`,
-//! `counters`) and a `task` that ends with the actor's result. Dropping `sdus` is the stop signal.
+//! The role has four ends (`sdus`, `received`, `link`, `counters`) and a `task` that ends with
+//! the loop's result. They are the ends of the deleted actor's `Transport` (`actor.rs` and
+//! `lib.rs` at `b6995f2`). Dropping `sdus` is the stop signal.
 //! The loop's sources, in the order of 0016 D3b: the data-socket read (64 frames), the
 //! registration verdict, the stop signal, the application channel, the received queue to the
 //! role, the data-socket write.
@@ -16,10 +17,10 @@ use em_event_loop::{App, HandlerId, LoopCore, SourceId, Turn, run};
 use em_transport::{
     IoAction, IoEvent, LinkState, OutboundSdu, Role, Sdu, TransportConfig, TransportCounters,
     TransportError, TransportHandler, TransportIo, TransportPolicy, TransportSources,
-    TransportTask,
 };
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::support::{FakeService, bounded};
 
@@ -99,8 +100,8 @@ pub struct LoopClient {
     pub link: watch::Receiver<LinkState>,
     /// The latest counters, published after every turn.
     pub counters: watch::Receiver<TransportCounters>,
-    /// The loop's task: ends with the actor's result.
-    pub task: TransportTask,
+    /// The loop's task: ends with the loop's result.
+    pub task: JoinHandle<Result<(), TransportError>>,
 }
 
 impl LoopClient {
@@ -243,7 +244,7 @@ struct LoopEnds {
 }
 
 impl LoopEnds {
-    fn with_task(self, task: TransportTask) -> LoopClient {
+    fn with_task(self, task: JoinHandle<Result<(), TransportError>>) -> LoopClient {
         LoopClient {
             sdus: self.sdus,
             received: self.received,

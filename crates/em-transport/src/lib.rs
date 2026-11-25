@@ -2,10 +2,10 @@
 
 //! AL-SAP client: carries CMDUs to and from an external IEEE 1905 daemon over two UNIX sockets.
 //!
-//! Design: note 0011 (slice S0), D1 to D3. The client does what upstream's
-//! `AlServiceAccessPoint` does (`src/al-sap/al_service_access_point.cpp`,
+//! Design: note 0011 (slice S0), D1 to D3; note 0016 for the loop transport. The client does
+//! what upstream's `AlServiceAccessPoint` does (`src/al-sap/al_service_access_point.cpp`,
 //! `inc/al_service_*.h` at `ba4180b`) against the service in `ieee1905-rs`
-//! (`ieee1905-core/src/al_sap.rs` at `a6443225`), as one tokio task:
+//! (`ieee1905-core/src/al_sap.rs` at `a6443225`):
 //!
 //! 1. connect the control socket, then the data socket;
 //! 2. send a registration request and read the response;
@@ -13,20 +13,25 @@
 //! 4. when the data socket closes or fails, publish a [`LinkState`] without an AL MAC,
 //!    wait, and register again.
 //!
-//! The same protocol is also written as a synchronous [`TransportCore`]. The event loop runs
-//! it through [`TransportHandler`] and the tokio [`TransportIo`] (0016 D8 step 4b-3). The
-//! actor described here, which [`spawn`] starts, stays until the role crates move to the loop.
+//! The client runs on the event loop (`em-event-loop`), in three parts:
 //!
-//! The role actor sends [`OutboundSdu`]s: the SDU with the `session` of the [`LinkState`] it
-//! was built under (note 0011 A6). The actor writes it only into that session.
+//! * [`TransportCore`]: every decision as a synchronous state machine, with no clock and no
+//!   I/O. It is driven with the current time and returns [`TransportAction`]s.
+//! * [`TransportHandler`]: composes the core into a loop application. The role crate owns one,
+//!   gives it its [`TransportSources`] and passes it the [`TransportEvent`]s and the loop turns.
+//!   What the I/O must do comes out as [`TransportIoAction`]s.
+//! * [`TransportIo`]: the tokio side. It performs the actions on the two sockets and reports
+//!   [`IoEvent`]s. It adds no decisions.
 //!
-//! The role actor gets four things from [`spawn`] (note 0011 A5): a sender for SDUs, a
-//! receiver that carries only received SDUs (a plain drop-oldest queue, counted), a
-//! `watch` of the [`LinkState`], and a `watch` of the [`TransportCounters`]. A link change
-//! is a latest value, not an event, and is not ordered against the received SDUs as the
-//! role actor's `select!` sees them. At each registration the actor publishes the new
-//! state before it reads any frame of the session, so when the role actor handles a
-//! received SDU, `link.borrow()` shows that SDU's session or a later one.
+//! The role sends [`OutboundSdu`]s: the SDU with the `session` of the [`LinkState`] it was
+//! built under (note 0011 A6). The core writes it only into that session. The role reads the
+//! received SDUs, the [`LinkState`] and the [`TransportCounters`] from the core through the
+//! handler. A link change is a latest value, not an event. At each registration the core
+//! publishes the new state before it handles any frame of the session, so when the role
+//! handles a received SDU, its link state shows that SDU's session or a later one.
+//!
+//! The old tokio actor (`spawn`, `Transport`, `TransportTask`) was deleted in 0016 D8 step 5b.
+//! It can be read at `b6995f2` (`crates/em-transport/src/actor.rs`).
 //!
 //! The payload of an [`Sdu`] is opaque here. **Contract for callers:** every SDU is
 //! exactly one CMDU ending in End of Message. The service drops anything else
@@ -36,7 +41,6 @@
 //! directions `local` is the local AL MAC and `remote` the other side's: on the wire,
 //! MAC A and MAC B (0011, "Address fields").
 
-mod actor;
 mod frame_reader;
 mod frame_splitter;
 mod handler;
@@ -54,8 +58,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use em_types::MacAddr;
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
 
 pub use frame_splitter::Frame;
 pub use handler::{TransportEvent, TransportHandler, TransportIoAction, TransportSources};
@@ -74,7 +76,7 @@ pub enum Role {
     Controller,
 }
 
-/// What [`spawn`] needs to know.
+/// What the transport needs to know to reach the service.
 #[derive(Debug)]
 pub struct TransportConfig {
     /// Path of the control socket. Upstream's controller uses
@@ -115,12 +117,12 @@ pub struct Sdu {
     pub cmdu: Vec<u8>,
 }
 
-/// An [`Sdu`] for the actor to send, with the session it was built for (0011 A6).
+/// An [`Sdu`] for the transport to send, with the session it was built for (0011 A6).
 ///
-/// The role actor copies `link.borrow()` when it builds the SDU, takes `local` from that
-/// copy and carries its `session` here. The actor writes the SDU only if the session is
-/// still the current one; otherwise it drops and counts it. So an SDU is written only
-/// into the session it was built for.
+/// The role reads the [`LinkState`] when it builds the SDU, takes `local` from it and carries
+/// its `session` here. [`TransportCore`] writes the SDU only if the session is still the
+/// current one; otherwise it drops and counts it. So an SDU is written only into the session
+/// it was built for.
 #[derive(Debug, PartialEq, Eq)]
 pub struct OutboundSdu {
     /// The [`LinkState::session`] the SDU was built for.
@@ -129,18 +131,18 @@ pub struct OutboundSdu {
     pub sdu: Sdu,
 }
 
-/// Whether the actor is registered, as a latest value (0011 A5).
+/// Whether the transport is registered, as a latest value (0011 A5).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct LinkState {
     /// The number of registrations the service has accepted so far; it equals
     /// [`TransportCounters::registrations`]. A change means a reconnect happened, even if
-    /// the role actor missed the `None` in between.
+    /// the role missed the `None` in between.
     pub session: u64,
     /// The local AL MAC of the service while registered, `None` otherwise.
     pub al_mac: Option<MacAddr>,
 }
 
-/// Why the actor ended with an error.
+/// Why the transport ended with an error ([`TransportIo::into_result`]).
 #[derive(Debug)]
 pub enum TransportError {
     /// The service answered the registration with a `result` other than success
@@ -153,7 +155,7 @@ pub enum TransportError {
     /// A socket error that is neither "no such socket", "connection refused",
     /// nor a service restart.
     Io {
-        /// What the actor was doing.
+        /// What the transport was doing.
         operation: &'static str,
         /// The error.
         source: std::io::Error,
@@ -183,7 +185,7 @@ impl std::error::Error for TransportError {
     }
 }
 
-/// Counts of what the actor dropped or moved. Errors are logged through `tracing` and
+/// Counts of what [`TransportCore`] dropped or moved. Errors are logged through `tracing` and
 /// counted here; there is no error event (0011 D2).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TransportCounters {
@@ -195,23 +197,22 @@ pub struct TransportCounters {
     pub sdus_received: u64,
     /// SDUs not written because they were sent while not registered, were built for another
     /// session, were queued at a stop but not written (built for another session, or behind a
-    /// failed write), or arrived through a permit held across that stop's close, within the
-    /// linger (0011 A6, A7).
+    /// failed write), or were sent after the stop began (0011 A6, A7).
     /// Matching SDUs queued at a stop are written until one write fails; the failed write counts
     /// in [`TransportCounters::dropped_send_failed`], the rest here.
     pub dropped_send_disconnected: u64,
     /// SDUs that need more than 256 fragments, or whose write failed.
     pub dropped_send_failed: u64,
     /// SDUs dropped because the outbound buffer was full: the oldest SDU not yet started (and not
-    /// being written), or the new SDU when nothing could be dropped for it. Counted only by `TransportCore`, never by the
-    /// actor (0016 U12, difference `tx-buffer`).
+    /// being written), or the new SDU when nothing could be dropped for it. The old actor never counted it (0016 U12,
+    /// difference `tx-buffer`).
     pub dropped_send_overflow: u64,
     /// Received SDUs dropped because the received queue was full (the oldest goes first).
     pub dropped_receive_overflow: u64,
-    /// Received SDUs still in the actor's queue when it returned, for any reason (0011 A6).
-    /// `sdus_received` is the SDUs moved into the received channel, plus
-    /// `dropped_receive_overflow`, plus this. Aborting the task skips the count, so the send
-    /// and receive counts do not balance after an abort (0011 A7).
+    /// Received SDUs still in the received queue when the transport finished, for any reason
+    /// (0011 A6). `sdus_received` is the SDUs the role took, plus `dropped_receive_overflow`,
+    /// plus this. Aborting the task that runs the loop skips the count, so the send and
+    /// receive counts do not balance after an abort (0011 A7).
     pub dropped_receive_stopped: u64,
     /// Frames longer than 65 536 octets that were skipped.
     pub dropped_receive_oversize: u64,
@@ -224,84 +225,4 @@ pub struct TransportCounters {
     /// delivered, and the rest of the set is skipped without counting. Not in
     /// `dropped_receive_fragments` and not in `sdus_received` (0016 D4, U2, U6).
     pub dropped_receive_too_large: u64,
-}
-
-/// The task [`spawn`] starts: ends with `Ok` on a normal stop.
-pub type TransportTask = JoinHandle<Result<(), TransportError>>;
-
-/// What [`spawn`] returns: the role actor's ends of the actor's channels (0011 A5).
-///
-/// The fields are owned, so the role actor may move them apart. Dropping `link` or
-/// `counters` stops nothing.
-#[derive(Debug)]
-pub struct Transport {
-    /// SDUs to send to the service, each with the session it was built for (0011 A6). The
-    /// role actor holds the only sender (0004 R6). Once the actor starts to stop, the
-    /// channel is closed and sends fail.
-    pub sdus: mpsc::Sender<OutboundSdu>,
-    /// SDUs received from the service. When the role actor does not read, the actor keeps
-    /// the newest 256 beyond the channel's 64 and drops the oldest, counted in
-    /// [`TransportCounters::dropped_receive_overflow`].
-    pub received: mpsc::Receiver<Sdu>,
-    /// The latest [`LinkState`].
-    pub link: watch::Receiver<LinkState>,
-    /// The latest [`TransportCounters`].
-    pub counters: watch::Receiver<TransportCounters>,
-    /// The actor's task.
-    pub task: TransportTask,
-}
-
-/// Starts the actor on the current tokio runtime.
-///
-/// The actor ends with `Ok` when the role actor drops the SDU sender or the `received`
-/// receiver, and with an error if the service rejects the registration or a socket fails
-/// in a way the reconnect cannot fix (0011 A5, A6). On a stop or a fatal registration error
-/// the actor first closes the send channel, so later sends fail.
-/// - **In a session** it writes the SDUs that were in the send channel and belong to the
-///   session, then stays 100 ms with the sockets open so that the last writes leave, and
-///   then ends. The 100 ms is counted from the end of those writes. SDUs that arrive through
-///   a permit held across the close are counted as `dropped_send_disconnected`. An SDU whose
-///   permit is still held when the 100 ms ends is lost uncounted (0011 A6).
-/// - **While not registered** it counts the queued SDUs as dropped and ends at once, unless
-///   a send permit is outstanding: then it waits for it, at most 100 ms.
-///
-/// If a read fails and the role actor has gone, the actor stops as above and still writes
-/// the queued SDUs. If a write fails, the session ends without another write, because the
-/// stream may be out of step; on a stop the queued SDUs are counted as
-/// `dropped_send_disconnected`. In either case the actor stops reading, so every received
-/// frame not yet read is lost and not counted (0011 A7).
-///
-/// A stop writes the matching SDUs counted by the channel's length, read just after the
-/// close: a send completed before the read is in the batch, one in progress may fall on
-/// either side (0011 A7).
-///
-/// **No time limit on writes (0011 A7).** A write can block without limit if the service
-/// stays alive and stops reading, in a session or during a stop. To bound a stop, time out
-/// on `&mut task` (or keep an `AbortHandle`) and then call `abort()`. A timeout that takes
-/// the [`TransportTask`] by value drops it on expiry and leaves the actor running. An
-/// aborted actor returns a cancelled `JoinError`. It skips the linger, the counts for the
-/// blocked SDU and the SDUs still queued, the unfinished fragment set and
-/// `dropped_receive_stopped`, and does not publish `al_mac: None`.
-///
-/// Dropping only `link` or `counters` stops nothing.
-#[must_use]
-pub fn spawn(config: TransportConfig) -> Transport {
-    let (sdus, sdu_receiver) = mpsc::channel(actor::SDU_CHANNEL_CAPACITY);
-    let (received_sender, received) = mpsc::channel(actor::RECEIVED_CHANNEL_CAPACITY);
-    let (link_sender, link) = watch::channel(LinkState::default());
-    let (counters_sender, counters) = watch::channel(TransportCounters::default());
-    let task = tokio::spawn(actor::run(
-        config,
-        sdu_receiver,
-        received_sender,
-        link_sender,
-        counters_sender,
-    ));
-    Transport {
-        sdus,
-        received,
-        link,
-        counters,
-        task,
-    }
 }

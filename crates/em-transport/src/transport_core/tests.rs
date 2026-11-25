@@ -229,7 +229,7 @@ fn registration_ignores_octets_after_the_seventh() {
 
 #[test]
 fn a_registration_error_is_retried_or_fatal_by_step_and_kind() {
-    // `actor.rs` classify_connect and classify_registration_io.
+    // `actor.rs` classify_connect and classify_registration_io at `b6995f2`.
     let connect_retries = [ErrorKind::NotFound, ErrorKind::ConnectionRefused];
     let io_retries = [
         ErrorKind::UnexpectedEof,
@@ -607,7 +607,7 @@ fn an_sdu_that_needs_more_than_256_fragments_counts_as_failed() {
 #[test]
 fn a_stalled_write_ends_the_session_at_exactly_the_stall_time() {
     // intentional-difference:tx-write-stall-5s
-    // The old actor had no time limit on a write (0011 A7).
+    // The old actor (`actor.rs` at `b6995f2`) had no time limit on a write (0011 A7).
     let mut rig = Rig::easymesh();
     rig.register();
     rig.send_now(sdu(1, 10));
@@ -873,7 +873,7 @@ fn fragments_are_joined() {
 #[test]
 fn a_set_over_one_mib_is_refused_and_counted_once() {
     // intentional-difference:rx-sdu-cap-1mib
-    // The old actor had no cap below the framing limit.
+    // The old actor (`actor.rs` at `b6995f2`) had no cap below the framing limit.
     let mut rig = Rig::easymesh();
     rig.register();
     rig.receive(&wire_bytes(&sdu(1, 1_100_000)));
@@ -891,7 +891,7 @@ fn a_set_over_one_mib_is_refused_and_counted_once() {
 #[test]
 fn the_received_queue_holds_1024_sdus() {
     // intentional-difference:rx-queue-1024-4mib
-    // The old actor queue held 256 SDUs.
+    // The old actor queue (`actor.rs` at `b6995f2`) held 256 SDUs.
     let mut rig = Rig::easymesh();
     rig.register();
     for tag in 0..=255u8 {
@@ -1670,7 +1670,7 @@ fn random_inputs_keep_the_invariants() {
 
 #[test]
 fn a_complete_registration_body_above_the_frame_limit_is_retried() {
-    // The actor's FrameReader never yields such a body; the core must not accept it.
+    // The old actor's FrameReader (`b6995f2`) never yields such a body; the core must not accept it.
     let mut rig = Rig::easymesh();
     rig.connect();
     let mut body = LOCAL.octets().to_vec();

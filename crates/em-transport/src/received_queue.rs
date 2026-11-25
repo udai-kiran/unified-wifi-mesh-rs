@@ -9,7 +9,7 @@ use crate::Sdu;
 /// A queue of at most `max_sdus` SDUs and `max_bytes` octets of CMDU (the sum of `cmdu.len()`).
 ///
 /// When a push would pass either limit, the oldest SDUs are dropped (0016 U1, difference
-/// `rx-queue-1024-4mib`; the old actor queue keeps 256 SDUs and counts no octets). The limits
+/// `rx-queue-1024-4mib`; the old actor queue (`actor.rs` at `b6995f2`) kept 256 SDUs and counted no octets). The limits
 /// are arguments: the numbers live in `policy` (0016 U31). Built here, used from 4b-2b.
 #[derive(Debug)]
 pub(crate) struct ReceivedQueue {
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn rx_queue_1024_sdus_and_4_mib() {
         // intentional-difference:rx-queue-1024-4mib
-        // The old actor queue held 256 SDUs and counted no octets.
+        // The old actor queue (`actor.rs` at `b6995f2`) held 256 SDUs and counted no octets.
         let mut queue = ReceivedQueue::new(1024, 4 * 1024 * 1024);
         for id in 0..=255 {
             assert_eq!(queue.push(sdu(id, 1)), 0);
