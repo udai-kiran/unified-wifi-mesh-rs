@@ -212,6 +212,33 @@ fn a_partial_write_leaves_the_rest_for_the_next_write() {
 }
 
 #[test]
+fn a_send_in_the_pass_of_a_write_does_not_evict_the_sdu_being_written() {
+    let policy = TransportPolicy {
+        tx_buffer_bytes: 50,
+        ..TransportPolicy::easymesh()
+    };
+    let mut rig = Rig::with_policy(policy);
+    rig.register_and_arm_read();
+    let long = |tag| Sdu {
+        cmdu: vec![tag; 8],
+        ..sdu(tag)
+    };
+    // 23 and 27 octets stored: both fit.
+    rig.send(sdu(1));
+    rig.send(long(2));
+    let first = wire_bytes(&sdu(1));
+    assert_eq!(rig.pass(), [TransportIoAction::Write(wire_bytes(&sdu(1)))]);
+
+    // A later turn of the same pass, or the next one, sends before the result arrives.
+    rig.send(sdu(3));
+    assert_eq!(rig.handler.counters().dropped_send_overflow, 1);
+
+    rig.event(TransportEvent::Wrote(first.len()));
+    assert_eq!(rig.handler.counters().sdus_sent, 1);
+    assert_eq!(rig.pass(), [TransportIoAction::Write(wire_bytes(&sdu(3)))]);
+}
+
+#[test]
 fn a_blocked_write_waits_for_writable() {
     let mut rig = Rig::new();
     rig.register_and_arm_read();

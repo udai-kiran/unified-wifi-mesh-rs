@@ -5,7 +5,7 @@
 //!
 //! [`AgentCore`] owns the orchestrator, the node table and the timers. It is driven
 //! by explicit inputs and `Instant`s and returns frames, platform requests and its next
-//! deadline; it has no sockets and no runtime. The tokio role actor ([`run`]) moves inputs
+//! deadline; it has no sockets and no runtime. The event loop run ([`run`]) moves inputs
 //! in and frames out, and hands platform requests to the [`platform::Platform`].
 
 use std::fmt;
@@ -27,7 +27,6 @@ use crate::platform::ConfirmedBss;
 
 mod actor;
 pub mod cli;
-mod pending;
 pub mod platform;
 mod rules;
 mod s2;
@@ -43,7 +42,7 @@ const ORCH_IDLE: Duration = Duration::from_millis(250);
 /// A radio waits for its M2 at most this long after its M1 left (0013 D5).
 const M2_WAIT_SECS: u64 = 10;
 
-/// A CMDU for the role actor to send; the actor adds the local AL MAC and session (0012 D9).
+/// A CMDU for the agent to send; the loop adds the local AL MAC and session (0012 D9).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
     /// Destination AL MAC or the IEEE 1905 multicast address.
@@ -552,7 +551,7 @@ impl AgentCore {
         // (`em_configuration.cpp:6351-6365`); it is deferred to S3 (0013 D8).
         let params = wsc::m1_params(al_mac, controller, key.mac, band);
         let session = self.rules.wsc.session_mut(key);
-        // The build runs on the actor task: its time is the actor's stall for the DH key
+        // The build runs on the loop task: its time is the loop's stall for the DH key
         // generation (0013 D9).
         let build_started = Instant::now();
         let cmdu =

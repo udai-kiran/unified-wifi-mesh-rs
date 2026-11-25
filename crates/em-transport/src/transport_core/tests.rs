@@ -549,6 +549,50 @@ fn the_outbound_buffer_overflow_counts_and_drops_the_oldest_not_started() {
 }
 
 #[test]
+fn an_sdu_whose_write_is_in_flight_is_not_evicted_by_a_send() {
+    let policy = TransportPolicy {
+        tx_buffer_bytes: 50,
+        ..TransportPolicy::easymesh()
+    };
+    let mut rig = Rig::with_policy(policy);
+    rig.register();
+    // 23 and 27 octets stored: both fit.
+    rig.send_now(sdu(1, 4));
+    rig.send_now(sdu(2, 8));
+    let first = wire_bytes(&sdu(1, 4));
+    assert_eq!(rig.core.write_chunk(rig.now), Some(&first[..]));
+    rig.core.write_issued();
+
+    // 23 + 27 + 23 = 73: SDU 2 is dropped, not the SDU in flight.
+    rig.send_now(sdu(3, 4));
+    assert_eq!(rig.counters().dropped_send_overflow, 1);
+
+    rig.core.wrote(rig.now, first.len());
+    assert_eq!(rig.counters().sdus_sent, 1);
+    let third = wire_bytes(&sdu(3, 4));
+    assert_eq!(rig.core.write_chunk(rig.now), Some(&third[..]));
+}
+
+#[test]
+fn a_blocked_write_ends_the_protection_of_the_sdu_in_flight() {
+    let policy = TransportPolicy {
+        tx_buffer_bytes: 50,
+        ..TransportPolicy::easymesh()
+    };
+    let mut rig = Rig::with_policy(policy);
+    rig.register();
+    rig.send_now(sdu(1, 4));
+    rig.send_now(sdu(2, 8));
+    rig.core.write_issued();
+    rig.core.write_blocked();
+
+    // Nothing is in flight: the oldest SDU goes, as in any overflow.
+    rig.send_now(sdu(3, 4));
+    let second = wire_bytes(&sdu(2, 8));
+    assert_eq!(rig.core.write_chunk(rig.now), Some(&second[..]));
+}
+
+#[test]
 fn an_sdu_that_needs_more_than_256_fragments_counts_as_failed() {
     let mut rig = Rig::easymesh();
     rig.register();

@@ -572,6 +572,15 @@ impl TransportCore {
         self.queued_chunk()
     }
 
+    /// The caller took [`TransportCore::write_chunk`] and hands it to the `Io`, which writes it
+    /// later. Until [`TransportCore::wrote`], [`TransportCore::write_blocked`] or a session end,
+    /// the SDU of the chunk is kept by `send` as if it were started: the result applies to the
+    /// oldest SDU, so a `send` in between must not evict it. A session end still counts that SDU
+    /// as not started unless octets of it were reported written.
+    pub fn write_issued(&mut self) {
+        self.outbound.mark_write_in_flight();
+    }
+
     /// `written` octets of [`TransportCore::write_chunk`] left. Counts `sdus_sent` when an SDU
     /// completes and resets the stall clock. Ignored when written is 0 or there is no chunk.
     ///
@@ -584,6 +593,7 @@ impl TransportCore {
     ///
     /// If `written` is more than the length of the chunk.
     pub fn wrote(&mut self, now: Instant, written: usize) {
+        self.outbound.write_finished();
         if written == 0 || self.queued_chunk().is_none() {
             return;
         }
@@ -605,8 +615,10 @@ impl TransportCore {
         }
     }
 
-    /// The socket would block: `write_ready` stays false until [`TransportCore::writable`].
+    /// The socket would block, so the write in flight wrote nothing: `write_ready` stays false
+    /// until [`TransportCore::writable`].
     pub fn write_blocked(&mut self) {
+        self.outbound.write_finished();
         self.socket_writable = false;
     }
 

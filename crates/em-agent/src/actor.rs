@@ -1,32 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The tokio role actor of the agent (0012 D9): moves inputs into [`AgentCore`]
-//! and its frames out to `em-transport`. It also passes the platform's confirmations
-//! in and the configurations of accepted M2s out to the [`Platform`]. All protocol
-//! logic is in the core.
+//! The agent on the event loop (0016 D2, D3b; D8 step 4c): one `LoopCore` per process whose
+//! handlers are the transport ([`TransportHandler`]) and the role ([`AgentCore`]). The app below
+//! moves the transport's received SDUs and the platform's confirmations into the core, the core's
+//! frames into the transport, and the configurations of accepted M2s to the [`Platform`]. All
+//! protocol logic is in the core.
+//!
+//! # Stop
+//!
+//! `TransportIo` has one application channel. A forwarder future, polled in the same task as the
+//! loop, moves the platform's confirmations into it and drops its sender when `stop` completes;
+//! the closed channel is the stop signal. A closed platform channel is not a stop.
+//!
+//! # Link changes
+//!
+//! After every turn the app compares the transport's link with what the role was last told and
+//! tells it the difference in order ([`link_changes`]). A reconnect always gives `unregistered()`
+//! before `registered()`, even if the loop never saw the state in between (0016 D5).
 
 use std::fmt;
-use std::future::{self, Future};
+use std::future::Future;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use em_event_loop::{App, HandlerId, LoopCore, SourceId, Turn, run as run_event_loop};
 use em_transport::{
-    LinkState, OutboundSdu, Role, Sdu, Transport, TransportConfig, TransportError, TransportTask,
-    spawn,
+    IoAction, IoEvent, LinkState, OutboundSdu, Role, Sdu, TransportConfig, TransportError,
+    TransportHandler, TransportIo, TransportPolicy, TransportSources,
 };
 use em_types::MacAddr;
-use tokio::sync::mpsc::Permit;
-use tokio::sync::watch;
-use tokio::task::JoinError;
+use tokio::sync::mpsc;
 
-use crate::pending::PendingFrames;
 use crate::platform::{Confirmation, Platform};
 use crate::{AgentCore, AlMacChanged, Frame};
 
-/// How long to wait for the transport task after a stop, before aborting it (0011 A7).
-const TRANSPORT_STOP_WAIT: Duration = Duration::from_secs(1);
+/// The sources of the loop, in the order of 0016 D3b.
+const READ: SourceId = SourceId(0);
+const REGISTRATION: SourceId = SourceId(1);
+const APPLICATION: SourceId = SourceId(2);
+const RECEIVED: SourceId = SourceId(3);
+const WRITE: SourceId = SourceId(4);
 
-/// What the agent actor needs besides the platform.
+/// The timers of the loop.
+const TRANSPORT_TIMER: HandlerId = HandlerId(0);
+const ROLE_TIMER: HandlerId = HandlerId(1);
+const HANDLER_COUNT: usize = 2;
+
+/// Source budgets, in the order of the ids above (0016 D3b): 64 frames, then one turn each.
+const BUDGETS: [usize; 5] = [64, 1, 1, 1, 1];
+
+const TRANSPORT_SOURCES: TransportSources = TransportSources {
+    read: READ,
+    registration: REGISTRATION,
+    write: WRITE,
+    timer: TRANSPORT_TIMER,
+};
+
+/// How many platform confirmations can wait for the loop.
+const APPLICATION_CHANNEL_CAPACITY: usize = 8;
+
+/// What the agent needs besides the platform.
 #[derive(Debug)]
 pub struct AgentConfig {
     /// AL-SAP control socket path.
@@ -37,17 +70,13 @@ pub struct AgentConfig {
     pub profile: u8,
 }
 
-/// Why the actor ended other than by a stop request. The process exits 1.
+/// Why the agent ended other than by a stop request. The process exits 1.
 #[derive(Debug)]
 pub enum ActorError {
     /// A registration returned a different AL MAC (0012 D9).
     AlMacChanged(AlMacChanged),
-    /// The transport task ended with an error, for example a rejected registration.
+    /// The transport ended with an error, for example a rejected registration.
     Transport(TransportError),
-    /// The transport task ended, or its channels closed, without an error.
-    TransportStopped,
-    /// The transport task panicked or was cancelled.
-    TransportFailed(JoinError),
 }
 
 impl fmt::Display for ActorError {
@@ -55,8 +84,6 @@ impl fmt::Display for ActorError {
         match self {
             Self::AlMacChanged(error) => write!(f, "{error}"),
             Self::Transport(error) => write!(f, "transport ended: {error}"),
-            Self::TransportStopped => write!(f, "transport ended without an error"),
-            Self::TransportFailed(error) => write!(f, "transport task failed: {error}"),
         }
     }
 }
@@ -66,93 +93,145 @@ impl std::error::Error for ActorError {
         match self {
             Self::AlMacChanged(error) => Some(error),
             Self::Transport(error) => Some(error),
-            Self::TransportStopped => None,
-            Self::TransportFailed(error) => Some(error),
         }
     }
 }
 
-fn now() -> Instant {
-    tokio::time::Instant::now().into_std()
+/// One thing the role has to be told about the link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkChange {
+    /// The registration of `session` is gone.
+    Unregistered { session: u64 },
+    /// The transport registered `session` with `al_mac`.
+    Registered { session: u64, al_mac: MacAddr },
 }
 
-/// The actor's state outside the transport's channels.
-struct Actor<P: Platform> {
-    core: AgentCore,
+/// What the role has to be told when the link goes from `told` to `current`, in order.
+///
+/// A new session of a registered link is `Unregistered` then `Registered`, also when the loop
+/// never saw the link lost in between.
+fn link_changes(told: LinkState, current: LinkState) -> Vec<LinkChange> {
+    if told == current {
+        return Vec::new();
+    }
+    let mut changes = Vec::new();
+    if told.al_mac.is_some() {
+        changes.push(LinkChange::Unregistered {
+            session: told.session,
+        });
+    }
+    if let Some(al_mac) = current.al_mac {
+        changes.push(LinkChange::Registered {
+            session: current.session,
+            al_mac,
+        });
+    }
+    changes
+}
+
+/// What the application channel delivered, until the application source serves it.
+enum ApplicationInput {
+    Confirmation(Confirmation),
+    /// The channel is closed: the stop signal.
+    Closed,
+}
+
+/// The loop's application: owns the role, the platform and the transport handler.
+struct AgentApp<P: Platform> {
+    role: AgentCore,
     platform: P,
-    link: watch::Receiver<LinkState>,
-    /// The link state the core has been told about.
-    seen: LinkState,
+    handler: TransportHandler,
+    /// The link state the role has been told about.
+    told: LinkState,
     /// Recorded at the first registration (0012 D9).
     al_mac: Option<MacAddr>,
-    pending: PendingFrames,
+    arrived: Option<ApplicationInput>,
+    /// The stop signal was served: the role gets no further input.
+    stopping: bool,
+    /// A registration returned a different AL MAC: the loop ends at once.
+    fatal: Option<AlMacChanged>,
 }
 
-impl<P: Platform> Actor<P> {
-    /// Tells the core about a link change. Called before every handler, because
-    /// the `link` arm of the `select!` can lose the race against a received SDU
-    /// of the new session (0011 A5).
-    ///
-    /// Returns the link state it copied. The caller stamps its frames with that
-    /// same value and does not read the link again, so the core and the stamp
-    /// agree on one session (0012 D9).
-    fn sync_link(&mut self) -> Result<LinkState, ActorError> {
-        let current = *self.link.borrow_and_update();
-        if current == self.seen {
-            return Ok(current);
+impl<P: Platform> AgentApp<P> {
+    fn new(profile: u8, platform: P, now: Instant, loop_core: &mut LoopCore<Instant>) -> Self {
+        let handler = TransportHandler::new(
+            TransportPolicy::easymesh(),
+            now,
+            TRANSPORT_SOURCES,
+            loop_core,
+        );
+        // The first turn of the application source arms the first receive.
+        loop_core.set_ready(APPLICATION, true);
+        Self {
+            role: AgentCore::new(profile, platform.radios()),
+            platform,
+            handler,
+            told: LinkState::default(),
+            al_mac: None,
+            arrived: None,
+            stopping: false,
+            fatal: None,
         }
-        self.seen = current;
-        if let Some(al_mac) = current.al_mac {
-            self.core
-                .registered(al_mac, now())
-                .map_err(ActorError::AlMacChanged)?;
-            if self.al_mac.is_none() {
-                tracing::info!(session = current.session, %al_mac, "registered");
-            } else {
-                tracing::info!(session = current.session, %al_mac, "new session, same AL MAC");
-            }
-            self.al_mac = Some(al_mac);
+    }
+
+    /// False once the role must get no further input.
+    fn role_is_active(&self) -> bool {
+        !self.stopping && self.fatal.is_none()
+    }
+
+    /// Sets what depends on the role after an event or a turn: the received source and the role
+    /// timer. Both are off while the role is not active.
+    fn refresh(&self, loop_core: &mut LoopCore<Instant>) {
+        let active = self.role_is_active();
+        loop_core.set_ready(RECEIVED, active && self.handler.received_ready());
+        let deadline = if active {
+            self.role.next_deadline()
         } else {
-            self.core.unregistered();
-            tracing::info!(session = current.session, "link lost, waiting to register");
+            None
+        };
+        loop_core.set_deadline(ROLE_TIMER, deadline);
+    }
+
+    /// Tells the role about the link changes since the last time (0011 A5).
+    fn sync_link(&mut self, now: Instant) {
+        if !self.role_is_active() {
+            return;
         }
-        Ok(current)
+        let current = self.handler.link();
+        for change in link_changes(self.told, current) {
+            self.tell_role(change, now);
+            if self.fatal.is_some() {
+                return;
+            }
+        }
+        self.told = current;
     }
 
-    fn handle_received(&mut self, sdu: &Sdu) -> Result<(), ActorError> {
-        let session = self.sync_link()?.session;
-        let frames = self.core.received(sdu.remote, &sdu.cmdu, now());
-        self.queue(session, frames);
-        self.apply_platform_requests();
-        Ok(())
-    }
-
-    /// The platform confirmed every radio's configuration (0013 D4).
-    fn handle_confirmation(&mut self, confirmation: Confirmation) -> Result<(), ActorError> {
-        self.sync_link()?;
-        self.core.platform_confirmed(confirmation.bss, now());
-        Ok(())
-    }
-
-    /// Hands the configurations of accepted M2s to the platform.
-    fn apply_platform_requests(&mut self) {
-        for request in self.core.take_platform_requests() {
-            self.platform
-                .apply_radio_config(request.radio, &request.bss);
+    fn tell_role(&mut self, change: LinkChange, now: Instant) {
+        match change {
+            LinkChange::Unregistered { session } => {
+                self.role.unregistered();
+                tracing::info!(session, "link lost, waiting to register");
+            }
+            LinkChange::Registered { session, al_mac } => {
+                if let Err(changed) = self.role.registered(al_mac, now) {
+                    self.fatal = Some(changed);
+                    return;
+                }
+                if self.al_mac.is_none() {
+                    tracing::info!(session, %al_mac, "registered");
+                } else {
+                    tracing::info!(session, %al_mac, "new session, same AL MAC");
+                }
+                self.al_mac = Some(al_mac);
+            }
         }
     }
 
-    fn handle_deadline(&mut self) -> Result<(), ActorError> {
-        let session = self.sync_link()?.session;
-        let frames = self.core.tick(now());
-        self.queue(session, frames);
-        Ok(())
-    }
-
-    /// Stamps each frame with the session of the synced link state and the
-    /// recorded AL MAC (0012 D9). A frame of a dead session is dropped and
-    /// counted by the transport.
-    fn queue(&mut self, session: u64, frames: Vec<Frame>) {
+    /// Puts each frame into the outbound buffer of the current session, stamped with the
+    /// recorded AL MAC (0012 D9). A frame of a dead session is dropped and counted by the
+    /// transport.
+    fn send_frames(&mut self, now: Instant, frames: Vec<Frame>, loop_core: &mut LoopCore<Instant>) {
         if frames.is_empty() {
             return;
         }
@@ -161,203 +240,519 @@ impl<P: Platform> Actor<P> {
             return;
         };
         for frame in frames {
-            self.pending.push(OutboundSdu {
-                session,
+            let outbound = OutboundSdu {
+                session: self.handler.link().session,
                 sdu: Sdu {
                     local,
                     remote: frame.remote,
                     cmdu: frame.cmdu,
                 },
-            });
+            };
+            self.handler.send(now, outbound, loop_core);
         }
     }
 
-    fn send_next(&mut self, permit: Permit<'_, OutboundSdu>) {
-        if let Some(sdu) = self.pending.pop() {
-            permit.send(sdu);
+    /// Hands the configurations of accepted M2s to the platform.
+    fn apply_platform_requests(&mut self) {
+        for request in self.role.take_platform_requests() {
+            self.platform
+                .apply_radio_config(request.radio, &request.bss);
         }
     }
-}
 
-async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => future::pending().await,
+    fn serve_application(
+        &mut self,
+        now: Instant,
+        loop_core: &mut LoopCore<Instant>,
+        actions: &mut Vec<IoAction>,
+    ) {
+        match self.arrived.take() {
+            Some(ApplicationInput::Confirmation(confirmation)) => {
+                // The platform confirmed every radio's configuration (0013 D4).
+                if self.role_is_active() {
+                    self.role.platform_confirmed(confirmation.bss, now);
+                }
+            }
+            Some(ApplicationInput::Closed) => {
+                self.stopping = true;
+                self.handler.stop(now, loop_core, actions);
+                // No receive is armed again.
+                return;
+            }
+            None => {}
+        }
+        // The next receive is armed only now, so the channel feeds the loop one value per turn.
+        actions.push(IoAction::RecvApp);
+    }
+
+    fn serve_received(&mut self, now: Instant, loop_core: &mut LoopCore<Instant>) {
+        if !self.role_is_active() {
+            return;
+        }
+        let Some(sdu) = self.handler.take_received() else {
+            return;
+        };
+        let frames = self.role.received(sdu.remote, &sdu.cmdu, now);
+        self.send_frames(now, frames, loop_core);
+        self.apply_platform_requests();
+    }
+
+    fn serve_role_timer(&mut self, now: Instant, loop_core: &mut LoopCore<Instant>) {
+        if !self.role_is_active() {
+            return;
+        }
+        let frames = self.role.tick(now);
+        self.send_frames(now, frames, loop_core);
     }
 }
 
-fn transport_result(result: Result<Result<(), TransportError>, JoinError>) -> ActorError {
-    match result {
-        Ok(Ok(())) => ActorError::TransportStopped,
-        Ok(Err(error)) => ActorError::Transport(error),
-        Err(error) => ActorError::TransportFailed(error),
+impl<P: Platform> App<Instant> for AgentApp<P> {
+    type Event = IoEvent<Confirmation>;
+    type Action = IoAction;
+
+    fn on_event(&mut self, event: Self::Event, loop_core: &mut LoopCore<Instant>) {
+        match event {
+            IoEvent::Transport(event) => self.handler.on_event(event, loop_core),
+            IoEvent::App(confirmation) => {
+                self.arrived = Some(ApplicationInput::Confirmation(confirmation));
+                loop_core.set_ready(APPLICATION, true);
+            }
+            IoEvent::AppClosed => {
+                self.arrived = Some(ApplicationInput::Closed);
+                loop_core.set_ready(APPLICATION, true);
+            }
+        }
+    }
+
+    fn serve(
+        &mut self,
+        turn: Turn,
+        now: Instant,
+        loop_core: &mut LoopCore<Instant>,
+        actions: &mut Vec<IoAction>,
+    ) {
+        // The driver checks `finished()` only after the pass. A turn served after the end could
+        // stop the transport again, or hide its outcome behind a stop that was not asked for.
+        if self.finished() {
+            return;
+        }
+        if !self.handler.serve(turn, now, loop_core, actions) {
+            match turn {
+                Turn::Serve(APPLICATION) => self.serve_application(now, loop_core, actions),
+                Turn::Serve(RECEIVED) => self.serve_received(now, loop_core),
+                Turn::Deadline(ROLE_TIMER) => self.serve_role_timer(now, loop_core),
+                Turn::Serve(_) | Turn::Deadline(_) | Turn::PassDone => {}
+            }
+        }
+        self.sync_link(now);
+        self.refresh(loop_core);
+    }
+
+    fn finished(&self) -> bool {
+        self.fatal.is_some() || self.handler.outcome().is_some()
     }
 }
 
-/// Finds out why the transport ended: its channels closed, so its task is
-/// finishing. Waits for it at most 1 s, then aborts it.
-async fn transport_ended(task: &mut TransportTask) -> ActorError {
-    let Ok(result) = tokio::time::timeout(TRANSPORT_STOP_WAIT, &mut *task).await else {
-        task.abort();
-        return ActorError::TransportStopped;
-    };
-    transport_result(result)
+/// Moves the platform's confirmations into the application channel until `stop` completes, then
+/// drops the sender: that closes the channel, which is the loop's stop signal.
+async fn forward_confirmations(
+    mut confirmations: mpsc::Receiver<Confirmation>,
+    sender: mpsc::Sender<Confirmation>,
+    stop: impl Future<Output = ()>,
+) {
+    tokio::pin!(stop);
+    let mut platform_is_open = true;
+    loop {
+        tokio::select! {
+            () = &mut stop => return,
+            received = confirmations.recv(), if platform_is_open => match received {
+                // A full channel waits for the loop, but a stop must not wait with it.
+                Some(confirmation) => tokio::select! {
+                    () = &mut stop => return,
+                    _ = sender.send(confirmation) => {}
+                },
+                None => platform_is_open = false,
+            },
+        }
+    }
 }
 
 /// Runs the agent until `stop` completes (returns `Ok`) or the transport ends
 /// or the AL MAC changes (returns the error; the process exits 1).
 ///
-/// A stop drops the transport's senders and receivers, waits at most 1 s for its
-/// task and then aborts it (0011 A7, 0012 D9).
+/// A stop closes the application channel; the loop then runs the transport's stop: queued
+/// frames are written for at most 900 ms, then the sockets stay open for 100 ms (0016 D3b).
 ///
 /// # Errors
 ///
-/// [`ActorError`] when the actor ends without a stop request.
+/// [`ActorError`] when the agent ends without a stop request.
+///
+/// # Panics
+///
+/// Never in practice: the loop ends only when the transport has finished or the AL MAC changed.
 pub async fn run(
     config: AgentConfig,
     mut platform: impl Platform,
     stop: impl Future<Output = ()>,
 ) -> Result<(), ActorError> {
-    let Transport {
-        sdus,
-        mut received,
-        link,
-        counters,
-        mut task,
-    } = spawn(TransportConfig::new(
-        config.control_path,
-        config.data_path,
-        Role::Agent,
-    ));
-    let mut confirmations = platform.confirmations();
-    let mut actor = Actor {
-        core: AgentCore::new(config.profile, platform.radios()),
-        platform,
-        link,
-        seen: LinkState::default(),
-        al_mac: None,
-        pending: PendingFrames::default(),
-    };
-    tokio::pin!(stop);
+    let confirmations = platform.confirmations();
+    let (sender, application_events) = mpsc::channel(APPLICATION_CHANNEL_CAPACITY);
+    let transport_config = TransportConfig::new(config.control_path, config.data_path, Role::Agent);
+    let mut io = TransportIo::new(&transport_config, application_events);
+    let mut loop_core = LoopCore::new(&BUDGETS, HANDLER_COUNT);
+    let now = tokio::time::Instant::now().into_std();
+    let mut app = AgentApp::new(config.profile, platform, now, &mut loop_core);
 
-    loop {
-        let deadline = actor
-            .core
-            .next_deadline()
-            .map(tokio::time::Instant::from_std);
-        let has_pending = !actor.pending.is_empty();
-        tokio::select! {
-            () = &mut stop => break,
-            result = &mut task => return Err(transport_result(result)),
-            sdu = received.recv() => match sdu {
-                Some(sdu) => actor.handle_received(&sdu)?,
-                None => return Err(transport_ended(&mut task).await),
-            },
-            changed = actor.link.changed() => match changed {
-                Ok(()) => {
-                    actor.sync_link()?;
-                }
-                Err(_) => return Err(transport_ended(&mut task).await),
-            },
-            Some(confirmation) = confirmations.recv() => actor.handle_confirmation(confirmation)?,
-            () = sleep_until_deadline(deadline) => actor.handle_deadline()?,
-            permit = sdus.reserve(), if has_pending => match permit {
-                Ok(permit) => actor.send_next(permit),
-                Err(_) => return Err(transport_ended(&mut task).await),
-            },
+    // Both futures run in this task. The forwarder ends at the stop; the loop goes on until the
+    // transport has finished, so only the loop ends this block.
+    {
+        let event_loop = run_event_loop(&mut loop_core, &mut io, &mut app);
+        let forwarder = forward_confirmations(confirmations, sender, stop);
+        tokio::pin!(event_loop, forwarder);
+        let mut forwarding = true;
+        loop {
+            tokio::select! {
+                () = &mut event_loop => break,
+                () = &mut forwarder, if forwarding => forwarding = false,
+            }
         }
     }
 
-    // The permit future of the last pass borrowed `sdus`, so the channels are
-    // dropped here and not in the `select!` arm.
-    drop(actor);
-    drop(received);
-    drop(sdus);
-    drop(counters);
-    stop_transport(&mut task).await;
+    if let Some(changed) = app.fatal {
+        return Err(ActorError::AlMacChanged(changed));
+    }
+    let outcome = app
+        .handler
+        .outcome()
+        .expect("the loop ends only when the transport has finished or the AL MAC changed");
+    let result = io.into_result(outcome);
+    if !app.stopping {
+        return result.map_err(ActorError::Transport);
+    }
+    match result {
+        Ok(()) => tracing::info!("transport stopped"),
+        Err(error) => tracing::warn!(%error, "transport ended with an error while stopping"),
+    }
     Ok(())
 }
 
-/// Waits for the transport task after its channels were dropped, then aborts it.
-async fn stop_transport(task: &mut TransportTask) {
-    match tokio::time::timeout(TRANSPORT_STOP_WAIT, &mut *task).await {
-        Ok(Ok(Ok(()))) => tracing::info!("transport stopped"),
-        Ok(Ok(Err(error))) => {
-            tracing::warn!(%error, "transport ended with an error while stopping");
-        }
-        Ok(Err(error)) => tracing::warn!(%error, "transport task failed while stopping"),
-        Err(_) => {
-            tracing::warn!("transport did not stop within 1 s, aborting it");
-            task.abort();
-            // An aborted task ends at once with a cancelled error.
-            let _ = task.await;
-        }
-    }
-}
-
+// Tests moved or retired by step 4c (0016 D8 step 4c), with their replacements:
+//
+// * `sync_link_returns_the_state_it_copied` (unit): retired. The actor no longer copies a
+//   watch value; `AgentApp::sync_link` reads `handler.link()` in the same turn. Replaced by
+//   `link_changes_*` (the pure function) and `a_reconnect_tells_the_role_unregistered_then_registered`.
+// * `frames_are_stamped_with_the_synced_session` (unit): retired. A frame is stamped when it is
+//   handed to the transport, from the link the role was told in the same turn. Replaced by
+//   `a_role_frame_lands_in_the_transport` (the frame is accepted into the session, not dropped
+//   and counted) and `tests/actor.rs` `searches_continue_on_a_new_session_with_the_same_al_mac`.
+// * `pending.rs` `a_full_queue_drops_the_oldest_and_counts`: retired, tag
+//   `intentional-difference:tx-buffer`. `PendingFrames` (64 frames, drop the oldest) is replaced
+//   by the transport's outbound buffer (4 MiB, drop the oldest not yet started,
+//   `dropped_send_overflow`, 0016 U12). The bound itself is tested in em-transport by
+//   `the_outbound_buffer_overflow_counts_and_drops_the_oldest_not_started` (`TransportCore`) and
+//   `outbound_buffer_of_4_mib_drops_the_oldest_unstarted_sdus_and_counts_them` (the loop, in
+//   `em-transport/tests/loop_session.rs`).
 #[cfg(test)]
 mod tests {
-    use em_cmd::RadioSpec;
-    use em_transport::LinkState;
-    use em_types::{FreqBand, MacAddr};
-    use tokio::sync::watch;
+    use std::time::Duration;
 
-    use super::Actor;
-    use crate::pending::PendingFrames;
-    use crate::platform::FakePlatform;
-    use crate::{AgentCore, PROTO_IDLE};
+    use em_cmd::RadioSpec;
+    use em_event_loop::{App, LoopCore, Turn};
+    use em_transport::{
+        Frame, IoAction, IoEvent, LinkState, TransportEvent, TransportIoAction, TransportOutcome,
+    };
+    use em_types::{FreqBand, MacAddr};
+
+    use super::{AgentApp, BUDGETS, HANDLER_COUNT, LinkChange, link_changes};
+    use crate::PROTO_IDLE;
+    use crate::platform::{Confirmation, FakePlatform};
+
+    use std::time::Instant;
 
     const AL_MAC: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 2]);
+    const OTHER_AL_MAC: MacAddr = MacAddr::new([2, 0, 0, 0, 0, 9]);
 
-    fn registered_link(session: u64) -> LinkState {
-        LinkState {
-            session,
-            al_mac: Some(AL_MAC),
-        }
-    }
-
-    fn actor_with(link: watch::Receiver<LinkState>) -> Actor<FakePlatform> {
-        let radios = vec![RadioSpec {
-            ruid: MacAddr::new([2, 0, 0, 0, 1, 1]),
-            band: FreqBand::BAND_5_GHZ,
-        }];
-        Actor {
-            core: AgentCore::new(2, Vec::from(radios.as_slice())),
-            platform: FakePlatform::new(radios),
-            link,
-            seen: LinkState::default(),
-            al_mac: None,
-            pending: PendingFrames::default(),
-        }
+    fn linked(session: u64, al_mac: Option<MacAddr>) -> LinkState {
+        LinkState { session, al_mac }
     }
 
     #[test]
-    fn sync_link_returns_the_state_it_copied() {
-        let (tx, rx) = watch::channel(LinkState::default());
-        let mut actor = actor_with(rx);
-        tx.send(registered_link(4)).unwrap();
-        assert_eq!(actor.sync_link().unwrap(), registered_link(4));
-        // Without a change it returns the same value again.
-        assert_eq!(actor.sync_link().unwrap(), registered_link(4));
+    fn link_changes_is_empty_without_a_change() {
+        let registered = linked(1, Some(AL_MAC));
+        assert_eq!(link_changes(registered, registered), []);
+        assert_eq!(link_changes(LinkState::default(), LinkState::default()), []);
     }
 
-    /// The frames of a handler carry the session of the state that `sync_link`
-    /// copied and registered with the core. A second read of the link could differ
-    /// from the first, so the frames would carry a session the core was never told
-    /// about. That race cannot be built deterministically; this test checks that the
-    /// stamp comes from the synced value.
-    #[tokio::test(start_paused = true)]
-    async fn frames_are_stamped_with_the_synced_session() {
-        let (tx, rx) = watch::channel(LinkState::default());
-        let mut actor = actor_with(rx);
-        tx.send(registered_link(7)).unwrap();
-        // Registering submits dev_init; its radio node sends a Search when the
-        // protocol timer runs out.
-        actor.sync_link().unwrap();
-        tokio::time::advance(PROTO_IDLE).await;
-        actor.handle_deadline().unwrap();
-        let stamped = actor.pending.pop().expect("a frame was queued");
-        assert_eq!(stamped.session, 7);
-        assert_eq!(stamped.sdu.local, AL_MAC);
+    #[test]
+    fn link_changes_registered_after_the_start() {
+        assert_eq!(
+            link_changes(LinkState::default(), linked(1, Some(AL_MAC))),
+            [LinkChange::Registered {
+                session: 1,
+                al_mac: AL_MAC
+            }]
+        );
+    }
+
+    #[test]
+    fn link_changes_unregistered_when_the_link_is_lost() {
+        assert_eq!(
+            link_changes(linked(1, Some(AL_MAC)), linked(1, None)),
+            [LinkChange::Unregistered { session: 1 }]
+        );
+    }
+
+    #[test]
+    fn link_changes_registered_again_after_a_lost_link() {
+        assert_eq!(
+            link_changes(linked(1, None), linked(2, Some(AL_MAC))),
+            [LinkChange::Registered {
+                session: 2,
+                al_mac: AL_MAC
+            }]
+        );
+    }
+
+    /// The loop never saw the link lost: session 1 straight to session 2. The role must still
+    /// get `unregistered()` first (0016 D5).
+    #[test]
+    fn link_changes_unregistered_then_registered_when_the_loss_was_skipped() {
+        assert_eq!(
+            link_changes(linked(1, Some(AL_MAC)), linked(2, Some(AL_MAC))),
+            [
+                LinkChange::Unregistered { session: 1 },
+                LinkChange::Registered {
+                    session: 2,
+                    al_mac: AL_MAC
+                }
+            ]
+        );
+    }
+
+    /// The app, a real `LoopCore` and the clock the test moves. The test plays the `Io`: it
+    /// reports what the sockets would report.
+    struct Rig {
+        loop_core: LoopCore<Instant>,
+        app: AgentApp<FakePlatform>,
+        now: Instant,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            let radios = vec![RadioSpec {
+                ruid: MacAddr::new([2, 0, 0, 0, 1, 1]),
+                band: FreqBand::BAND_5_GHZ,
+            }];
+            let now = Instant::now();
+            let mut loop_core = LoopCore::new(&BUDGETS, HANDLER_COUNT);
+            let app = AgentApp::new(2, FakePlatform::new(radios), now, &mut loop_core);
+            Self {
+                loop_core,
+                app,
+                now,
+            }
+        }
+
+        /// One pass at the current time; returns the actions it produced.
+        fn pass(&mut self) -> Vec<IoAction> {
+            self.loop_core.begin_pass(self.now);
+            let mut actions = Vec::new();
+            loop {
+                let turn = self.loop_core.next_turn();
+                if turn == Turn::PassDone {
+                    return actions;
+                }
+                self.app
+                    .serve(turn, self.now, &mut self.loop_core, &mut actions);
+            }
+        }
+
+        fn event(&mut self, event: IoEvent<Confirmation>) {
+            self.app.on_event(event, &mut self.loop_core);
+        }
+
+        fn transport_event(&mut self, event: TransportEvent) {
+            self.event(IoEvent::Transport(event));
+        }
+
+        fn advance(&mut self, by: Duration) {
+            self.now += by;
+        }
+
+        /// Connects, registers with `al_mac` and arms the first read.
+        fn register(&mut self, al_mac: MacAddr) {
+            let first = self.pass();
+            assert!(first.contains(&IoAction::Transport(TransportIoAction::Connect)));
+            self.transport_event(TransportEvent::Registered(response(al_mac)));
+            self.pass();
+            assert_eq!(self.app.handler.link().al_mac, Some(al_mac));
+        }
+
+        /// Ends the data socket and waits for the reconnect.
+        fn lose_link(&mut self) {
+            self.transport_event(TransportEvent::ReadEnded);
+            self.pass();
+            assert_eq!(self.app.handler.link().al_mac, None);
+        }
+
+        fn reconnect(&mut self, al_mac: MacAddr) {
+            self.advance(Duration::from_secs(2));
+            self.register(al_mac);
+        }
+    }
+
+    fn response(al_mac: MacAddr) -> Frame {
+        let mut body = al_mac.octets().to_vec();
+        body.push(1);
+        Frame::Complete(body)
+    }
+
+    fn has_write(actions: &[IoAction]) -> bool {
+        actions
+            .iter()
+            .any(|action| matches!(action, IoAction::Transport(TransportIoAction::Write(_))))
+    }
+
+    /// The registration made the radio search; its Search is due after `PROTO_IDLE`, and the
+    /// tick hands it to the transport, which writes it on the next pass.
+    #[test]
+    fn a_role_frame_lands_in_the_transport() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+        rig.advance(PROTO_IDLE);
+        let tick_pass = rig.pass();
+        assert!(!has_write(&tick_pass), "the write comes on the next pass");
+        let write_pass = rig.pass();
+        assert!(has_write(&write_pass), "no Write after the role's frame");
+        assert_eq!(rig.app.handler.counters().dropped_send_disconnected, 0);
+    }
+
+    /// While the link is lost the role gets `unregistered()`, so its tick builds no Search; after
+    /// the new session it is registered again and searches. A role that missed `unregistered()`
+    /// would build frames for a dead session, and the transport would count them dropped.
+    #[test]
+    fn a_reconnect_tells_the_role_unregistered_then_registered() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+
+        rig.lose_link();
+        assert_eq!(rig.app.told, linked(1, None));
+        rig.advance(PROTO_IDLE);
+        rig.pass();
+        rig.pass();
+        assert_eq!(rig.app.handler.counters().dropped_send_disconnected, 0);
+
+        rig.reconnect(AL_MAC);
+        assert_eq!(rig.app.told, linked(2, Some(AL_MAC)));
+        assert!(rig.app.fatal.is_none());
+        let after_reconnect = rig.pass();
+        assert!(has_write(&after_reconnect), "no Search on the new session");
+    }
+
+    #[test]
+    fn a_different_al_mac_ends_the_loop_at_once() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+        rig.lose_link();
+        assert!(!rig.app.finished());
+
+        rig.reconnect(OTHER_AL_MAC);
+        let changed = rig.app.fatal.as_ref().expect("the AL MAC change is fatal");
+        assert_eq!(changed.recorded, AL_MAC);
+        assert_eq!(changed.new, OTHER_AL_MAC);
+        assert!(rig.app.finished());
+    }
+
+    /// The rejection is handled on the registration turn; the closed channel on the application
+    /// turn of the same pass. Without the check in `serve` the second turn would stop the
+    /// transport and `run` would return `Ok` instead of the rejection.
+    #[test]
+    fn no_turn_is_served_after_the_transport_finished() {
+        let mut rig = Rig::new();
+        let first = rig.pass();
+        assert!(first.contains(&IoAction::Transport(TransportIoAction::Connect)));
+        let mut body = AL_MAC.octets().to_vec();
+        body.push(0);
+        rig.transport_event(TransportEvent::Registered(Frame::Complete(body)));
+        rig.event(IoEvent::AppClosed);
+
+        rig.pass();
+        assert_eq!(
+            rig.app.handler.outcome(),
+            Some(TransportOutcome::Rejected { result: 0 })
+        );
+        assert!(!rig.app.stopping);
+    }
+
+    /// The AL MAC change is found on the registration turn; the closed channel on the application
+    /// turn of the same pass must not stop the transport.
+    #[test]
+    fn no_turn_is_served_after_an_al_mac_change() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+        rig.lose_link();
+        rig.advance(Duration::from_secs(2));
+        let connect = rig.pass();
+        assert!(connect.contains(&IoAction::Transport(TransportIoAction::Connect)));
+        rig.transport_event(TransportEvent::Registered(response(OTHER_AL_MAC)));
+        rig.event(IoEvent::AppClosed);
+
+        let pass = rig.pass();
+        assert!(rig.app.fatal.is_some());
+        assert!(!rig.app.stopping);
+        assert!(!pass.contains(&IoAction::Transport(TransportIoAction::CloseSession)));
+    }
+
+    /// Planted-bug check: without the `role_is_active` guards the tick would run after the stop.
+    #[test]
+    fn the_role_gets_no_input_after_the_application_channel_closed() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+        let deadline_before_stop = rig.app.role.next_deadline();
+        assert!(deadline_before_stop.is_some());
+
+        rig.event(IoEvent::AppClosed);
+        let stop_pass = rig.pass();
+        assert!(rig.app.stopping);
+        assert!(
+            !stop_pass.contains(&IoAction::RecvApp),
+            "a receive was armed after the stop"
+        );
+
+        // The tick of the role is due, but it does not run: its deadline is still there.
+        rig.advance(PROTO_IDLE);
+        let later = rig.pass();
+        assert!(!has_write(&later));
+        assert_eq!(rig.app.role.next_deadline(), deadline_before_stop);
+    }
+
+    /// A frame is in flight and its write is blocked when the stop comes: the transport writes
+    /// for 900 ms, lingers for 100 ms and finishes, so the stop takes 1 s (0016 D3b).
+    #[test]
+    fn a_stop_with_a_frame_in_flight_finishes_within_a_second() {
+        let mut rig = Rig::new();
+        rig.register(AL_MAC);
+        rig.advance(PROTO_IDLE);
+        rig.pass();
+        let write_pass = rig.pass();
+        assert!(has_write(&write_pass));
+        rig.transport_event(TransportEvent::WriteBlocked);
+        rig.pass();
+
+        let stopped_at = rig.now;
+        rig.event(IoEvent::AppClosed);
+        rig.pass();
+        assert!(!rig.app.finished());
+
+        rig.advance(Duration::from_millis(900));
+        rig.pass();
+        assert!(!rig.app.finished(), "the linger is still running");
+        rig.advance(Duration::from_millis(100));
+        rig.pass();
+
+        assert!(rig.app.finished());
+        assert_eq!(rig.app.handler.outcome(), Some(TransportOutcome::Stopped));
+        assert!(rig.now.duration_since(stopped_at) <= Duration::from_secs(1));
+        assert!(rig.app.fatal.is_none());
     }
 }
