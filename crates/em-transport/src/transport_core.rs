@@ -5,8 +5,8 @@
 //! No tokio, no clock, no I/O (0016 D1). The caller passes the current time in, reports what
 //! happened on the sockets, and performs the [`TransportAction`]s the core returns. The
 //! `handler` module (`TransportHandler`) and the tokio `Io` (`tokio_io`) drive this core on the
-//! event loop (0016 D8 step 4b-3). The old actor (`actor.rs`) stays as it is until `em-agent`
-//! moves to the loop (0016 D8 step 4c).
+//! event loop (0016 D8 step 4b-3). The old actor was deleted in step 5b; the citations of
+//! `actor.rs` below name the file at `b6995f2`.
 //!
 //! # State machine
 //!
@@ -31,7 +31,7 @@
 //! `dropped_send_disconnected`; an unfinished fragment set counts in `dropped_receive_fragments`;
 //! the frame splitter starts again. A session that ends by itself also clears `link.al_mac`,
 //! emits `CloseSession` and waits `reconnect_delay`. A stop ends in the same way, but `al_mac` is
-//! cleared and the sockets are closed after the linger (as in `actor.rs` `run_session`).
+//! cleared and the sockets are closed after the linger (as in `actor.rs` `run_session` at `b6995f2`).
 //!
 //! **Deadlines that do not fit.** A deadline is `now + duration`. When that sum cannot be
 //! represented as an `Instant` (for example a policy duration of `Duration::MAX`), the deadline
@@ -144,7 +144,7 @@ pub enum RegistrationStep {
 }
 
 impl RegistrationStep {
-    /// The operation name `TransportError::Io` carries (as `actor.rs` `register` names them).
+    /// The operation name `TransportError::Io` carries (as `actor.rs` `register` at `b6995f2` names them).
     fn operation(self) -> &'static str {
         match self {
             Self::ConnectControl => "connect control socket",
@@ -154,7 +154,7 @@ impl RegistrationStep {
         }
     }
 
-    /// True for the error kinds that mean "try again" (`actor.rs` `classify_connect` for the
+    /// True for the error kinds that mean "try again" (`actor.rs` `classify_connect` at `b6995f2` for the
     /// two connects, `classify_registration_io` for the request and the response). Any other
     /// kind is fatal.
     fn retries_on(self, kind: io::ErrorKind) -> bool {
@@ -249,7 +249,7 @@ impl TransportCore {
 
     // ----- registration -----
 
-    /// The registration response arrived as one frame (0011 D3 step 3; `actor.rs` `register`).
+    /// The registration response arrived as one frame (0011 D3 step 3; `actor.rs` `register` at `b6995f2`).
     ///
     /// Success starts a session. A frame that is oversize, too short, or carries an all-zero AL
     /// MAC ends the attempt and is retried after `reconnect_delay`. Any `result` other than
@@ -264,7 +264,7 @@ impl TransportCore {
         if self.state != State::Registering {
             return;
         }
-        // The actor's `FrameReader` never yields a body above the limit, so neither does the core
+        // The old actor's `FrameReader` (`b6995f2`) never yields a body above the limit, so neither does the core
         // accept one.
         let body = match frame {
             Frame::Complete(body) if !is_over_frame_limit(body.len()) => body,
@@ -300,7 +300,7 @@ impl TransportCore {
     }
 
     /// A step of the registration attempt failed with an I/O error of `kind` (`actor.rs`
-    /// `classify_connect` and `classify_registration_io`). A missing or refusing socket, and a
+    /// `classify_connect` and `classify_registration_io` at `b6995f2`). A missing or refusing socket, and a
     /// service that closed or reset before the response, are retried after `reconnect_delay`;
     /// any other kind finishes the core with [`TransportOutcome::IoFailed`]. Ignored unless an
     /// attempt is in progress.
@@ -341,7 +341,7 @@ impl TransportCore {
         };
     }
 
-    /// The same order and meaning as `actor.rs` `run_session`: counted, then the link shows the
+    /// The same order and meaning as `actor.rs` `run_session` at `b6995f2`: counted, then the link shows the
     /// new session and AL MAC before any frame of it is read.
     fn start_session(&mut self, al_mac: MacAddr) {
         tracing::info!("registered, local AL MAC {al_mac}");
@@ -355,8 +355,8 @@ impl TransportCore {
         self.state = State::InSession;
     }
 
-    /// A fatal registration verdict: like every return of the old actor, it counts the received
-    /// SDUs nobody will take (0011 A6; `actor.rs` `run`).
+    /// A fatal registration verdict: like every return of the old actor (`actor.rs` `run` at `b6995f2`), it counts the received
+    /// SDUs nobody will take (0011 A6).
     fn finish_fatal(&mut self, outcome: TransportOutcome, actions: &mut Vec<TransportAction>) {
         self.drop_received_for_stop();
         actions.push(TransportAction::CloseSession);
@@ -393,7 +393,7 @@ impl TransportCore {
         self.state == State::InSession && !self.splitter.has_frame()
     }
 
-    /// Handles one frame, with the logic and counters of `actor.rs` `handle_frame`. Receive
+    /// Handles one frame, with the logic and counters of `actor.rs` `handle_frame` at `b6995f2`. Receive
     /// errors drop the frame and keep the session. `_now` is there for the same shape as the
     /// other handlers; reading needs no time.
     pub fn serve_read(&mut self, _now: Instant) {
@@ -502,7 +502,7 @@ impl TransportCore {
                 return;
             }
             State::StopWriting { .. } | State::StopLingering { .. } | State::Finished => {
-                tracing::debug!("SDU dropped: the actor is stopping");
+                tracing::debug!("SDU dropped: the transport is stopping");
                 self.counters.dropped_send_disconnected += 1;
                 return;
             }

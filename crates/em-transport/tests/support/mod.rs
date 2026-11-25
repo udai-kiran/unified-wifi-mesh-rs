@@ -9,10 +9,11 @@ use std::sync::mpsc as std_mpsc;
 use std::thread;
 use std::time::Duration;
 
-use em_transport::{Role, Sdu, TransportConfig, TransportError, TransportTask};
+use em_transport::{Role, Sdu, TransportConfig, TransportError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 /// The reconnect delay the tests configure.
 pub const RECONNECT_DELAY: Duration = Duration::from_secs(2);
@@ -21,9 +22,9 @@ pub const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 const LIMIT: Duration = Duration::from_secs(60);
 
 /// Waits for `future`, failing the test with `what` if it takes longer than [`LIMIT`].
-/// A broken actor then fails a test with a message instead of hanging it.
+/// A broken loop then fails a test with a message instead of hanging it.
 pub async fn bounded<T>(what: &str, future: impl Future<Output = T>) -> T {
-    // The timeout cannot fire if a broken actor spins without yielding. The watchdog
+    // The timeout cannot fire if a broken loop spins without yielding. The watchdog
     // then ends the process with a message after a long real time.
     let _watchdog = Watchdog::start(what.to_owned(), Duration::from_secs(20));
     tokio::time::timeout(LIMIT, future)
@@ -31,29 +32,22 @@ pub async fn bounded<T>(what: &str, future: impl Future<Output = T>) -> T {
         .unwrap_or_else(|_| panic!("timed out waiting for: {what}"))
 }
 
-/// Waits for the actor to end and returns its result.
-pub async fn join(task: TransportTask) -> Result<(), TransportError> {
-    bounded("the actor to end", task)
-        .await
-        .expect("the actor task panicked")
-}
-
-/// Like [`join`], for tests that run in real time with a short limit.
-pub async fn join_within(limit: Duration, task: TransportTask) -> Result<(), TransportError> {
-    // A real-time timeout cannot fire while the actor spins without yielding.
-    let _watchdog = Watchdog::start(
-        "the actor to end".to_owned(),
-        limit + Duration::from_secs(5),
-    );
+/// Waits for the loop's task to end within a real-time `limit` and returns its result.
+pub async fn join_within(
+    limit: Duration,
+    task: JoinHandle<Result<(), TransportError>>,
+) -> Result<(), TransportError> {
+    // A real-time timeout cannot fire while the loop spins without yielding.
+    let _watchdog = Watchdog::start("the loop to end".to_owned(), limit + Duration::from_secs(5));
     tokio::time::timeout(limit, task)
         .await
-        .unwrap_or_else(|_| panic!("the actor did not end within {limit:?}"))
-        .expect("the actor task panicked")
+        .unwrap_or_else(|_| panic!("the loop did not end within {limit:?}"))
+        .expect("the loop task panicked")
 }
 
 /// Aborts the whole test process with a message if it is not dropped in time.
 ///
-/// For tests where a broken actor can spin without ever yielding, which no timeout
+/// For tests where a broken loop can spin without ever yielding, which no timeout
 /// on the same thread can interrupt.
 pub struct Watchdog {
     disarm: std_mpsc::Sender<()>,

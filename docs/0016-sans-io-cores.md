@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E13. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 and A3 (proofs only for `LoopCore`, frozen; the `Reassembler` is tested, not proved; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E14. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 and A3 (proofs only for `LoopCore`, frozen; the `Reassembler` is tested, not proved; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |
@@ -423,7 +423,16 @@ no `sorry`, only Lean's standard axioms. These errata change the text above wher
   3. **Two copies of the app.** `em-agent` (`AgentApp`) and `em-ctrl` (`CtrlApp`) keep separate copies of the application. They are two role crates; a shared helper would be new `em-transport` API for two users.
   4. **The old actor has no user.** `spawn`, `actor.rs` and `tests/session.rs` in `em-transport` are used by no crate now. They are deleted in step 5b, in their own PR.
 
+- **E14 (D8 step 5b: the old actor deleted).** Decisions of the step 5b brief, recorded here (E11 item 4, E13 item 4):
+  1. **Deleted.** `src/actor.rs` (`spawn`, `Transport`, `TransportTask` and `mod actor`), `tests/session.rs` (66 tests), the 9 unit tests of `actor.rs`, and the helpers of `tests/support/mod.rs` that only the actor used. No other crate used them.
+  2. **Kept.** `FrameReader` (`TransportIo` reads the registration response with it), every `TransportCounters` field (`TransportCore` counts all 12), and `TransportConfig` (the probe and the loop tests copy `reconnect_delay` into the policy).
+  3. **Old cites.** The doc comments that cite the old actor name `actor.rs` at `b6995f2`, the last commit that has it.
+  4. **No behaviour change.** The only non-comment change in the kept files is one debug log text, `SDU dropped: the transport is stopping` (it said `the actor is stopping`).
+  5. **Counts.** em-transport has 165 unit tests and 66 loop tests; 75 tests were removed.
+
 ## Revision history
+
+- errata E14 (2026-11-25): D8 step 5b (the old tokio actor, `spawn` and `tests/session.rs` deleted, as E11 item 4 and E13 item 4 said; one debug log text changed, no other behaviour change). Recorded as an erratum, not by editing the text above.
 
 - errata E13 (2026-11-25): D8 step 5 (`em-ctrl` on the loop; the application channel carries nothing and is closed at the stop; the old actor left with no user for step 5b). Recorded as an erratum, not by editing the text above.
 

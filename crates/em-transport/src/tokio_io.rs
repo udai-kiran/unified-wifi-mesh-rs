@@ -2,7 +2,7 @@
 
 //! `TransportIo`: the tokio `Io` of the event loop for the transport (0016 D2, U19; step 4b-3).
 //!
-//! It does what the old actor did at the sockets and nothing more: connect, register, read
+//! It does what the deleted actor did at the sockets (`actor.rs` at `b6995f2`) and nothing more: connect, register, read
 //! when told to, write when told to, receive from the application channel when told to. Every
 //! decision belongs to [`TransportHandler`](crate::TransportHandler) and the core.
 //!
@@ -146,7 +146,7 @@ impl<E> TransportIo<E> {
         }
     }
 
-    /// The result the old actor's task returned, from the handler's outcome: `Ok` for a stop,
+    /// The result of the transport, from the handler's outcome: `Ok` for a stop,
     /// [`TransportError::RegistrationRejected`], or [`TransportError::Io`] with the `io::Error`
     /// the failed step produced.
     ///
@@ -392,7 +392,7 @@ impl<E: Send> em_event_loop::Io<Instant> for TransportIo<E> {
 }
 
 /// Connects control, then data, sends the request and reads one framed response
-/// (0011 D3 steps 1 to 3; `actor.rs` `register`). The response is judged by the core.
+/// (0011 D3 steps 1 to 3; `actor.rs` `register` at `b6995f2`). The response is judged by the core.
 async fn register(
     control_path: PathBuf,
     data_path: PathBuf,

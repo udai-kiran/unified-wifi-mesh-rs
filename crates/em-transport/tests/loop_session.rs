@@ -2,7 +2,8 @@
 
 //! Tests of the transport on the event loop, with real UNIX sockets and a scripted fake service
 //! (0016 D2, D8 step 4b-3). Every scenario of `session.rs` that still has a meaning on the loop
-//! is ported here; the harness is in `loop_support`. Tests tagged
+//! is ported here. `session.rs` tested the old actor; it was deleted in step 5b and can be read
+//! at `b6995f2` (`crates/em-transport/tests/session.rs`); the harness is in `loop_support`. Tests tagged
 //! `intentional-difference:<id>` pin a row of the 0016 table of intentional differences or a
 //! place where this client does not do what upstream's does (0011 D3).
 //!
@@ -132,7 +133,7 @@ use std::time::Duration;
 
 use em_transport::{
     LinkState, MAX_FRAGMENT_PAYLOAD, MAX_SDU_PAYLOAD, OutboundSdu, Role, Sdu, TransportConfig,
-    TransportCounters, TransportError, TransportTask,
+    TransportCounters, TransportError,
 };
 use em_types::MacAddr;
 use loop_support::{
@@ -148,6 +149,7 @@ use tokio::net::unix::OwnedReadHalf;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 const SERVICE_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
 const PEER_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x02];
@@ -174,7 +176,7 @@ const RX_SDU_CAP: usize = 1_048_576;
 // ---------------------------------------------------------------------------
 
 /// Waits for the loop's task to end and returns its result.
-async fn join_loop(task: TransportTask) -> Result<(), TransportError> {
+async fn join_loop(task: JoinHandle<Result<(), TransportError>>) -> Result<(), TransportError> {
     bounded("the loop to end", task)
         .await
         .expect("the loop task panicked")

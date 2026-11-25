@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The numbers of the transport's policy (0016 U15, U31). The mechanisms in `wire`, `actor` and
+//! The numbers of the transport's policy (0016 U15, U31). The mechanisms in `wire` and
 //! `transport_core` take them as arguments and hold none; `TransportPolicy::easymesh` is the one
 //! place that gathers them.
 
