@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+em-event-loop = { path = "../em-event-loop" }
 em-types = { path = "../em-types" }
 tokio = { version = "1.54.1", default-features = false, features = ["net", "io-util", "sync", "time", "macros", "rt"] }
 tracing = { version = "0.1.44", default-features = false }

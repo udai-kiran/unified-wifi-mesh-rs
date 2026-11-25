@@ -49,6 +49,10 @@ struct FakeIo {
     wake_script: VecDeque<(u64, Vec<Event>)>,
     woken_events: Vec<Event>,
     log: Vec<Call>,
+    /// Calls of `yield_now`, kept out of `log` so the call sequences stay as they are.
+    yields: usize,
+    /// The events that become available during each `yield_now` (empty once used up).
+    events_during_yield: VecDeque<Vec<Event>>,
 }
 
 impl Io<u64> for FakeIo {
@@ -57,6 +61,14 @@ impl Io<u64> for FakeIo {
 
     fn now(&mut self) -> u64 {
         self.clock
+    }
+
+    fn yield_now(&mut self) -> impl Future<Output = ()> + Send {
+        self.yields += 1;
+        if let Some(events) = self.events_during_yield.pop_front() {
+            self.woken_events.extend(events);
+        }
+        std::future::ready(())
     }
 
     fn wait(&mut self, deadline: Option<u64>) -> impl Future<Output = ()> + Send {
@@ -184,6 +196,8 @@ fn events_between_passes_are_delivered_without_a_wait() {
         poll_script: VecDeque::from([
             vec![Event::Data(1)],
             vec![Event::Data(2)],
+            // The poll after the yield that the driver makes before the second pass.
+            vec![],
             vec![Event::Stop],
         ]),
         ..FakeIo::default()
@@ -212,6 +226,8 @@ fn a_source_still_ready_after_a_pass_gets_another_pass_at_once() {
         poll_script: VecDeque::from([
             vec![Event::Data(1), Event::Data(2)],
             vec![],
+            // The poll after the yield that the driver makes before the second pass.
+            vec![],
             vec![Event::Stop],
         ]),
         ..FakeIo::default()
@@ -222,6 +238,39 @@ fn a_source_still_ready_after_a_pass_gets_another_pass_at_once() {
     assert_eq!(
         app.turns,
         [(Turn::Serve(SourceId(0)), 0), (Turn::Serve(SourceId(0)), 0)]
+    );
+    // Instead of a wait, the driver yields once between the two passes.
+    assert_eq!(io.yields, 1);
+}
+
+#[test]
+fn events_that_arrive_during_the_yield_are_served_by_the_next_pass() {
+    // The source stays ready after every turn, so the driver yields after the first pass. Data(9)
+    // arrives during that yield. Delivered right after it, the second pass serves it; delivered
+    // only after the second pass, that pass would be empty and a third would be needed.
+    let mut core = LoopCore::new(&[1], 1);
+    let mut io = FakeIo {
+        poll_script: VecDeque::from([vec![Event::Data(1)]]),
+        events_during_yield: VecDeque::from([vec![Event::Data(9)]]),
+        ..FakeIo::default()
+    };
+    let mut app = ToyApp {
+        always_ready: true,
+        ..ToyApp::default()
+    };
+    drive(&mut core, &mut io, &mut app);
+    assert_eq!(app.turns.len(), 2);
+    let performed: Vec<_> = io.log.iter().filter(|call| **call != Call::Poll).collect();
+    assert_eq!(
+        performed,
+        [
+            &Call::Perform(10),
+            &Call::Perform(11),
+            &Call::Perform(12),
+            &Call::Perform(90),
+            &Call::Perform(91),
+            &Call::Perform(92),
+        ]
     );
 }
 
@@ -302,6 +351,7 @@ fn nothing_ready_and_no_deadline_waits_with_none() {
     let mut app = ToyApp::default();
     drive(&mut core, &mut io, &mut app);
     assert_eq!(waits(&io), [None]);
+    assert_eq!(io.yields, 0);
 }
 
 #[test]

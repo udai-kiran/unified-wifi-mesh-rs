@@ -30,6 +30,16 @@ pub trait Io<T: Ord + Copy> {
 
     /// Starts one external action. Never waits; the result comes back as an event.
     fn perform(&mut self, action: Self::Action);
+
+    /// Lets other work on the same thread run, then returns. The driver calls it between two
+    /// passes when a source is still ready, because it does not wait then: without it a source
+    /// that stays ready (a busy channel, a peer that never stops sending) would keep the thread.
+    /// Like `wait`, it may make events available (the driver polls them when it returns), but it
+    /// never blocks for them. The default returns at once, for an `Io` that has no other work to
+    /// let run.
+    fn yield_now(&mut self) -> impl Future<Output = ()> + Send {
+        std::future::ready(())
+    }
 }
 
 /// The application that [`run`] drives.
@@ -64,6 +74,10 @@ pub trait App<T: Ord + Copy> {
 /// action is performed and readiness refreshed, without waiting. Only then does the driver
 /// wait, and only if no source is ready; it waits until the next deadline of `core`.
 ///
+/// When a source is still ready the driver does not wait; it calls [`Io::yield_now`], delivers the
+/// events that arrived during the yield (as after a wait) and runs the next pass, so other work on
+/// the thread is not starved and the next pass sees those events.
+///
 /// `finished()` is checked after the first delivery and after each pass's actions are
 /// performed and its events delivered, never inside a pass. So a pass that makes the
 /// application finish still has all its actions performed, and no wait follows it.
@@ -90,10 +104,15 @@ where
             io.perform(action);
         }
         deliver_events(core, io, app, &mut events);
-        if !app.finished() && !core.has_ready_source() {
-            io.wait(core.next_deadline()).await;
-            deliver_events(core, io, app, &mut events);
+        if app.finished() {
+            break;
         }
+        if core.has_ready_source() {
+            io.yield_now().await;
+        } else {
+            io.wait(core.next_deadline()).await;
+        }
+        deliver_events(core, io, app, &mut events);
     }
 }
 

@@ -13,6 +13,10 @@
 //! 4. when the data socket closes or fails, publish a [`LinkState`] without an AL MAC,
 //!    wait, and register again.
 //!
+//! The same protocol is also written as a synchronous [`TransportCore`]. The event loop runs
+//! it through [`TransportHandler`] and the tokio [`TransportIo`] (0016 D8 step 4b-3). The
+//! actor described here, which [`spawn`] starts, stays until the role crates move to the loop.
+//!
 //! The role actor sends [`OutboundSdu`]s: the SDU with the `session` of the [`LinkState`] it
 //! was built under (note 0011 A6). The actor writes it only into that session.
 //!
@@ -35,11 +39,13 @@
 mod actor;
 mod frame_reader;
 mod frame_splitter;
+mod handler;
 mod outbound_buffer;
 mod policy;
 mod received_queue;
 #[cfg(test)]
 mod test_prng;
+mod tokio_io;
 mod transport_core;
 mod wire;
 
@@ -52,6 +58,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 pub use frame_splitter::Frame;
+pub use handler::{TransportEvent, TransportHandler, TransportIoAction, TransportSources};
+pub use tokio_io::{IoAction, IoEvent, TransportIo};
 pub use transport_core::{
     RegistrationStep, TransportAction, TransportCore, TransportOutcome, TransportPolicy,
 };

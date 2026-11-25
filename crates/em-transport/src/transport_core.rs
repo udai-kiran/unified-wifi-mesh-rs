@@ -3,9 +3,10 @@
 //! `TransportCore`: every decision of the transport as a synchronous state machine (0016 D4).
 //!
 //! No tokio, no clock, no I/O (0016 D1). The caller passes the current time in, reports what
-//! happened on the sockets, and performs the [`TransportAction`]s the core returns. The old
-//! actor (`actor.rs`) stays as it is until `em-agent` moves to the core (0016 D8 step 4c); the
-//! tokio `Io` that drives this core is step 4b-3.
+//! happened on the sockets, and performs the [`TransportAction`]s the core returns. The
+//! `handler` module (`TransportHandler`) and the tokio `Io` (`tokio_io`) drive this core on the
+//! event loop (0016 D8 step 4b-3). The old actor (`actor.rs`) stays as it is until `em-agent`
+//! moves to the loop (0016 D8 step 4c).
 //!
 //! # State machine
 //!
@@ -384,6 +385,14 @@ impl TransportCore {
         self.state == State::InSession && self.splitter.has_frame()
     }
 
+    /// True while in a session that is not stopping and the splitter holds no complete frame: the
+    /// caller may read more octets from the socket (a partial frame may be waiting for the rest).
+    /// The opposite of the read condition in [`TransportCore::read_ready`], within a session.
+    #[must_use]
+    pub fn wants_bytes(&self) -> bool {
+        self.state == State::InSession && !self.splitter.has_frame()
+    }
+
     /// Handles one frame, with the logic and counters of `actor.rs` `handle_frame`. Receive
     /// errors drop the frame and keep the session. `_now` is there for the same shape as the
     /// other handlers; reading needs no time.
@@ -526,32 +535,56 @@ impl TransportCore {
         matches!(self.state, State::InSession | State::StopWriting { .. })
     }
 
-    /// True while writing is allowed (in a session, or stopping within the write window), the
-    /// socket is writable, and the buffer has a chunk. It is false while the socket is known to
-    /// be blocked, so the write source does not spin (0016 E10).
-    #[must_use]
-    pub fn write_ready(&self) -> bool {
-        self.may_write() && self.socket_writable && self.outbound.next_chunk().is_some()
+    /// True when a deadline of the writing states is due at `now`: the stall deadline in a
+    /// session, the stop write limit while stopping. The event loop serves sources before it ticks
+    /// the deadlines, so a write that starts at or after a due deadline would be written first and
+    /// judged by the deadline afterwards.
+    fn write_deadline_due(&self, now: Instant) -> bool {
+        self.may_write() && self.next_deadline().is_some_and(|deadline| deadline <= now)
     }
 
-    /// The octets of the oldest queued SDU that are not written yet. Write some of them, then
-    /// call [`TransportCore::wrote`].
-    #[must_use]
-    pub fn write_chunk(&self) -> Option<&[u8]> {
+    /// The octets that are queued for writing, whatever the time.
+    fn queued_chunk(&self) -> Option<&[u8]> {
         if !self.may_write() {
             return None;
         }
         self.outbound.next_chunk()
     }
 
+    /// True while writing is allowed (in a session, or stopping within the write window), the
+    /// socket is writable, and the buffer has a chunk. It is false while the socket is known to
+    /// be blocked, so the write source does not spin (0016 E10). It is also false when the stall
+    /// deadline or the stop write limit is due at `now`: the deadline wins over a write at the
+    /// same `now`.
+    #[must_use]
+    pub fn write_ready(&self, now: Instant) -> bool {
+        self.socket_writable && self.write_chunk(now).is_some()
+    }
+
+    /// The octets of the oldest queued SDU that are not written yet. Write some of them, then
+    /// call [`TransportCore::wrote`]. `None` when a deadline is due at `now` (see
+    /// [`TransportCore::write_ready`]), so a write never starts at or after a due deadline.
+    #[must_use]
+    pub fn write_chunk(&self, now: Instant) -> Option<&[u8]> {
+        if self.write_deadline_due(now) {
+            return None;
+        }
+        self.queued_chunk()
+    }
+
     /// `written` octets of [`TransportCore::write_chunk`] left. Counts `sdus_sent` when an SDU
     /// completes and resets the stall clock. Ignored when written is 0 or there is no chunk.
+    ///
+    /// Report the result with the time the write was performed. The write was issued at a `now`
+    /// before every deadline (`write_chunk` refuses otherwise), so the chunk check here does not
+    /// look at deadlines. A result reported at or after the stop write limit is too late and is
+    /// not accepted.
     ///
     /// # Panics
     ///
     /// If `written` is more than the length of the chunk.
     pub fn wrote(&mut self, now: Instant, written: usize) {
-        if written == 0 || self.write_chunk().is_none() {
+        if written == 0 || self.queued_chunk().is_none() {
             return;
         }
         if self.stop_limit_reached(now) {

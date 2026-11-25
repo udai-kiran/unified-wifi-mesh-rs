@@ -370,6 +370,7 @@ dependencies = [
 name = "em-transport"
 version = "0.1.0"
 dependencies = [
+ "em-event-loop",
  "em-msg",
  "em-types",
  "tokio",
