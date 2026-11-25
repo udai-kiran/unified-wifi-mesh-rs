@@ -11,7 +11,7 @@ Base: `rdkcentral/unified-wifi-mesh` @ `ba4180b`.
 
 ## Status
 
-S1 library part (synchronous core, tested without sockets) and the tokio role actor with `main` and the command line implemented. The Docker exit checks are in `docker/run-s1.sh` (0012 D8). The S2 core flow (note [0013](../../docs/0013-s2-onboarding.md) D2, D3, D7) is implemented and tested without sockets; its Docker checks are in `docker/run-s2.sh` (0013 D10). See [STATUS.md](../../STATUS.md).
+S1 library part (synchronous core, tested without sockets) and the tokio event loop with `main` and the command line implemented. The controller runs on the loop since D8 step 5 (note 0016). The Docker exit checks are in `docker/run-s1.sh` (0012 D8). The S2 core flow (note [0013](../../docs/0013-s2-onboarding.md) D2, D3, D7) is implemented and tested without sockets; its Docker checks are in `docker/run-s2.sh` (0013 D10). See [STATUS.md](../../STATUS.md).
 
 ## S1 library part (note 0012 D3, D9, D10)
 
@@ -97,38 +97,54 @@ cargo run -p em-ctrl --release -- \
   The Docker lost-M2 check uses it.
 - A bad argument prints the usage on stderr and exits 2.
 - Logs go to stdout as plain text; the level comes from `RUST_LOG` (default `info`).
-- SIGTERM or SIGINT: the actor drops its transport channels, waits at most 1 s for the
-  transport task, aborts it, and exits 0. A rejected registration, an ended transport or a
-  changed AL MAC logs an error and exits 1.
+- SIGTERM or SIGINT: the controller stops as described in "The loop" below and exits 0. A
+  rejected registration, an ended transport or a changed AL MAC logs an error and exits 1.
 
-### The actor (`src/actor.rs`)
+### The loop (`src/actor.rs`)
 
-One `select!` loop owns the `CtrlCore` and the transport. Arms: the stop future (`break`,
-then the 1 s stop and exit 0); the transport task ending, `received` closing, `link`
-closing and a failed `reserve()` (each waits at most 1 s for the task and exits 1 with its
-error); a received SDU (fed to the core whatever its session); a link change (`Some` calls
-`registered`, a different AL MAC is fatal; `None` calls `unregistered`, which stops the proto
-ticks); the core's next deadline through `sleep_until` (a proto or orchestrator tick); and
-`sdus.reserve()`, only while frames are pending. Every handler first brings the
-core up to date through `sync_link`, which reads `link` once and returns that value,
-because a received SDU can be selected before its link change. Frames are stamped with the
-session of that same value and the recorded AL MAC, and queue in at most 64 pending frames
-(oldest dropped, counted, logged at `warn`).
+One `em-event-loop` loop per process (0016 D2, D3b) drives two handlers: the transport
+(`TransportHandler`, `em-transport`) and `CtrlCore`. The sources, in order: the data socket
+read (up to 64 frames per pass), the registration, the application channel (it carries
+nothing and is closed at the stop), a received SDU for the role (one per pass), and the data
+socket write. The timers are the transport's and the role's `next_deadline()`.
 
-Log lines the Docker checks can match: `registered` (session, al_mac), `new session, same
-AL MAC`, `link lost, waiting to register`, `peer model created`, `existing peer model`,
-`Response sent`, the S2 lines above, `pending frames full, dropped the oldest`, `em-ctrl stopped` (error),
-`transport stopped`.
+- **Link changes.** After every turn the loop compares the transport's link with the one the
+  role was last told, and tells the role the difference in order. A new session of a registered
+  link gives `unregistered()` and then `registered()`, also when the loop never saw the link
+  lost in between.
+- **Frames.** A role frame goes straight into the transport's outbound buffer for the current
+  session, stamped with that session and the recorded AL MAC. The buffer holds 4 MiB and drops
+  the oldest frame not yet started (difference `tx-buffer`). There is no separate pending queue.
+- **Stop.** A future polled in the same task drops the application channel's sender when
+  `stop` completes; the closed channel is the stop signal. The role gets no further input. The
+  transport then writes the frames it has queued for at most 900 ms and keeps its sockets open
+  for 100 ms. `run` returns `Ok` and logs `transport stopped`.
+- **Errors.** A transport that ends without a stop returns `ActorError::Transport` with its
+  error. A changed AL MAC returns `ActorError::AlMacChanged` at once, without the transport
+  stop.
+
+Log lines the Docker checks can match (target `em_ctrl::actor`): `registered` (session,
+al_mac), `new session, same AL MAC`, `link lost, waiting to register`, `transport stopped`, and
+`transport ended with an error while stopping` (warn). The S2 lines above come from the core.
+`em-ctrl stopped` (error) is logged by `main`.
 
 ### Tests
 
-`tests/actor.rs` runs the actor against a fake AL-SAP service over UNIX sockets in a
+The package has 39 library tests, 7 in `tests/actor.rs` and 2 in `tests/binary.rs`.
+
+`tests/actor.rs` runs the controller against a fake AL-SAP service over UNIX sockets in a
 temporary directory (a trimmed copy of `em-transport`'s test support), in paused time: a
-Search answered with a Response on the live session, and again after a reconnect (so it
-carries the new session), a different AL MAC (fatal), a rejected registration (error
-result) and the stop path (under 1 s), and an M1 answered with an M2 followed by a Topology
-Query on the actor's own deadline. `tests/binary.rs` runs the binary with a missing and an
-invalid reset file (exit 1).
+Search answered with a Response on the live session, the same AL MAC on a new session (the
+log shows the lost link first), a different AL MAC (fatal), a rejected registration (error
+result, also on a reconnect), the stop path (under 1 s), and an M1 answered with an M2 followed
+by a Topology Query on the role's own deadline. `tests/binary.rs` runs the binary with a
+missing and an invalid reset file (exit 1).
+
+The unit tests in `src/actor.rs` check the link-change function on its own (including a loss
+the loop never saw), a role frame reaching the transport, the reconnect order, a changed AL
+MAC, no turn after the transport has finished or the AL MAC changed, the role getting no input
+after the stop, and a stop with a frame in flight (within 1 s), on a real `LoopCore` with a
+clock the test moves.
 
 The core tests (`src/s2_tests.rs`, virtual time, `em-db`'s `load_reset_str` for the rows)
 cover M1 routing (new node, reset, no peer model, a radio in `wsc_m2_sent`), an M2 that the
@@ -144,10 +160,10 @@ renew per radio, the cancel scoped to one agent, and a new `em_config` after the
 - A Search whose AL MAC or band cannot be read is dropped without a model, as upstream's
   routing returns before the commit.
 - Messages other than a Search, an M1 and a Topology Response are ignored.
-- The stop and "transport ended" waits are 1 s each (0011 A7), both on the virtual clock in
-  tests. The brief names no time for the ended case; the same 1 s is used.
-- Before the transport task is awaited, an ended transport is always an error exit (1),
-  even when the task returned `Ok`: the actor did not ask it to stop.
+- The stop takes at most 1 s (900 ms of writes, then 100 ms of linger; 0016 D3b, U8). Tests
+  run it on the virtual clock.
+- A transport that ends without a stop is always an error exit (1), even when it returned
+  `Ok`: the controller did not ask it to stop.
 - `--help` is not special: it is an unknown option and exits 2.
 - `CtrlConfig` has no reconnect delay: the transport's default of 2 s applies.
 - `OrchRole::on_start` sees no node state, so `em.cpp:173-175` (`wsc_m2_sent` to

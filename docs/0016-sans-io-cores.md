@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E12. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 and A3 (proofs only for `LoopCore`, frozen; the `Reassembler` is tested, not proved; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
+| Status | **Accepted** (2026-11-23, user), rev 5, errata E1 to E13. User decisions U1 to U38; verification workflow in [0017](0017-verification-workflow.md), amended by its A2 and A3 (proofs only for `LoopCore`, frozen; the `Reassembler` is tested, not proved; Codex review plus the user, a second reviewer only for security code; this replaces D8's "plan review and the full review set"); open: C7 (deferred), C11 (later) |
 | Date | 2026-11-23 |
 | Follows | [0004](0004-runtime-and-ownership.md) R1 to R4, R6; [0002](0002-cmd-core-orch.md) D1, D7, D10; [0011](0011-em-transport-s0.md) D2, D3, A5 to A8; [0012](0012-s1-discovery.md) D1, D9, D11; [0013](0013-s2-onboarding.md) D9; [0014](0014-init-config-and-al-mac.md) D16; [0010](0010-vertical-slices-and-transport.md) D6, D7 |
 | Amends | 0004 R3, R4, R6 (D2); 0002 D1 (role-actor wording, `reserve()` forwarding, database I/O, bridges), D7 (reply ownership), D10 item 6 (database I/O through `Offload`, same "no other role input" rule, U7); 0011 D2, D3 step 6 (U2 refusal), A5 (U1), A6 (D4), A7 (U4, counting kept); 0012 D9 (session stamps, pending frames, transport ended, stopping with the 1 s bound kept, U8); 0014 D16 (admin tasks become loop sources, replies by id, the save uses `Offload`) |
@@ -417,7 +417,15 @@ no `sorry`, only Lean's standard axioms. These errata change the text above wher
   9. **A write in flight is kept (review round 1, a defect of 4b-3).** The `Io` writes a chunk after the pass, but a later turn of the same pass (the role timer runs after the write source) may send. With the buffer full, that send could drop the SDU whose bytes were already handed out, and the write result then advanced the next SDU (wrong octets on the wire, or a panic). `TransportCore::write_issued` now marks that SDU; the outbound buffer keeps it, like a started SDU, until the result (`wrote`, `write_blocked`) or the session end. A session end still counts it as not started unless octets of it were reported written. So `tx-buffer` drops the oldest SDU that is neither started nor being written.
   10. **No turn after the end (review round 1).** Once the transport has an outcome or the AL MAC changed, the application serves no further turn of that pass, so a stop in the same pass no longer turns a fatal transport error into `Ok`, and an AL MAC change never runs the transport stop.
 
+- **E13 (D8 step 5: `em-ctrl` on the loop).** Decisions of the step 5 brief, recorded here (D2, D3b, D5, D8 step 5):
+  1. **The application channel carries nothing.** `TransportIo` has one application channel. The controller has no platform, so the channel carries `Infallible`. A future, polled in the same task as the loop, drops the sender when `stop` completes; `AppClosed` is the stop signal. This is E12 item 1 without the platform forwarder.
+  2. **E12 items 2 to 6, 9 and 10 apply unchanged.** Item 7 still holds: the replay tests and the D5 leaks wait for step 6. Item 8 is done, since the role no longer uses the old actor.
+  3. **Two copies of the app.** `em-agent` (`AgentApp`) and `em-ctrl` (`CtrlApp`) keep separate copies of the application. They are two role crates; a shared helper would be new `em-transport` API for two users.
+  4. **The old actor has no user.** `spawn`, `actor.rs` and `tests/session.rs` in `em-transport` are used by no crate now. They are deleted in step 5b, in their own PR.
+
 ## Revision history
+
+- errata E13 (2026-11-25): D8 step 5 (`em-ctrl` on the loop; the application channel carries nothing and is closed at the stop; the old actor left with no user for step 5b). Recorded as an erratum, not by editing the text above.
 
 - errata E12 (2026-11-25): D8 step 4c (`em-agent` on the loop, decisions 1 to 4 of the step 4c brief; items 9 and 10 from the Codex review round 1); the log and error changes, and the facts that keep the replay tests and the D5 leaks for step 6. Recorded as an erratum, not by editing the text above.
 

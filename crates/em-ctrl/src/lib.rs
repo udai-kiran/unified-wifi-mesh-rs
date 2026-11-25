@@ -5,8 +5,8 @@
 //!
 //! [`CtrlCore`] routes a Search, lets the AL node answer it, keeps the in-memory peer
 //! model, answers each M1 with M2 and drives `em_config` until the agent's Topology
-//! Response. It is driven by explicit inputs and has no sockets and no runtime; the tokio
-//! role actor ([`run`]) moves inputs in and frames out.
+//! Response. It is driven by explicit inputs and has no sockets and no runtime; the event
+//! loop run ([`run`]) moves inputs in and frames out.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -27,7 +27,6 @@ use crate::rules::{CtrlNodes, CtrlRules};
 mod actor;
 pub mod cli;
 mod networks;
-mod pending;
 mod rules;
 mod s2;
 
@@ -65,7 +64,7 @@ enum M2Handoff {
     Fail,
 }
 
-/// A CMDU for the role actor to send; the actor adds the local AL MAC and session (0012 D9).
+/// A CMDU for the controller to send; the loop adds the local AL MAC and session (0012 D9).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
     /// Destination AL MAC.

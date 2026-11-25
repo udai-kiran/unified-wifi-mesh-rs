@@ -109,7 +109,7 @@ impl CtrlCore {
     fn answer_m1(&mut self, key: NodeKey, remote: MacAddr, m1: &wsc::M1<'_>, now: Instant) {
         let identity = self.identity();
         let rows = self.networks.views();
-        // The build runs on the actor task: its time is the actor's stall for the DH key
+        // The build runs on the loop task: its time is the loop's stall for the DH key
         // generation, the shared secret, the KDF and the AES encryptions (0013 D9).
         let build_started = Instant::now();
         let built = wsc::build_m2(m1, &identity, &rows, &mut self.msg_ids, &mut self.random);

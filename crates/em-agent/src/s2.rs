@@ -48,7 +48,7 @@ impl AgentCore {
         };
         let mid = CmduHeader::parse(cmdu).map_or(0, |(header, _)| header.msg_id);
         let session = self.rules.wsc.session_mut(key);
-        // The check runs on the actor task: its time is the actor's stall for the shared
+        // The check runs on the loop task: its time is the loop's stall for the shared
         // secret, the KDF and the AES decryption (0013 D9).
         let check_started = Instant::now();
         let accepted = wsc::accept_m2(session, state, remote, cmdu);

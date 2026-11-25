@@ -123,7 +123,7 @@ impl Harness {
         self.deliver_from(CONTROLLER, cmdu);
     }
 
-    /// Delivers a CMDU and, like the actor, hands the platform requests to the fake
+    /// Delivers a CMDU and, like the loop, hands the platform requests to the fake
     /// platform and its confirmations back to the core.
     fn deliver_from(&mut self, remote: MacAddr, cmdu: &[u8]) {
         let offset = self.now - self.start;
