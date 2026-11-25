@@ -4,6 +4,12 @@
 //! all curves, SPKI and point rejection, compressed keys, the boot-key hash, arithmetic, and
 //! random-source failures.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: integration test uses OS randomness"
+)]
+
 mod common;
 
 use common::row;
@@ -47,7 +53,7 @@ fn be(len: usize, value: u8) -> Vec<u8> {
 }
 
 fn generated(curve: Curve) -> (PrivateKey, PublicKey) {
-    let private = PrivateKey::generate(curve, &mut OsRandom).expect("keygen");
+    let private = PrivateKey::generate(curve, &mut OsRandom::new()).expect("keygen");
     let public = private.public_key().expect("public key");
     (private, public)
 }
@@ -67,7 +73,7 @@ fn p521_sign_verify_ecdh_and_encoding() {
 
     // Signing and verification (SHA-256 digest padded to 66 bytes).
     let message = b"eyJ0eXAiOiJkcHBDb24ifQ.eyJzdWIiOiJwNTIxIn0";
-    let signature = alice.sign(message, &mut OsRandom).expect("sign");
+    let signature = alice.sign(message, &mut OsRandom::new()).expect("sign");
     alice_public.verify(message, &signature).expect("verify");
     assert_eq!(
         bob_public.verify(message, &signature),
@@ -98,7 +104,7 @@ fn rust_signatures_verify_and_changes_are_rejected_on_every_curve() {
     for curve in CURVES {
         let (private, public) = generated(curve);
         let (_, other_public) = generated(curve);
-        let signature = private.sign(message, &mut OsRandom).expect("sign");
+        let signature = private.sign(message, &mut OsRandom::new()).expect("sign");
 
         public.verify(message, &signature).expect("verify");
         assert_eq!(

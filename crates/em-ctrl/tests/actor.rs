@@ -2,6 +2,12 @@
 
 //! Tests of the controller on the event loop against a fake AL-SAP service (0012 D9).
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: integration test measures real time and uses OS randomness"
+)]
+
 mod support;
 
 use std::cell::RefCell;
@@ -279,7 +285,7 @@ fn m1_cmdu() -> Vec<u8> {
     wsc::build_m1(
         &params,
         &mut MsgIdCounter::new(),
-        &mut OsRandom,
+        &mut OsRandom::new(),
         &mut Session::new(),
     )
     .unwrap()

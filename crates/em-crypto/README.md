@@ -19,7 +19,7 @@ fixture. See [STATUS.md](../../STATUS.md).
 
 | Module | Contents |
 |---|---|
-| `rand` | `RandomSource` (fallible), `OsRandom` (getrandom), `FailingRandom` (tests), `random_secret`, `Nonce` |
+| `rand` | `RandomSource` (fallible), `OsRandom` (getrandom), `FailingRandom` (tests), `SeededRandom` (feature `test-random`, tests), `random_secret`, `Nonce` |
 | `secret` | `SecretBytes`, `SecretArray<N>`: wiped on drop, no `Clone`/`Copy`, redacted `Debug` |
 | `ct` | `eq`: constant-time equality; a length mismatch is a mismatch |
 | `hash` | `digest` and `hmac` over a list of pieces, SHA-256/384/512 |
@@ -34,6 +34,19 @@ fixture. See [STATUS.md](../../STATUS.md).
 Rust replacements of `em_base.h` types: `em_nonce_t` is `rand::Nonce` (16 bytes, public, `Copy`;
 use `rand::random_secret::<16>` for a nonce that must stay secret) and `em_dh5_key_t` is
 `dh::DhPublic` (192 bytes, big-endian, left-padded) with `dh::DhPrivate` for the exponent.
+
+## Feature `test-random`
+
+Off by default. It adds `rand::SeededRandom`, a deterministic (SplitMix64) byte stream that
+makes replay tests repeatable. It is not random and must never produce keys outside tests, so
+enable it only from `[dev-dependencies]`. Normal builds, the Docker build and
+`cargo build -p em-agent -p em-ctrl` or `cargo build --workspace` leave it off, so `SeededRandom`
+is not compiled in. Cargo unifies dev-dependency features into any build that includes test
+targets (`cargo test`, `cargo build --all-targets`, `cargo clippy --all-targets`). In such a build
+the feature is on for the library and the binaries too, so `SeededRandom` exists in production
+code. Clippy's `disallowed-types` still rejects a production use there, and a normal build fails
+to compile one. Ship binaries from a normal build. Turning the feature on by hand (for example
+`--all-features` or `--features em-crypto/test-random`) compiles it into a non-test build.
 
 ## Pinned dependencies
 
@@ -67,7 +80,8 @@ are not used.
 
 `rand_core` is not a direct dependency; it comes in through `elliptic-curve` and is built without its
 `getrandom` or `std` features, so no `OsRng` is compiled. The only OS randomness is
-`rand::OsRandom`.
+`rand::OsRandom`, built with `OsRandom::new()`. It has no `Default`, so `new` is the only
+way to get one.
 
 ## Random numbers
 
@@ -208,7 +222,7 @@ prints one line per record and `records=N failures=0`, and exits nonzero on any 
   the `PointForm` of imported keys when exporting, and handle `Error::UnsupportedCurve` for
   P-192/P-224 peers (upstream accepts them; this port refuses them). Sign connectors with
   `PrivateKey::sign` (SHA-256, DER, then base64url) and verify the original encoded
-  `header.payload` text with `PublicKey::verify`. Pass `OsRandom` for production signing and keys.
+  `header.payload` text with `PublicKey::verify`. Pass `OsRandom::new()` for production signing and keys.
 - `em-easyconnect`: specify and implement `L.x` (the x-coordinate of `((bR + pR) mod q) * BI`)
   with errors for failed operations instead of upstream's NULL result; test mutual
   authentication past `L.x` into `k_e` derivation; read PEM files with both private and public

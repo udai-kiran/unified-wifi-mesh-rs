@@ -245,4 +245,8 @@ pub struct EngineCtx<'a, S> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: unit tests use the real clock"
+)]
 mod tests;

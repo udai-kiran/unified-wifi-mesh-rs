@@ -8,6 +8,7 @@ use std::time::Instant;
 use em_cmd::{Command, EmConfig, NodeKey, NodeKind};
 use em_core::wsc::{self, ControllerEffect, Identity};
 use em_core::{CtrlState, Node, configuration, topology};
+use em_crypto::rand::RandomSource;
 use em_msg::{CmduHeader, TlvIter, readers, validate};
 use em_orch::OrchRole;
 use em_types::{MacAddr, ProfileType, TlvType};
@@ -15,7 +16,7 @@ use em_types::{MacAddr, ProfileType, TlvType};
 use crate::rules::RadioLink;
 use crate::{CtrlCore, Frame, M2Handoff};
 
-impl CtrlCore {
+impl<R: RandomSource> CtrlCore<R> {
     /// The registrar identity in M2. The first 12 bytes of the UUID are the controller's AL
     /// MAC repeated twice; the last 4 are zero.
     fn identity(&self) -> Identity<'static> {
@@ -111,9 +112,11 @@ impl CtrlCore {
         let rows = self.networks.views();
         // The build runs on the loop task: its time is the loop's stall for the DH key
         // generation, the shared secret, the KDF and the AES encryptions (0013 D9).
-        let build_started = Instant::now();
+        let started = (self.measure_now)();
         let built = wsc::build_m2(m1, &identity, &rows, &mut self.msg_ids, &mut self.random);
-        let build_us = build_started.elapsed().as_micros();
+        let build_us = (self.measure_now)()
+            .saturating_duration_since(started)
+            .as_micros();
         let output = match built {
             Ok(output) => output,
             Err(error) => {

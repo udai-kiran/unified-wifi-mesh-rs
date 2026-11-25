@@ -18,7 +18,7 @@ use em_cmd::{
 use em_core::configuration;
 use em_core::wsc::BssConfig;
 use em_core::{AgentState, EngineCtx, MsgIdCounter, NodeTable, Output, Outputs};
-use em_crypto::rand::OsRandom;
+use em_crypto::rand::RandomSource;
 use em_msg::{CmduHeader, validate};
 use em_orch::{OrchRole, Orchestrator, RoleEffect};
 use em_types::{MacAddr, MsgType, ProfileType};
@@ -96,8 +96,15 @@ struct NodeDeadline {
     due: Instant,
 }
 
+/// The production random source, named once so the type ban still covers every field.
+#[allow(
+    clippy::disallowed_types,
+    reason = "0016 U27: the production random source, named once"
+)]
+type ProductionRandom = em_crypto::rand::OsRandom;
+
 /// The agent's protocol and orchestration state.
-pub struct AgentCore {
+pub struct AgentCore<R: RandomSource = ProductionRandom> {
     orch: Orchestrator<AgentRules>,
     rules: AgentRules,
     nodes: NodeTable<AgentState>,
@@ -108,18 +115,47 @@ pub struct AgentCore {
     al_mac: Option<MacAddr>,
     registered: bool,
     radios: Vec<RadioSpec>,
-    random: OsRandom,
+    random: R,
+    /// The clock for the D9 timing logs; the only clock the core reads.
+    measure_now: fn() -> Instant,
     /// The BSS list of the last platform confirmation, standing in for the agent's model
     /// (0013 D4).
     confirmed: Option<Vec<ConfirmedBss>>,
     platform_requests: Vec<ApplyRadioConfig>,
 }
 
-impl AgentCore {
+impl AgentCore<ProductionRandom> {
     /// Creates a core that has not yet registered. `profile` is the port's
-    /// `--profile` switch (0012 D4); `radios` come from the platform.
+    /// `--profile` switch (0012 D4); `radios` come from the platform. This is the
+    /// production constructor: OS randomness and the real clock.
     #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        clippy::disallowed_types,
+        reason = "0016 U27: the production constructor builds OsRandom (OsRandom::new) and reads the real clock (Instant::now)"
+    )]
     pub fn new(profile: u8, radios: Vec<RadioSpec>) -> Self {
+        // `Instant::now` here is the production measurement clock.
+        Self::with_sources(
+            profile,
+            radios,
+            em_crypto::rand::OsRandom::new(),
+            Instant::now,
+        )
+    }
+}
+
+impl<R: RandomSource> AgentCore<R> {
+    /// Creates a core with the given random source and measurement clock, for replay
+    /// tests (a seeded source and a fixed clock). [`AgentCore::new`] is the production
+    /// constructor.
+    #[must_use]
+    pub fn with_sources(
+        profile: u8,
+        radios: Vec<RadioSpec>,
+        random: R,
+        measure_now: fn() -> Instant,
+    ) -> Self {
         Self {
             orch: Orchestrator::new(),
             rules: AgentRules::new(profile),
@@ -130,7 +166,8 @@ impl AgentCore {
             al_mac: None,
             registered: false,
             radios,
-            random: OsRandom,
+            random,
+            measure_now,
             confirmed: None,
             platform_requests: Vec::new(),
         }
@@ -553,7 +590,7 @@ impl AgentCore {
         let session = self.rules.wsc.session_mut(key);
         // The build runs on the loop task: its time is the loop's stall for the DH key
         // generation (0013 D9).
-        let build_started = Instant::now();
+        let build_started = (self.measure_now)();
         let cmdu =
             match em_core::wsc::build_m1(&params, &mut self.msg_ids, &mut self.random, session) {
                 Ok(cmdu) => cmdu,
@@ -567,7 +604,9 @@ impl AgentCore {
             self.rules.wsc.clear(key);
             return false;
         }
-        let build_us = build_started.elapsed().as_micros();
+        let build_us = (self.measure_now)()
+            .saturating_duration_since(build_started)
+            .as_micros();
         let mid = CmduHeader::parse(&cmdu).map_or(0, |(header, _)| header.msg_id);
         out.events.push(Output::Frame {
             remote: controller,
@@ -666,4 +705,9 @@ impl AgentCore {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: unit tests read the real clock once, for the fixed start, and use the seeded random source"
+)]
 mod tests;

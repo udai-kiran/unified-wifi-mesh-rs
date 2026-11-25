@@ -2,6 +2,7 @@
 
 //! Tests of the controller's S2 flow in virtual time (note 0013 D3, D7, D10).
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use em_cmd::{CommandType, NodeKey, NodeKind};
@@ -9,7 +10,7 @@ use em_core::configuration::build_search;
 use em_core::topology::{self, Bss, Radio};
 use em_core::wsc::{self, Identity, M1Params, Session};
 use em_core::{AgentState, CtrlState, MsgIdCounter};
-use em_crypto::rand::OsRandom;
+use em_crypto::rand::SeededRandom;
 use em_db::load_reset_str;
 use em_msg::bodies::{
     ApRadioAdvancedCapabilities, ApRadioBasicCapabilities, BasicOperatingClass,
@@ -27,6 +28,19 @@ const RADIO_24: MacAddr = MacAddr::new([2, 0, 0, 0, 1, 1]);
 const RADIO_5: MacAddr = MacAddr::new([2, 0, 0, 0, 1, 2]);
 const OTHER_RADIO: MacAddr = MacAddr::new([2, 0, 0, 0, 2, 1]);
 const SECOND: Duration = Duration::from_secs(1);
+
+/// The core's random seed in the harness (and in the replay runs that must match).
+const CORE_SEED: u64 = 0x5eed_0001;
+/// The test agent's random seed.
+const PEER_SEED: u64 = 0x5eed_0002;
+/// A different core seed, for the replay run that must differ.
+const OTHER_CORE_SEED: u64 = 0x5eed_0003;
+
+/// The core's measurement clock and the start of virtual time: one instant, read once.
+fn fixed_now() -> Instant {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    *BASE.get_or_init(Instant::now)
+}
 
 /// The shape of the Docker reset file: a WPA2 fronthaul row and a SAE backhaul row.
 const RESET: &str = r#"{
@@ -58,7 +72,9 @@ struct AgentRadio {
 
 /// Drives a core with virtual time and records every frame with its offset from the start.
 struct Harness {
-    core: CtrlCore,
+    core: CtrlCore<SeededRandom>,
+    /// The test agent's random source, for the M1 it builds.
+    peer_random: SeededRandom,
     start: Instant,
     now: Instant,
     frames: Vec<(Duration, Frame)>,
@@ -67,11 +83,22 @@ struct Harness {
 
 impl Harness {
     fn with(drop_first_m2: bool) -> Self {
-        let start = Instant::now();
-        let mut core = CtrlCore::new(load_reset_str(RESET).unwrap(), drop_first_m2);
+        Self::seeded(drop_first_m2, CORE_SEED, PEER_SEED)
+    }
+
+    /// A core and a test agent with the given random seeds, on the fixed clock.
+    fn seeded(drop_first_m2: bool, core_seed: u64, peer_seed: u64) -> Self {
+        let start = fixed_now();
+        let mut core = CtrlCore::with_sources(
+            load_reset_str(RESET).unwrap(),
+            drop_first_m2,
+            SeededRandom::new(core_seed),
+            fixed_now,
+        );
         core.registered(CONTROLLER).unwrap();
         Self {
             core,
+            peer_random: SeededRandom::new(peer_seed),
             start,
             now: start,
             frames: Vec::new(),
@@ -120,7 +147,8 @@ impl Harness {
     fn m1(&mut self, agent: MacAddr, radio: MacAddr, band: FreqBand) -> AgentRadio {
         let mut session = Session::new();
         let params = m1_params(agent, radio, band);
-        let cmdu = wsc::build_m1(&params, &mut self.ids, &mut OsRandom, &mut session).unwrap();
+        let cmdu =
+            wsc::build_m1(&params, &mut self.ids, &mut self.peer_random, &mut session).unwrap();
         self.send(agent, &cmdu);
         AgentRadio { session }
     }
@@ -508,4 +536,103 @@ fn an_m1_after_the_cancel_starts_a_new_em_config() {
     harness.run_for(Duration::from_millis(600));
     assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
     assert!(harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+}
+
+// Replay tests (0016 AC3): output determinism only. With the clock and both random sources
+// fixed, a scripted run gives the same outputs every time.
+
+/// Everything the core produced for one scripted step.
+#[derive(Debug, PartialEq, Eq)]
+struct StepRecord {
+    step: &'static str,
+    /// Frames out: offset from the start, destination and CMDU bytes.
+    frames: Vec<(Duration, MacAddr, Vec<u8>)>,
+    next_deadline: Option<Instant>,
+}
+
+/// Records the frames the harness gained since `frames_before`, and the core's deadline.
+fn record_step(
+    records: &mut Vec<StepRecord>,
+    step: &'static str,
+    harness: &Harness,
+    frames_before: usize,
+) {
+    let frames = harness.frames[frames_before..]
+        .iter()
+        .map(|(offset, frame)| (*offset, frame.remote, Vec::from(frame.cmdu.as_slice())))
+        .collect();
+    records.push(StepRecord {
+        step,
+        frames,
+        next_deadline: harness.core.next_deadline(),
+    });
+}
+
+/// Registered, Search answered, M1 from a seeded test agent, M2 out, ticks, Topology Response.
+fn replay_script(core_seed: u64, peer_seed: u64) -> Vec<StepRecord> {
+    let mut harness = Harness::seeded(false, core_seed, peer_seed);
+    let mut records = Vec::new();
+    record_step(&mut records, "registered", &harness, 0);
+
+    let before = harness.frames.len();
+    harness.search(AGENT);
+    record_step(&mut records, "search", &harness, before);
+
+    let before = harness.frames.len();
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+    record_step(&mut records, "m1_2_4", &harness, before);
+
+    let before = harness.frames.len();
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    record_step(&mut records, "m1_5", &harness, before);
+
+    let before = harness.frames.len();
+    harness.run_for(2 * SECOND);
+    record_step(&mut records, "ticks", &harness, before);
+
+    let before = harness.frames.len();
+    harness.response(AGENT, b"front", &[RADIO_24, RADIO_5]);
+    record_step(&mut records, "topology_response", &harness, before);
+
+    let before = harness.frames.len();
+    harness.run_for(SECOND);
+    record_step(&mut records, "final", &harness, before);
+    records
+}
+
+/// The first M2 the controller sent in a run.
+fn first_m2(records: &[StepRecord]) -> &[u8] {
+    records
+        .iter()
+        .flat_map(|record| &record.frames)
+        .find(|(_, _, cmdu)| header_of(cmdu).msg_type == MsgType::AP_AUTOCONFIGURATION_WSC)
+        .map(|(_, _, cmdu)| cmdu.as_slice())
+        .unwrap()
+}
+
+/// 0016 AC3, output determinism only: two runs with the same seeds and clock give the same
+/// frames and deadlines at every step.
+#[test]
+fn replay_same_seed_gives_identical_output() {
+    let first = replay_script(CORE_SEED, PEER_SEED);
+    let second = replay_script(CORE_SEED, PEER_SEED);
+    assert_eq!(first, second);
+    // The run is not trivially empty: the Search was answered and both M1s got an M2.
+    let search_step = first.iter().find(|record| record.step == "search").unwrap();
+    assert_eq!(search_step.frames.len(), 1);
+    let m2_count = first
+        .iter()
+        .flat_map(|record| &record.frames)
+        .filter(|(_, _, cmdu)| header_of(cmdu).msg_type == MsgType::AP_AUTOCONFIGURATION_WSC)
+        .count();
+    assert_eq!(m2_count, 2);
+}
+
+/// 0016 AC3: only the core's seed changes, and the controller's M2 changes with it, so the
+/// core draws its M2 randomness from the injected source.
+#[test]
+fn replay_core_seed_reaches_m2() {
+    let first = replay_script(CORE_SEED, PEER_SEED);
+    let other = replay_script(OTHER_CORE_SEED, PEER_SEED);
+    assert_ne!(first_m2(&first), first_m2(&other));
 }

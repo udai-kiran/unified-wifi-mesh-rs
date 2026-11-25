@@ -447,6 +447,10 @@ wire_code! {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "tests use HashSet/HashMap for uniqueness checks; 0016 U27 allows test modules"
+)]
 mod golden {
     use super::{Class, Entry, FreqBand, MediaType, MsgType, ProfileType, ServiceType, TlvType};
 
@@ -905,6 +909,10 @@ mod golden {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "tests use HashSet/HashMap for uniqueness checks; 0016 U27 allows test modules"
+)]
 mod tests {
     use super::{FreqBand, MediaType, MsgType, ProfileType, ServiceType, TlvType};
 

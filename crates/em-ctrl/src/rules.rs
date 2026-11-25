@@ -2,12 +2,11 @@
 
 //! The controller's orchestration rules for `em_config` (`src/orch/em_orch_ctrl.cpp`).
 
-use std::collections::HashMap;
-
 use em_cmd::{Command, CommandType, NodeKey, NodeKind, OrchOp};
 use em_core::{CtrlState, Node, NodeTable};
 use em_orch::{OrchRole, RoleEffect, TransientOut};
 use em_types::MacAddr;
+use em_utils::SortedVecMap;
 
 /// `EM_MAX_CMD_GEN_TTL + EM_MAX_CMD_EXT_TTL` in seconds (`inc/em_base.h:112-113`).
 const TOPO_SYNC_LIMIT_SECS: u64 = 40;
@@ -25,7 +24,7 @@ pub(crate) struct RadioLink {
 #[derive(Debug, Default)]
 pub(crate) struct CtrlNodes {
     pub(crate) table: NodeTable<CtrlState>,
-    pub(crate) links: HashMap<NodeKey, RadioLink>,
+    pub(crate) links: SortedVecMap<NodeKey, RadioLink>,
 }
 
 impl CtrlNodes {

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use em_cmd::{ChainId, CommandType, CommandView, NodeKey, NodeKind, OrchState, RadioSpec};
 use em_core::configuration::{build_renew, build_response, build_search};
 use em_core::wsc::{self, AUTH_SAE, AUTH_WPA2_PERSONAL, Identity, NetworkSsid};
 use em_core::{AgentState, MsgIdCounter, topology};
-use em_crypto::rand::OsRandom;
+use em_crypto::rand::SeededRandom;
+use em_crypto::{HashAlgorithm, hash};
 use em_msg::{AL_SAP_BUDGET, CmduHeader, MsgBuilder, RAW_BUDGET, TlvIter, readers};
 use em_types::{FreqBand, MacAddr, MsgType, TlvType};
 use tokio::sync::mpsc::Receiver;
@@ -244,14 +246,18 @@ const ALL_BANDS: [FreqBand; 3] = [
 /// pair of rows: WPA2 fronthaul and SAE backhaul.
 struct ScriptedController {
     ids: MsgIdCounter,
-    random: OsRandom,
+    random: SeededRandom,
 }
 
 impl ScriptedController {
     fn new() -> Self {
+        Self::with_seed(PEER_SEED)
+    }
+
+    fn with_seed(seed: u64) -> Self {
         Self {
             ids: MsgIdCounter::new(),
-            random: OsRandom,
+            random: SeededRandom::new(seed),
         }
     }
 
@@ -1122,4 +1128,193 @@ fn a_renew_queued_behind_dev_init_still_runs_when_no_recovery_is_involved() {
     assert_eq!(wsc::parse_m1(&m1s[2].1.cmdu).unwrap().radio(), RADIO_5);
     assert!(!harness.core.orch.is_type_in_progress(CommandType::DevInit));
     assert_eq!(harness.state(RADIO_24), AgentState::TopoSynchronized);
+}
+
+// Replay tests (0016 AC3): output determinism only. With the clock and both random sources
+// fixed, a scripted run gives the same outputs every time.
+
+/// The seed of the test controller's random source in every replay run.
+const PEER_SEED: u64 = 0x5eed_0001;
+/// The agent core's seed in the runs that must match.
+const CORE_SEED: u64 = 0x5eed_0002;
+/// A different core seed, for the run that must differ.
+const OTHER_CORE_SEED: u64 = 0x5eed_0003;
+
+/// The core's measurement clock in replay runs: one instant, read once.
+fn fixed_now() -> Instant {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    *BASE.get_or_init(Instant::now)
+}
+
+/// Everything the core produced for one scripted step.
+#[derive(Debug, PartialEq, Eq)]
+struct StepRecord {
+    step: &'static str,
+    /// Frames out: destination and CMDU bytes.
+    frames: Vec<(MacAddr, Vec<u8>)>,
+    /// Platform requests, in `Debug` form.
+    platform_requests: Vec<String>,
+    /// SHA-256 of each BSS network key in those requests, in order. `Debug` redacts the key,
+    /// so this is what makes two runs with different keys differ. Digests only, so a failed
+    /// comparison never prints key bytes.
+    network_key_digests: Vec<Vec<u8>>,
+    next_deadline: Option<Instant>,
+}
+
+/// Drives a seeded core through a scripted run and records each step.
+struct Replay {
+    core: AgentCore<SeededRandom>,
+    platform: FakePlatform,
+    confirmations: Receiver<Confirmation>,
+    controller: ScriptedController,
+    now: Instant,
+    records: Vec<StepRecord>,
+}
+
+impl Replay {
+    fn new(core_seed: u64, peer_seed: u64) -> Self {
+        let mut platform = FakePlatform::new(two_radios());
+        let confirmations = platform.confirmations();
+        Self {
+            core: AgentCore::with_sources(3, two_radios(), SeededRandom::new(core_seed), fixed_now),
+            platform,
+            confirmations,
+            controller: ScriptedController::with_seed(peer_seed),
+            now: fixed_now(),
+            records: Vec::new(),
+        }
+    }
+
+    fn record(&mut self, step: &'static str, frames: Vec<Frame>) {
+        let mut platform_requests = Vec::new();
+        let mut network_key_digests = Vec::new();
+        for request in self.core.take_platform_requests() {
+            self.platform
+                .apply_radio_config(request.radio, &request.bss);
+            platform_requests.push(format!("{request:?}"));
+            for bss in &request.bss {
+                let digest = hash::digest(HashAlgorithm::Sha256, &[bss.network_key.expose()]);
+                network_key_digests.push(Vec::from(digest.expose()));
+            }
+        }
+        self.records.push(StepRecord {
+            step,
+            frames: frames
+                .into_iter()
+                .map(|frame| (frame.remote, frame.cmdu))
+                .collect(),
+            platform_requests,
+            network_key_digests,
+            next_deadline: self.core.next_deadline(),
+        });
+    }
+
+    fn register(&mut self) {
+        self.core.registered(AGENT, self.now).unwrap();
+        self.record("registered", Vec::new());
+    }
+
+    /// Fires every deadline up to `offset` after the fixed start, in order, and records one
+    /// step with all the frames they produced.
+    fn tick_to(&mut self, step: &'static str, offset: Duration) {
+        let end = fixed_now() + offset;
+        let mut frames = Vec::new();
+        while let Some(due) = self.core.next_deadline() {
+            if due > end {
+                break;
+            }
+            self.now = self.now.max(due);
+            frames.extend(self.core.tick(self.now));
+        }
+        self.now = self.now.max(end);
+        self.record(step, frames);
+    }
+
+    /// Delivers a CMDU from the controller, then hands the platform's confirmations back.
+    fn deliver(&mut self, step: &'static str, cmdu: &[u8]) {
+        let frames = self.core.received(CONTROLLER, cmdu, self.now);
+        self.record(step, frames);
+        while let Ok(confirmation) = self.confirmations.try_recv() {
+            self.core.platform_confirmed(confirmation.bss, self.now);
+        }
+    }
+
+    /// Every M1 the core has sent so far, in order.
+    fn m1_cmdus(&self) -> Vec<Vec<u8>> {
+        self.records
+            .iter()
+            .flat_map(|record| &record.frames)
+            .filter(|(_, cmdu)| msg_type_of(cmdu) == MsgType::AP_AUTOCONFIGURATION_WSC)
+            .map(|(_, cmdu)| Vec::from(cmdu.as_slice()))
+            .collect()
+    }
+}
+
+/// Registered, Search, Response, M1, M2, the platform's confirmation, Topology Query.
+fn replay_script(core_seed: u64, peer_seed: u64) -> Vec<StepRecord> {
+    let mut replay = Replay::new(core_seed, peer_seed);
+    replay.register();
+    replay.tick_to("search", SECOND);
+    replay.deliver(
+        "response_2_4",
+        &response_for(FreqBand::BAND_2_4_GHZ, 3, 0x7000),
+    );
+    replay.deliver("response_5", &response_for(FreqBand::BAND_5_GHZ, 3, 0x7001));
+    replay.tick_to("m1", SECOND + Duration::from_millis(600));
+    for (index, m1) in replay.m1_cmdus().into_iter().enumerate() {
+        let m2 = replay.controller.m2_for(&m1);
+        let step = if index == 0 { "m2_first" } else { "m2_second" };
+        replay.deliver(step, &m2);
+    }
+    replay.tick_to("settle", 3 * SECOND);
+    let query = topology::build_query(&mut replay.controller.ids).unwrap();
+    replay.deliver("topology_query", &query);
+    replay.tick_to("final", 4 * SECOND);
+    replay.records
+}
+
+/// The first M1 the agent sent in a run.
+fn first_m1(records: &[StepRecord]) -> &[u8] {
+    records
+        .iter()
+        .flat_map(|record| &record.frames)
+        .find(|(_, cmdu)| msg_type_of(cmdu) == MsgType::AP_AUTOCONFIGURATION_WSC)
+        .map(|(_, cmdu)| cmdu.as_slice())
+        .unwrap()
+}
+
+/// 0016 AC3, output determinism only: two runs with the same seeds and clock give the same
+/// frames, platform requests and deadlines at every step.
+#[test]
+fn replay_same_seed_gives_identical_output() {
+    let first = replay_script(CORE_SEED, PEER_SEED);
+    let second = replay_script(CORE_SEED, PEER_SEED);
+    assert_eq!(first, second);
+    // The script reaches the Topology Query: the run is not trivially empty.
+    assert!(first_m1(&first).len() > 100);
+    let query_step = first
+        .iter()
+        .find(|record| record.step == "topology_query")
+        .unwrap();
+    assert_eq!(query_step.frames.len(), 1);
+    assert!(
+        first
+            .iter()
+            .any(|record| !record.platform_requests.is_empty())
+    );
+    // The key digests are non-empty too, so the comparison above covers the keys.
+    assert!(
+        first
+            .iter()
+            .any(|record| !record.network_key_digests.is_empty())
+    );
+}
+
+/// 0016 AC3: only the core's seed changes, and the agent's M1 changes with it, so the core
+/// draws its M1 randomness from the injected source.
+#[test]
+fn replay_core_seed_reaches_m1() {
+    let first = replay_script(CORE_SEED, PEER_SEED);
+    let other = replay_script(OTHER_CORE_SEED, PEER_SEED);
+    assert_ne!(first_m1(&first), first_m1(&other));
 }

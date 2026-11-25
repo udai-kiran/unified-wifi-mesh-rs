@@ -57,6 +57,10 @@ use crate::wire::{
 use crate::{LinkState, OutboundSdu, Sdu, TransportCounters, TransportError};
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "tests build inputs with the real clock; 0016 U27 allows test modules"
+)]
 mod tests;
 
 /// Every number the core uses (0016 U15). The core holds none of its own.

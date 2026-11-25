@@ -51,6 +51,10 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: tests bound real-time waits with tokio::time::timeout; test modules may read the clock"
+)]
 mod tests {
     use std::time::Duration;
 

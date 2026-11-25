@@ -121,6 +121,11 @@
 //!   own thread), the same with the loop on the test's one thread
 //!   (`..._on_a_current_thread_runtime`), and the reverse.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: integration test measures real time"
+)]
+
 // Each test file is its own crate, and this one uses only part of the shared support.
 #[allow(dead_code)]
 #[path = "support/mod.rs"]

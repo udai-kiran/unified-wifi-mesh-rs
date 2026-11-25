@@ -8,18 +8,19 @@
 //! Response. It is driven by explicit inputs and has no sockets and no runtime; the event
 //! loop run ([`run`]) moves inputs in and frames out.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::time::{Duration, Instant};
 
 use em_cmd::{CommandType, CommandView, NoCommands, NodeKey, NodeKind, OrchState};
 use em_core::configuration::{self, SearchRoute};
 use em_core::{CtrlState, EngineCtx, MsgIdCounter, Node, NodeTable, Output, Outputs};
-use em_crypto::rand::OsRandom;
+use em_crypto::rand::RandomSource;
 use em_dm::NetworkSsidInfo;
 use em_msg::{CmduHeader, readers};
 use em_orch::{Orchestrator, RoleEffect};
 use em_types::{MacAddr, MsgType};
+use em_utils::SortedVecMap;
 
 use crate::networks::Networks;
 use crate::rules::{CtrlNodes, CtrlRules};
@@ -105,8 +106,15 @@ pub struct PeerModel {
     pub is_emplus_agent: bool,
 }
 
+/// The production random source, named once so the type ban still covers every field.
+#[allow(
+    clippy::disallowed_types,
+    reason = "0016 U27: the production random source, named once"
+)]
+type ProductionRandom = em_crypto::rand::OsRandom;
+
 /// The controller's protocol state and peer models.
-pub struct CtrlCore {
+pub struct CtrlCore<R: RandomSource = ProductionRandom> {
     orch: Orchestrator<CtrlRules>,
     rules: CtrlRules,
     nodes: CtrlNodes,
@@ -114,11 +122,13 @@ pub struct CtrlCore {
     /// Recorded at the first registration and fixed for the life of the process.
     al_mac: Option<MacAddr>,
     registered: bool,
-    models: HashMap<MacAddr, PeerModel>,
+    models: SortedVecMap<MacAddr, PeerModel>,
     /// AL MACs of `models`, oldest creation first. Updates do not reorder it.
     model_order: VecDeque<MacAddr>,
     networks: Networks,
-    random: OsRandom,
+    random: R,
+    /// The clock for the M2 build timing; a fixed one makes replays repeatable.
+    measure_now: fn() -> Instant,
     m2_handoff: M2Handoff,
     proto_deadlines: Vec<NodeDeadline>,
     orch_deadline: Option<Instant>,
@@ -126,13 +136,40 @@ pub struct CtrlCore {
     outbox: Vec<Frame>,
 }
 
-impl CtrlCore {
+impl CtrlCore<ProductionRandom> {
     /// Creates a core that has not yet registered.
     ///
     /// `networks` is the reset file's `NetworkSSIDList` (0013 D2). With `drop_first_m2` the
     /// first M2's hand-off is replaced by a no-op, the test-only switch of 0013 D10.
     #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        clippy::disallowed_types,
+        reason = "0016 U27: the production constructor builds OsRandom (OsRandom::new) and reads the real clock (Instant::now)"
+    )]
     pub fn new(networks: Vec<Box<NetworkSsidInfo>>, drop_first_m2: bool) -> Self {
+        // The one place the production core reads the real clock.
+        Self::with_sources(
+            networks,
+            drop_first_m2,
+            em_crypto::rand::OsRandom::new(),
+            Instant::now,
+        )
+    }
+}
+
+impl<R: RandomSource> CtrlCore<R> {
+    /// Creates a core with the given random source and measurement clock.
+    ///
+    /// For replay tests (a seeded source and a fixed clock); [`CtrlCore::new`] is the
+    /// production constructor.
+    #[must_use]
+    pub fn with_sources(
+        networks: Vec<Box<NetworkSsidInfo>>,
+        drop_first_m2: bool,
+        random: R,
+        measure_now: fn() -> Instant,
+    ) -> Self {
         Self {
             orch: Orchestrator::new(),
             rules: CtrlRules,
@@ -140,10 +177,11 @@ impl CtrlCore {
             msg_ids: MsgIdCounter::new(),
             al_mac: None,
             registered: false,
-            models: HashMap::new(),
+            models: SortedVecMap::new(),
             model_order: VecDeque::new(),
             networks: Networks::new(networks),
-            random: OsRandom,
+            random,
+            measure_now,
             m2_handoff: if drop_first_m2 {
                 M2Handoff::DropNext
             } else {
@@ -403,6 +441,15 @@ fn log_response_sent(cmdu: &[u8]) {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: unit tests read the real clock once, for the fixed start, and use the seeded random source"
+)]
 mod s2_tests;
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "0016 U27: unit tests read the real clock once, for the fixed start"
+)]
 mod tests;

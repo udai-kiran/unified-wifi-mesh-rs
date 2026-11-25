@@ -2,6 +2,11 @@
 
 //! Test-only access to the generated TLV body fixtures.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "test-only module; HashSet checks fixture keys are unique (0016 U27 allows tests)"
+)]
+
 use std::collections::HashSet;
 
 pub type Key = (&'static str, &'static str);

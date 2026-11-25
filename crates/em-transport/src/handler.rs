@@ -51,6 +51,10 @@ use crate::transport_core::{
 use crate::{LinkState, OutboundSdu, Sdu, TransportCounters};
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "tests build inputs with the real clock; 0016 U27 allows test modules"
+)]
 mod tests;
 
 /// The loop sources and the timer a [`TransportHandler`] serves. The role picks the ids.

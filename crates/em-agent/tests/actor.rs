@@ -2,6 +2,12 @@
 
 //! Tests of the agent on the event loop against a fake AL-SAP service (0012 D9).
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "0016 U27: integration test measures real time and uses OS randomness"
+)]
+
 mod support;
 
 use std::cell::RefCell;
@@ -342,7 +348,7 @@ fn m2_for(m1_cmdu: &[u8]) -> Vec<u8> {
         &identity,
         &rows,
         &mut MsgIdCounter::new(),
-        &mut OsRandom,
+        &mut OsRandom::new(),
     )
     .unwrap()
     .cmdu
