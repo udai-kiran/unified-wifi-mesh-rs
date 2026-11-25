@@ -113,12 +113,16 @@ socket write. The timers are the transport's and the role's `next_deadline()`.
   link gives `unregistered()` and then `registered()`, also when the loop never saw the link
   lost in between.
 - **Frames.** A role frame goes straight into the transport's outbound buffer for the current
-  session, stamped with that session and the recorded AL MAC. The buffer holds 4 MiB and drops
-  the oldest frame not yet started (difference `tx-buffer`). There is no separate pending queue.
+  session, stamped with that session and the recorded AL MAC. The buffer holds 4 MiB of
+  stored encoded octets. When a frame does not fit, whole SDUs are dropped, oldest first,
+  never one that has started or whose write is in flight (0016 E12 item 9; difference
+  `tx-buffer`). If dropping cannot make room (the frame alone, or the frame and the protected
+  SDU, are over 4 MiB), the new frame is refused and nothing is dropped. There is no separate pending queue.
 - **Stop.** A future polled in the same task drops the application channel's sender when
-  `stop` completes; the closed channel is the stop signal. The role gets no further input. The
-  transport then writes the frames it has queued for at most 900 ms and keeps its sockets open
-  for 100 ms. `run` returns `Ok` and logs `transport stopped`.
+  `stop` completes; the closed channel is the stop signal. The role gets no further input. In a
+  session the transport then writes the frames it has queued for at most 900 ms and keeps its
+  sockets open for 100 ms; without a session it finishes at once. `run` returns `Ok` and logs
+  `transport stopped`.
 - **Errors.** A transport that ends without a stop returns `ActorError::Transport` with its
   error. A changed AL MAC returns `ActorError::AlMacChanged` at once, without the transport
   stop.
@@ -130,7 +134,7 @@ al_mac), `new session, same AL MAC`, `link lost, waiting to register`, `transpor
 
 ### Tests
 
-The package has 39 library tests, 7 in `tests/actor.rs` and 2 in `tests/binary.rs`.
+The package has 40 library tests, 7 in `tests/actor.rs` and 2 in `tests/binary.rs`.
 
 `tests/actor.rs` runs the controller against a fake AL-SAP service over UNIX sockets in a
 temporary directory (a trimmed copy of `em-transport`'s test support), in paused time: a
@@ -141,9 +145,10 @@ by a Topology Query on the role's own deadline. `tests/binary.rs` runs the binar
 missing and an invalid reset file (exit 1).
 
 The unit tests in `src/actor.rs` check the link-change function on its own (including a loss
-the loop never saw), a role frame reaching the transport, the reconnect order, a changed AL
-MAC, no turn after the transport has finished or the AL MAC changed, the role getting no input
-after the stop, and a stop with a frame in flight (within 1 s), on a real `LoopCore` with a
+the loop never saw), a role frame reaching the transport, the reconnect order, a protocol
+deadline that waits for the reconnect (no frame during the outage), a changed AL MAC, no turn
+after the transport has finished or the AL MAC changed, the role not running its pending
+deadlines after the stop, and a stop with a frame in flight (within 1 s), on a real `LoopCore` with a
 clock the test moves.
 
 The core tests (`src/s2_tests.rs`, virtual time, `em-db`'s `load_reset_str` for the rows)
@@ -160,10 +165,9 @@ renew per radio, the cancel scoped to one agent, and a new `em_config` after the
 - A Search whose AL MAC or band cannot be read is dropped without a model, as upstream's
   routing returns before the commit.
 - Messages other than a Search, an M1 and a Topology Response are ignored.
-- The stop takes at most 1 s (900 ms of writes, then 100 ms of linger; 0016 D3b, U8). Tests
-  run it on the virtual clock.
-- A transport that ends without a stop is always an error exit (1), even when it returned
-  `Ok`: the controller did not ask it to stop.
+- The stop in a session takes at most 1 s (900 ms of writes, then 100 ms of linger; 0016 D3b,
+  U8); without a session it finishes at once. Tests run it on the virtual clock.
+- A transport that ends without a stop is always an error exit (1).
 - `--help` is not special: it is an unknown option and exits 2.
 - `CtrlConfig` has no reconnect delay: the transport's default of 2 s applies.
 - `OrchRole::on_start` sees no node state, so `em.cpp:173-175` (`wsc_m2_sent` to
