@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use em_cmd::{CfgRenew, Command, CommandType, NodeKey, NodeKind};
+use em_cmd::{CfgRenew, Command, CommandType, CommandView, NodeKey, NodeKind};
 use em_core::topology::{self, Bss, Radio};
 use em_core::{AgentState, Outputs, configuration, wsc};
 use em_msg::{CmduHeader, readers};
@@ -158,6 +158,18 @@ impl<R: RandomSource> AgentCore<R> {
         };
         if self.orch.is_type_in_progress(CommandType::CfgRenew) {
             tracing::info!(band = ?route.band, "renew refused: a cfg_renew is in progress");
+            return;
+        }
+        // intentional-difference:renew-refused-during-recovery
+        // Upstream accepts the Renew (`em_agent.cpp:2438-2447`) and has no recovery
+        // `dev_init`. Here the recovery search onboards every radio again, so a `cfg_renew`
+        // queued behind it would re-onboard a radio a second time after synchronization
+        // (0014 D18 S2-R2-ADV-01). The chain id goes stale when the chain ends.
+        let recovery_running = self
+            .recovery_dev_init
+            .is_some_and(|chain| self.orch.command(chain).is_some());
+        if recovery_running {
+            tracing::info!(band = ?route.band, "renew refused: a recovery search is running");
             return;
         }
         // Upstream skips a radio whose recorded controller is another AL MAC

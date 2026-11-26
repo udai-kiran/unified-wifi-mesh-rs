@@ -389,6 +389,17 @@ On top of S1's checks:
 - **R1 limit (round 2):** the cancel runs when the recovery `dev_init` is submitted. A Renew that arrives later,
   during the recovery search, is still queued and causes one extra re-onboarding after synchronization. It needs an
   outage ending in a window under 1 s around the controller's 40 s timeout, heals by itself and does not repeat.
+- **E3 (2026-11-25, secure-onboarding Stage 2; [0014](0014-init-config-and-al-mac.md) D18 and its erratum E1):**
+  E2 is resolved: the 40 s timeout sets every radio of the agent `misconfigured`, and any other `em_config` cancel
+  the radios of its active stages, as upstream; each starts a Renew retry episode, one Renew at once and one per idle
+  second while it stays `misconfigured`, 5 per episode
+  (`renew-retry-counter-per-episode`, `renew-retry-without-cfg-renew-command`). The R1 limit is closed: the agent
+  refuses a Renew while its recovery `dev_init` runs (`renew-refused-during-recovery`). D7 also changes: the M1 is
+  checked, and its M2 built, before it changes any state (`m1-validated-before-state`), at most 4 radios per agent
+  (`radio-cap-per-agent`), a radio moves to the agent that sends its M1 (`radio-owner-move`), a fresh M1 clears the
+  agent's SSID mismatch (`mismatch-cleared-on-m1`), the 40 s `em_config` age and its cancel are per agent
+  (`em-config-age-per-agent`, `em-config-cancel-per-agent`). `run-s2.sh --eviction` gates on exactly 5 Renews per
+  radio (check 5r).
 
 ## Revision history
 

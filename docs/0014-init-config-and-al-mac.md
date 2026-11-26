@@ -620,8 +620,36 @@ Until slice S7, a wired deployment needs an isolated management VLAN or MACsec (
 4. If Phase C is chosen: `em-ctrl` refuses an AL MAC that differs from the resolved one, and the patched daemons pass D11.
 5. `STATUS.md`, READMEs and amendment pointers in 0012 and 0013 (and 0010 if S7 moves) are updated.
 
+## Errata
+
+- **E1 (2026-11-25, Stage 2 implementation; plan review of the Stage 2 contract and user decisions Q1 to Q5, R1 to
+  R4).** D18 as implemented:
+  1. **S2-03 wording.** An M1 carries no AP Radio Identifier TLV. The rule is: the RUID the controller routes by (the
+     first radio-bearing TLV, `readers::radio_id`) must equal the RUID of the M1's AP Radio Basic Capabilities TLV.
+     The M1 is parsed and checked (RUID, peer model, also for a known radio, and at most 4 radios per agent,
+     `EM_MAX_RADIO_PER_AGENT`), and its M2 is built and validated, before any state changes; a new radio node is
+     created from the parsed M1. A failed check, build or validation changes nothing (user decision, 2026-11-25).
+  2. **Renew retry mechanism (R1, R2).** No controller `cfg_renew` command: a per-radio counter on the controller,
+     sent from the proto tick while the radio is `misconfigured`. Two rules start an episode: the 40 s
+     `topo_sync_pending` timeout marks and renews every radio of the agent (upstream `em_orch_ctrl.cpp:75-92`); any
+     other `em_config` cancel marks and renews exactly the candidates of active stages, through the cancel hook, and
+     drops pending stages with no state change (upstream `em_orch.cpp:270-302`). The counter restarts at each episode (upstream
+     carries it over); the episode stops when the radio leaves `misconfigured` or after 5. Upstream's 10 s
+     `cfg_renew` cancel is not ported.
+  3. **S2-04 mechanism.** `em-orch` gives the transient hook its own stage's age and lets the role restart the stage
+     start of chosen candidates. An accepted M1 restarts the age of all the agent's `em_config` stages; the
+     non-`topo_sync_pending` branch cancels only that agent's radios (item 2 gives which radios are marked). The type-wide elapsed value is unchanged.
+  4. **Added to D18.** Peer-model eviction (Q1, R3): least recently heard from. A Search, an M1 whose M2 was
+     built (not one that is refused or ignored) and a Topology Response refresh a model. Eviction removes the agent's chains, radio nodes, links,
+     deadlines and retry state. S2-06 lets any agent with a peer model take a radio over (R4, an accepted risk
+     until admission).
+  5. **Cites.** D18's file:line cites were taken at `78a5c83`, before note 0016 moved the roles onto the event loop,
+     and no longer match the code. The current places are named in the crate READMEs and the `intentional-difference`
+     tags.
+
 ## Revision history
 
+- Erratum E1 (2026-11-25): D18 as implemented in Stage 2.
 - Accepted by the user (2026-11-22). Amendment pointers added to 0013 D2, D4, D6, D7; 0010 D1; 0002 D2.
 - rev 8 (2026-11-22, round 2 of the pre-implementation review: plan reviewer 10 findings, Codex 17, none critical; this is the last review
   round for this design): section gating split (D18 and the agent change apply in both modes); PSK rule over enabled rows in the file's

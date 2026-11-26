@@ -46,6 +46,7 @@ struct TestRole {
     calls: RefCell<Vec<(NodeKey, u64)>>,
     transient_states: RefCell<Vec<(NodeKey, State)>>,
     reset_values: RefCell<Vec<u64>>,
+    stage_ages: RefCell<Vec<(NodeKey, u64)>>,
 }
 
 impl Default for TestRole {
@@ -63,6 +64,7 @@ impl Default for TestRole {
             calls: RefCell::new(Vec::new()),
             transient_states: RefCell::new(Vec::new()),
             reset_values: RefCell::new(Vec::new()),
+            stage_ages: RefCell::new(Vec::new()),
         }
     }
 }
@@ -186,6 +188,9 @@ impl OrchRole for TestRole {
         out: &mut TransientOut<State>,
     ) {
         self.calls.borrow_mut().push((node, elapsed));
+        self.stage_ages
+            .borrow_mut()
+            .push((node, out.stage_elapsed()));
         if let Some(entry) = nodes.iter().find(|entry| entry.key == node) {
             self.transient_states.borrow_mut().push((node, entry.state));
         }
@@ -1272,4 +1277,150 @@ fn new_command_types_are_in_progress_until_their_chains_finish() {
             OrchOp::TopoSync,
         ]
     );
+}
+
+/// Config chains for radios 1 and 2 (started at `now` and `now + 8 s`), a
+/// `CfgRenew` chain for radio 3 started at `now`, and a pending `EmConfig`
+/// chain behind radio 1.
+fn per_agent_age_setup(role: &mut TestRole, now: Instant) -> (Orchestrator<TestRole>, Vec<Node>) {
+    let mut orch = Orchestrator::new();
+    let mut nodes = test_nodes(&[1, 2, 3]);
+    // One stage is activated per tick, so tick after every submit.
+    submit_existing(&mut orch, role, &mut nodes, config(1), now);
+    tick(&mut orch, role, &mut nodes, now);
+    submit_existing(
+        &mut orch,
+        role,
+        &mut nodes,
+        Command::CfgRenew(CfgRenew { radio: radio(3) }),
+        now,
+    );
+    tick(&mut orch, role, &mut nodes, now);
+    submit_existing(
+        &mut orch,
+        role,
+        &mut nodes,
+        config(2),
+        now + Duration::from_secs(8),
+    );
+    tick(&mut orch, role, &mut nodes, now + Duration::from_secs(8));
+    submit_existing(&mut orch, role, &mut nodes, config(1), now);
+    (orch, nodes)
+}
+
+fn stage_age_of(role: &TestRole, node: NodeKey) -> u64 {
+    role.stage_ages
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(visited, _)| *visited == node)
+        .expect("node was visited")
+        .1
+}
+
+#[test]
+fn stage_elapsed_is_per_stage_while_elapsed_is_the_type_maximum() {
+    let now = Instant::now();
+    let mut role = TestRole {
+        selection: CandidateSelection::Command,
+        ..TestRole::default()
+    };
+    let (mut orch, mut nodes) = per_agent_age_setup(&mut role, now);
+    role.calls.borrow_mut().clear();
+    tick(
+        &mut orch,
+        &mut role,
+        &mut nodes,
+        now + Duration::from_secs(10),
+    );
+    assert_eq!(stage_age_of(&role, radio(1)), 10);
+    assert_eq!(stage_age_of(&role, radio(2)), 2);
+    assert_eq!(stage_age_of(&role, radio(3)), 10);
+    let calls = role.calls.borrow();
+    let elapsed_of = |node| {
+        calls
+            .iter()
+            .find(|(visited, _)| *visited == node)
+            .unwrap()
+            .1
+    };
+    assert_eq!(elapsed_of(radio(1)), 10);
+    // Visited before radio 1, so it sees the maximum left by the last tick.
+    assert_eq!(elapsed_of(radio(2)), 8);
+}
+
+#[test]
+fn reset_stage_start_restarts_only_matching_active_stages_of_that_kind() {
+    let now = Instant::now();
+    let mut role = TestRole {
+        selection: CandidateSelection::Command,
+        ..TestRole::default()
+    };
+    let (mut orch, mut nodes) = per_agent_age_setup(&mut role, now);
+    let later = now + Duration::from_secs(10);
+    let reset = orch.reset_stage_start(CommandType::EmConfig, &[radio(1), radio(3)], later);
+    assert_eq!(reset, 1);
+    tick(&mut orch, &mut role, &mut nodes, later);
+    assert_eq!(stage_age_of(&role, radio(1)), 0);
+    assert_eq!(stage_age_of(&role, radio(2)), 2);
+    assert_eq!(stage_age_of(&role, radio(3)), 10);
+    // The type-wide value is untouched: radio 2 (stage age 2) still sees 8.
+    let calls = role.calls.borrow();
+    let elapsed_of = |node| {
+        calls
+            .iter()
+            .rev()
+            .find(|(visited, _)| *visited == node)
+            .unwrap()
+            .1
+    };
+    assert_eq!(elapsed_of(radio(2)), 8);
+}
+
+#[test]
+fn reset_stage_start_ignores_pending_and_finished_stages_and_unknown_candidates() {
+    let now = Instant::now();
+    let mut role = TestRole {
+        selection: CandidateSelection::Command,
+        ..TestRole::default()
+    };
+    let (mut orch, mut nodes) = per_agent_age_setup(&mut role, now);
+    let later = now + Duration::from_secs(10);
+    assert_eq!(
+        orch.reset_stage_start(CommandType::EmConfig, &[radio(9)], later),
+        0
+    );
+    assert_eq!(
+        orch.reset_stage_start(CommandType::CfgRenew, &[radio(1)], later),
+        0
+    );
+    let effect = orch.remove_chain_for_node(radio(2), State::Reset);
+    apply(&mut nodes, effect.into_iter().collect());
+    assert_eq!(
+        orch.reset_stage_start(CommandType::EmConfig, &[radio(2)], later),
+        0
+    );
+}
+
+#[test]
+fn stage_elapsed_restarts_from_zero_after_reset_stage_start() {
+    let now = Instant::now();
+    let mut role = TestRole {
+        selection: CandidateSelection::Command,
+        ..TestRole::default()
+    };
+    let (mut orch, mut nodes) = per_agent_age_setup(&mut role, now);
+    let reset_at = now + Duration::from_secs(10);
+    assert_eq!(
+        orch.reset_stage_start(CommandType::EmConfig, &[radio(2)], reset_at),
+        1
+    );
+    tick(
+        &mut orch,
+        &mut role,
+        &mut nodes,
+        reset_at + Duration::from_secs(3),
+    );
+    assert_eq!(stage_age_of(&role, radio(2)), 3);
+    assert_eq!(stage_age_of(&role, radio(1)), 13);
 }

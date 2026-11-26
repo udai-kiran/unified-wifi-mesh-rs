@@ -961,6 +961,70 @@ fn a_renew_followed_by_a_lost_m2_restarts_discovery_with_one_new_dev_init() {
     assert_eq!(harness.radio_states(), [AgentState::TopoSynchronized; 2]);
 }
 
+/// Brings the harness to a running recovery `dev_init` (chain 3): a renewed radio lost its M2.
+fn harness_in_recovery_search() -> Harness {
+    let mut harness = registered(two_radios());
+    harness.onboard_both();
+    harness.deliver(&renew_for(FreqBand::BAND_5_GHZ, CONTROLLER));
+    harness.run_for(2 * SECOND);
+    harness.run_for(20 * SECOND);
+    assert!(matches!(
+        harness.core.orch.command(ChainId(3)),
+        Some(em_cmd::Command::DevInit(_))
+    ));
+    harness
+}
+
+// intentional-difference:renew-refused-during-recovery
+// S2-R2-ADV-01: upstream accepts a Renew at any time (`em_agent.cpp:2438-2447`) and has no
+// recovery `dev_init`. Here the Renew that arrives during the recovery search is refused,
+// so no `cfg_renew` re-onboards a radio after the search synchronized it.
+#[test]
+fn a_renew_during_the_recovery_search_is_refused_and_causes_no_extra_onboarding() {
+    let mut harness = harness_in_recovery_search();
+    harness.deliver(&renew_for(FreqBand::BAND_5_GHZ, CONTROLLER));
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::CfgRenew));
+
+    harness.respond(FreqBand::BAND_5_GHZ);
+    harness.respond(FreqBand::BAND_2_4_GHZ);
+    let first = harness.m1_frames().len() - 2;
+    harness.answer_m1(first);
+    harness.answer_m1(first + 1);
+    harness.settle();
+    assert!(harness.query().is_some());
+    assert_eq!(harness.radio_states(), [AgentState::TopoSynchronized; 2]);
+
+    let m1_count = harness.m1_frames().len();
+    let search_count = harness.searches().len();
+    let mut answered = m1_count;
+    for _ in 0..60 {
+        controller_second(&mut harness, &mut answered);
+        assert!(!harness.core.orch.is_type_in_progress(CommandType::CfgRenew));
+    }
+    assert_eq!(harness.m1_frames().len(), m1_count, "no extra M1");
+    assert_eq!(harness.searches().len(), search_count, "no new dev_init");
+    assert_eq!(harness.radio_states(), [AgentState::TopoSynchronized; 2]);
+}
+
+// intentional-difference:renew-refused-during-recovery
+// The refusal ends with the recovery chain: no flag is left behind.
+#[test]
+fn a_renew_after_the_recovery_search_completed_is_accepted() {
+    let mut harness = harness_in_recovery_search();
+    harness.respond(FreqBand::BAND_5_GHZ);
+    harness.respond(FreqBand::BAND_2_4_GHZ);
+    let first = harness.m1_frames().len() - 2;
+    harness.answer_m1(first);
+    harness.answer_m1(first + 1);
+    harness.settle();
+    assert!(harness.query().is_some());
+    assert_eq!(harness.radio_states(), [AgentState::TopoSynchronized; 2]);
+    assert!(harness.core.orch.command(ChainId(3)).is_none());
+
+    harness.deliver(&renew_for(FreqBand::BAND_5_GHZ, CONTROLLER));
+    assert!(harness.core.orch.is_type_in_progress(CommandType::CfgRenew));
+}
+
 /// 0013 D4: the controller sends one renew per radio back to back; the agent refuses the
 /// second while the first `cfg_renew` runs, and the `onewifi_cb` restart completes it.
 #[test]

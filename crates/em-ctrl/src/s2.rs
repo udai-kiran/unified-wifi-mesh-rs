@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use em_cmd::{Command, EmConfig, NodeKey, NodeKind};
+use em_cmd::{Command, CommandType, EmConfig, NodeKey, NodeKind};
 use em_core::wsc::{self, ControllerEffect, Identity};
 use em_core::{CtrlState, Node, configuration, topology};
 use em_crypto::rand::RandomSource;
@@ -14,7 +14,17 @@ use em_orch::OrchRole;
 use em_types::{MacAddr, ProfileType, TlvType};
 
 use crate::rules::RadioLink;
-use crate::{CtrlCore, Frame, M2Handoff};
+use crate::{CtrlCore, EM_MAX_RADIO_PER_AGENT, Frame, M2Handoff, RenewEpisode};
+
+/// The Renews one retry episode sends, the first included (`EM_MAX_RENEW_TX_THRESH`,
+/// `inc/em_base.h:115`).
+const MAX_RENEW_TX: u8 = 5;
+
+/// An M2 that was built and passed validation, with the time the build took.
+struct BuiltM2 {
+    output: wsc::M2Output,
+    build_us: u128,
+}
 
 impl<R: RandomSource> CtrlCore<R> {
     /// The registrar identity in M2. The first 12 bytes of the UUID are the controller's AL
@@ -37,6 +47,17 @@ impl<R: RandomSource> CtrlCore<R> {
     /// An AP-Autoconfiguration WSC message: routed by the radio ID it carries
     /// (`em_ctrl.cpp:1240-1270`), then handled as an M1 when the radio waits for one
     /// (`em_configuration.cpp:6553-6556`).
+    ///
+    /// The M1 is checked in full before it changes anything (0014 D18 S2-03, S2-06).
+    /// The order is: parse it; the routing RUID must equal the RUID of AP Radio Basic
+    /// Capabilities; the sender must have a peer model, also for a known radio; a new radio
+    /// or a move must leave the sender within [`EM_MAX_RADIO_PER_AGENT`] radios; the owner's
+    /// M1 in `wsc_m2_sent` is ignored (nothing changes, model order included); the M2 is
+    /// built and validated. A failed check or a failed build logs one line and returns with
+    /// no change to any node, link, owner, mismatch flag, chain, deadline, retry counter, age
+    /// or state, and does not refresh the sender's peer model in the eviction order. Only
+    /// then does the radio change, and the M2 is handed over (the test-only hand-off failure
+    /// comes after the changes).
     pub(crate) fn handle_wsc(&mut self, remote: MacAddr, cmdu: &[u8], now: Instant) {
         let radio = match CmduHeader::parse(cmdu) {
             Ok((_, area)) => readers::radio_id(area).ok().flatten(),
@@ -50,64 +71,169 @@ impl<R: RandomSource> CtrlCore<R> {
             mac: radio,
             kind: NodeKind::Radio,
         };
-        let m1 = wsc::parse_m1(cmdu);
-        if !self.route_to_radio(key, remote, m1.as_ref().ok().map(wsc::M1::band), now) {
-            return;
-        }
-        if self.nodes.state(key) != Some(CtrlState::WscM1Pending) {
-            return;
-        }
-        match m1 {
-            Ok(m1) => self.answer_m1(key, remote, &m1, now),
-            Err(error) => tracing::warn!(radio = %radio, %remote, %error, "M1 rejected"),
-        }
-    }
-
-    /// Resets an existing radio node to `ctrl_wsc_m1_pending` unless it is in
-    /// `wsc_m2_sent`, or creates it from the M1 (`em_ctrl.cpp:1245-1269`). A radio in
-    /// `wsc_m2_sent` keeps its state, so the caller ignores the M1. Returns false when the
-    /// M1 is dropped because the agent has no peer model.
-    fn route_to_radio(
-        &mut self,
-        key: NodeKey,
-        remote: MacAddr,
-        band: Option<em_types::FreqBand>,
-        now: Instant,
-    ) -> bool {
-        if let Some(state) = self.nodes.state(key) {
-            if state == CtrlState::WscM2Sent {
-                tracing::info!(radio = %key.mac, "M1 ignored: the M2 was sent already");
-            } else if let Some(node) = self.nodes.table.get_mut(key) {
-                node.state = CtrlState::WscM1Pending;
+        let m1 = match wsc::parse_m1(cmdu) {
+            Ok(m1) => m1,
+            Err(error) => {
+                tracing::warn!(radio = %radio, %remote, %error, "M1 rejected");
+                return;
             }
-            return true;
+        };
+        // intentional-difference:m1-validated-before-state
+        // Upstream creates the node from the routing RUID with `em_freq_band_unknown`
+        // before the M1 is parsed (`em_ctrl.cpp:1259-1265`); a bad M1 left a node behind.
+        // An M1 has no AP Radio Identifier TLV, so the routing RUID is the first TLV that
+        // carries one; it must be the radio the M1 describes.
+        if m1.radio() != radio {
+            tracing::warn!(
+                radio = %radio,
+                described = %m1.radio(),
+                %remote,
+                "M1 refused: the routing radio differs from AP Radio Basic Capabilities"
+            );
+            return;
         }
         // Upstream drops an M1 from an agent without a data model, which a Search creates
-        // (`em_ctrl.cpp:1253-1257`).
+        // (`em_ctrl.cpp:1253-1257`). Here it also holds for a known radio (S2-06).
         let Some(peer) = self.models.get(&remote) else {
-            tracing::warn!(radio = %key.mac, %remote, "M1 dropped: no peer model for this agent");
-            return false;
+            tracing::warn!(radio = %radio, %remote, "M1 dropped: no peer model for this agent");
+            return;
         };
         let profile = peer.profile;
+        let owner = self.nodes.links.get(&key).map(|link| link.agent_al);
+        // intentional-difference:radio-cap-per-agent
+        // Upstream defines `EM_MAX_RADIO_PER_AGENT` (`inc/em_base.h:90`) but does not
+        // enforce it where it creates a radio node.
+        if owner != Some(remote) && self.nodes.radios_of(remote).len() >= EM_MAX_RADIO_PER_AGENT {
+            tracing::warn!(
+                radio = %radio,
+                %remote,
+                max = EM_MAX_RADIO_PER_AGENT,
+                "M1 refused: the agent has the most radios allowed"
+            );
+            return;
+        }
+        if owner == Some(remote) && self.nodes.state(key) == Some(CtrlState::WscM2Sent) {
+            // A known radio in `wsc_m2_sent` keeps its state and ignores the M1. The rule
+            // sits after the checks above, so a bad M1 never reaches it, and it applies to
+            // the owner only: a move supersedes the owner's exchange. Nothing is built and
+            // nothing changes, model order included: an ignored M1 may be one that could not
+            // be answered, so only an M1 whose M2 was built refreshes the model (R3).
+            tracing::info!(radio = %key.mac, "M1 ignored: the M2 was sent already");
+            return;
+        }
+        // intentional-difference:m1-validated-before-state
+        // The M2 does not read node state (`wsc::build_m2` takes the M1, the identity, the
+        // network rows, the message ID counter and the random source), so it is built and
+        // validated before the radio changes. An M1 that cannot be answered, such as one
+        // with no BSS capacity, then changes no node, link, chain, age or retry episode.
+        let Some(built) = self.build_m2_for(key, &m1) else {
+            return;
+        };
+        // The M1 passed every check and can be answered, so the sender is alive: a model that
+        // is heard from is evicted last (R3). A refused M1 does not count, or an agent at its
+        // radio cap could keep its model by sending M1s; neither does an M1 whose M2 cannot
+        // be built.
+        self.touch_model(remote);
+        if owner.is_some_and(|current| current != remote) {
+            self.move_radio(key, remote, profile, m1.band(), now);
+        } else if owner.is_none() {
+            self.create_radio(key, remote, profile, m1.band(), now);
+        }
+        // intentional-difference:mismatch-cleared-on-m1
+        // Upstream clears a mismatch only when the Topology Response is good; a parsed,
+        // accepted M1 from any radio of the agent is a fresh start for all of them (S2-08).
+        for agent_radio in self.nodes.radios_of(remote) {
+            if let Some(link) = self.nodes.links.get_mut(&agent_radio) {
+                link.ssid_mismatch = false;
+            }
+        }
+        if let Some(node) = self.nodes.table.get_mut(key) {
+            node.state = CtrlState::WscM1Pending;
+        }
+        self.reset_agent_em_config_age(remote, now);
+        self.answer_m1(key, remote, built, now);
+    }
+
+    /// Gives every `em_config` stage of the agent's radios a new start time.
+    ///
+    /// intentional-difference:em-config-age-per-agent. Upstream keeps one start time per
+    /// command type and resets it for the whole type (`em_orch.cpp:72-88,129-138,222`), so
+    /// one agent's progress keeps every other agent's 40 s from running out. Here an accepted
+    /// M1 restarts the age of this agent's stages only. The M2 built for it is handed over
+    /// in the same call at the same `now`, so it needs no second reset.
+    fn reset_agent_em_config_age(&mut self, agent_al: MacAddr, now: Instant) {
+        let radios = self.nodes.radios_of(agent_al);
+        self.orch
+            .reset_stage_start(CommandType::EmConfig, &radios, now);
+    }
+
+    /// Creates the radio node from the parsed M1 (`em_ctrl.cpp:1259-1269`).
+    fn create_radio(
+        &mut self,
+        key: NodeKey,
+        agent_al: MacAddr,
+        profile: u8,
+        band: em_types::FreqBand,
+        now: Instant,
+    ) {
+        let band = Some(band);
         self.nodes
             .table
             .insert(Node::new(key, CtrlState::WscM1Pending, profile, band));
         self.nodes.links.insert(
             key,
             RadioLink {
-                agent_al: remote,
+                agent_al,
                 ssid_mismatch: false,
             },
         );
         self.restart_proto_deadline(key, now);
-        tracing::info!(radio = %key.mac, agent = %remote, ?band, "radio node created");
-        true
+        tracing::info!(radio = %key.mac, agent = %agent_al, ?band, "radio node created");
     }
 
-    /// Builds M2 and hands it over; then, in upstream's order, removes the radio's
-    /// previous `em_config`, enters `wsc_m2_sent` and submits `em_config`
-    /// (`em_configuration.cpp:6262-6275`). A failed hand-off applies none of them.
-    fn answer_m1(&mut self, key: NodeKey, remote: MacAddr, m1: &wsc::M1<'_>, now: Instant) {
+    /// Hands a known radio to the agent that sent the M1, in one step (S2-06).
+    ///
+    /// intentional-difference:radio-owner-move. Upstream sends M2 to the M1's sender but
+    /// Topology Query and Renew to the first owner's data model
+    /// (`em_configuration.cpp:483,959`); here the owner, profile and band follow the M1, the
+    /// old owner's `em_config` for the radio is removed, and the per-radio state restarts.
+    /// Any agent with a peer model can take a radio over until Stage 3 binds a radio to its
+    /// agent (accepted risk R4).
+    fn move_radio(
+        &mut self,
+        key: NodeKey,
+        new_owner: MacAddr,
+        profile: u8,
+        band: em_types::FreqBand,
+        now: Instant,
+    ) {
+        let old_owner = self.nodes.links.get(&key).map(|link| link.agent_al);
+        self.remove_em_config_chain(key, now);
+        if let Some(node) = self.nodes.table.get_mut(key) {
+            node.profile = profile;
+            node.band = Some(band);
+            node.state = CtrlState::WscM1Pending;
+        }
+        self.nodes.links.insert(
+            key,
+            RadioLink {
+                agent_al: new_owner,
+                ssid_mismatch: false,
+            },
+        );
+        self.reset_radio_per_radio_state(key);
+        self.restart_proto_deadline(key, now);
+        tracing::info!(
+            radio = %key.mac,
+            from = ?old_owner,
+            to = %new_owner,
+            "radio moved to another agent"
+        );
+    }
+
+    /// Builds M2 and validates it (profile 3), without touching any node. `None` after one
+    /// warn line when it cannot be built or fails validation.
+    fn build_m2_for(&mut self, key: NodeKey, m1: &wsc::M1<'_>) -> Option<BuiltM2> {
         let identity = self.identity();
         let rows = self.networks.views();
         // The build runs on the loop task: its time is the loop's stall for the DH key
@@ -121,13 +247,22 @@ impl<R: RandomSource> CtrlCore<R> {
             Ok(output) => output,
             Err(error) => {
                 tracing::warn!(radio = %key.mac, %error, "M2 could not be built");
-                return;
+                return None;
             }
         };
         if let Err(error) = validate(&output.cmdu, ProfileType::MULTI_AP_PROFILE_3) {
             tracing::warn!(radio = %key.mac, %error, "M2 failed validation, not sent");
-            return;
+            return None;
         }
+        Some(BuiltM2 { output, build_us })
+    }
+
+    /// Hands the built M2 over; then, in upstream's order, removes the radio's previous
+    /// `em_config`, enters `wsc_m2_sent` and submits `em_config`
+    /// (`em_configuration.cpp:6262-6275`). A failed hand-off applies none of them; the
+    /// changes `handle_wsc` made before it stay.
+    fn answer_m1(&mut self, key: NodeKey, remote: MacAddr, built: BuiltM2, now: Instant) {
+        let BuiltM2 { output, build_us } = built;
         let mid = CmduHeader::parse(&output.cmdu).map_or(0, |(header, _)| header.msg_id);
         let m2_count = count_wsc_tlvs(&output.cmdu);
         let effects = output.post_handoff_effects(remote);
@@ -162,16 +297,7 @@ impl<R: RandomSource> CtrlCore<R> {
 
     fn apply_controller_effect(&mut self, effect: ControllerEffect, now: Instant) {
         match effect {
-            ControllerEffect::RemoveChainForNode(radio) => {
-                if let Some(state_effect) = self
-                    .orch
-                    .remove_chain_for_node(radio, CtrlState::Unconfigured)
-                {
-                    let mut out = Vec::new();
-                    self.rules.apply(&mut self.nodes, state_effect, &mut out);
-                    self.drain_orch_out(out, now);
-                }
-            }
+            ControllerEffect::RemoveChainForNode(radio) => self.remove_em_config_chain(radio, now),
             ControllerEffect::SetState(radio, state) => {
                 if let Some(node) = self.nodes.table.get_mut(radio) {
                     node.state = state;
@@ -183,7 +309,19 @@ impl<R: RandomSource> CtrlCore<R> {
         }
     }
 
-    fn submit_em_config(&mut self, config: EmConfig, now: Instant) {
+    /// Removes the `em_config` chain of a radio and sets the radio `unconfigured` when one ran.
+    pub(crate) fn remove_em_config_chain(&mut self, radio: NodeKey, now: Instant) {
+        if let Some(state_effect) = self
+            .orch
+            .remove_chain_for_node(radio, CtrlState::Unconfigured)
+        {
+            let mut out = Vec::new();
+            self.rules.apply(&mut self.nodes, state_effect, &mut out);
+            self.drain_orch_out(out, now);
+        }
+    }
+
+    pub(crate) fn submit_em_config(&mut self, config: EmConfig, now: Instant) {
         let (chain, effects) = self.orch.submit(
             &mut self.rules,
             &mut self.nodes,
@@ -200,10 +338,16 @@ impl<R: RandomSource> CtrlCore<R> {
         }
     }
 
-    /// The proto tick of a radio node: the Topology Query of `em_state_ctrl_topo_sync_pending`
-    /// (`em_configuration.cpp:6869-6914`), only while `em_config` executes on it.
+    /// The proto tick of a radio node. A `misconfigured` radio gets the next Renew of its
+    /// retry episode (see [`Self::start_renew_episode`]). Otherwise it is the Topology Query of
+    /// `em_state_ctrl_topo_sync_pending` (`em_configuration.cpp:6869-6914`), only while
+    /// `em_config` executes on it.
     pub(crate) fn dispatch_proto_tick(&mut self, key: NodeKey, now: Instant) {
         self.restart_proto_deadline(key, now);
+        if key.kind == NodeKind::Radio && self.nodes.state(key) == Some(CtrlState::Misconfigured) {
+            self.retry_renew(key);
+            return;
+        }
         if key.kind != NodeKind::Radio
             || self.nodes.state(key) != Some(CtrlState::TopoSyncPending)
             || !self.em_config_in_progress(key)
@@ -211,6 +355,65 @@ impl<R: RandomSource> CtrlCore<R> {
             return;
         }
         self.topology_query_tick(key);
+    }
+
+    /// Starts a Renew retry episode for a radio whose `em_config` was cancelled: the count
+    /// restarts at 0 and the first Renew goes out now.
+    ///
+    /// Upstream retries `em_configuration.cpp:850-938,6865-6866` up to
+    /// `EM_MAX_RENEW_TX_THRESH` (`inc/em_base.h:115`).
+    ///
+    /// intentional-difference:renew-retry-counter-per-episode. Upstream carries the count
+    /// from one episode to the next and clears it only at the threshold and in the
+    /// `cfg_renew` cancel hook (`em_configuration.cpp:935-938`, `em_orch_ctrl.cpp:171-175,
+    /// 418-420`), so a later cancel could start with a spent budget (R1).
+    ///
+    /// intentional-difference:renew-retry-without-cfg-renew-command. Upstream sends the
+    /// retries only while a `cfg_renew` command is in progress (`em.cpp:546-559`), which a
+    /// 10 s type-wide cancel ends (`em_orch_ctrl.cpp:157-163`). The controller has no such
+    /// command; the idle proto tick of a misconfigured radio sends them (R2).
+    ///
+    /// A cancel can ask twice for the same radio in one instant: `transient` asks for every
+    /// radio of the agent on the `topo_sync_pending` path, and `pre_process_cancel` asks again
+    /// for the radios whose stage was active. A radio whose episode already started at `now`
+    /// is left alone, so the first Renew goes out once. A cancel at a later instant starts a
+    /// fresh episode (R1).
+    pub(crate) fn start_renew_episode(&mut self, key: NodeKey, now: Instant) {
+        let started_now = self
+            .renew_counts
+            .get(&key)
+            .is_some_and(|episode| episode.started == now);
+        if started_now {
+            return;
+        }
+        self.send_renew(key);
+        // The retries are one idle second apart, the first one a second after this Renew.
+        self.restart_proto_deadline(key, now);
+        self.renew_counts.insert(
+            key,
+            RenewEpisode {
+                sent: 1,
+                started: now,
+            },
+        );
+    }
+
+    /// One retry of the episode, on the idle proto tick of a misconfigured radio.
+    fn retry_renew(&mut self, key: NodeKey) {
+        let Some(episode) = self.renew_counts.get(&key).copied() else {
+            return;
+        };
+        if episode.sent == 0 || episode.sent >= MAX_RENEW_TX {
+            return;
+        }
+        self.send_renew(key);
+        self.renew_counts.insert(
+            key,
+            RenewEpisode {
+                sent: episode.sent + 1,
+                ..episode
+            },
+        );
     }
 
     fn topology_query_tick(&mut self, key: NodeKey) {
@@ -263,6 +466,7 @@ impl<R: RandomSource> CtrlCore<R> {
     /// (`em_configuration.cpp:6597-6632`). Success moves every radio of the agent to
     /// `topo_synchronized`; an unknown SSID flags a mismatch.
     pub(crate) fn handle_topology_response(&mut self, remote: MacAddr, cmdu: &[u8], now: Instant) {
+        self.touch_model(remote);
         let radios = self.nodes.radios_of(remote);
         let waiting = radios
             .iter()

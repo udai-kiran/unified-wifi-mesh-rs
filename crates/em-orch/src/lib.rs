@@ -62,6 +62,7 @@ pub struct TransientOut<S: Copy> {
     actions: Vec<TransientAction<S>>,
     kind: CommandType,
     elapsed: u64,
+    stage_elapsed: u64,
 }
 
 impl<S: Copy> TransientOut<S> {
@@ -70,7 +71,13 @@ impl<S: Copy> TransientOut<S> {
             actions: Vec::new(),
             kind,
             elapsed,
+            stage_elapsed: 0,
         }
+    }
+
+    fn with_stage_elapsed(mut self, stage_elapsed: u64) -> Self {
+        self.stage_elapsed = stage_elapsed;
+        self
     }
 
     /// Adds a role effect in hook order.
@@ -78,9 +85,10 @@ impl<S: Copy> TransientOut<S> {
         self.actions.push(TransientAction::Effect(effect));
     }
 
-    /// Requests a new start time and resets the type's elapsed value to zero.
+    /// Requests a new start time and resets the type's elapsed value and this stage's age to zero.
     pub fn reset_start_time(&mut self) {
         self.elapsed = 0;
+        self.stage_elapsed = 0;
         self.actions.push(TransientAction::ResetStartTime);
     }
 
@@ -88,6 +96,19 @@ impl<S: Copy> TransientOut<S> {
     #[must_use]
     pub const fn elapsed(&self) -> u64 {
         self.elapsed
+    }
+
+    /// Returns the elapsed whole seconds of the stage this hook runs for.
+    ///
+    /// 0014 D18 S2-04 (per-agent age): upstream keeps one elapsed time per
+    /// command type, so [`Self::elapsed`] is the maximum over all active
+    /// stages of the type (`src/orch/em_orch.cpp:72-88`, `:129-138`). This is
+    /// the age of the current stage alone, measured from its own start time
+    /// (same unit and rounding as [`Self::elapsed`]). A
+    /// [`Self::reset_start_time`] request sets it to zero.
+    #[must_use]
+    pub const fn stage_elapsed(&self) -> u64 {
+        self.stage_elapsed
     }
 
     /// Requests cancellation of pending and active stages of this type.
@@ -520,11 +541,10 @@ impl<R: OrchRole> Orchestrator<R> {
         let start = chain.stages[id.stage]
             .start
             .expect("active stage has a start");
+        let stage_elapsed = now.saturating_duration_since(start).as_secs();
         let stats = self.stats.get_mut(&kind).expect("admitted stage has stats");
-        stats.elapsed = stats
-            .elapsed
-            .max(now.saturating_duration_since(start).as_secs());
-        let mut out = TransientOut::new(kind, stats.elapsed);
+        stats.elapsed = stats.elapsed.max(stage_elapsed);
+        let mut out = TransientOut::new(kind, stats.elapsed).with_stage_elapsed(stage_elapsed);
         role.transient(&chain.command, node, nodes, stats.elapsed, &mut out);
         for action in out.actions {
             match action {
@@ -540,6 +560,55 @@ impl<R: OrchRole> Orchestrator<R> {
                 }
             }
         }
+    }
+
+    /// Restarts the age of the active stages of `kind` that involve `candidates`.
+    ///
+    /// 0014 D18 S2-04 (per-agent 40 s age): upstream keeps one time per
+    /// command type and resets it for the whole type
+    /// (`src/orch/em_orch.cpp:72-88`, `:129-138`). The type's reset lets one
+    /// agent's progress keep every other agent's timeout from firing, and the
+    /// type's elapsed value is the oldest active stage's age, so one stage
+    /// held past 40 s makes the other agents' timeouts fire early. This resets
+    /// only the start time of matching stages, to `now` (an argument, so no
+    /// clock is read; 0016 U27). Returns how many stages were reset.
+    ///
+    /// A stage is reset when any of its candidates is in `candidates`: a stage
+    /// has one start time, and progress by one of its nodes is progress of the
+    /// stage. (For `em_config` every chain has a single candidate.) Pending
+    /// stages have no start time, and stages whose matching nodes are all
+    /// `Fini` are finished; neither is touched. Other kinds and the type-wide
+    /// elapsed value read by [`OrchRole::transient`] are left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an active stage refers to a missing chain (an internal bug).
+    pub fn reset_stage_start(
+        &mut self,
+        kind: CommandType,
+        candidates: &[NodeKey],
+        now: Instant,
+    ) -> usize {
+        let mut reset_count = 0;
+        for id in &self.active {
+            let chain = self.chains.get_mut(&id.chain).expect("chain exists");
+            if chain.command.kind() != kind {
+                continue;
+            }
+            let stage = &mut chain.stages[id.stage];
+            let involved = stage.candidates.iter().any(|node| {
+                candidates.contains(node)
+                    && self
+                        .nodes
+                        .get(node)
+                        .is_none_or(|status| status.state != OrchState::Fini)
+            });
+            if involved {
+                stage.start = Some(now);
+                reset_count += 1;
+            }
+        }
+        reset_count
     }
 
     /// Cancels a command type only for the specified candidates.

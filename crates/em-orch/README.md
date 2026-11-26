@@ -58,6 +58,13 @@ it may reach a threshold up to one second later (0012 D2).
   counters at removal (`em_orch.cpp:257-260`); those counters are not present
   in the S1 node model and the future controller must reset them when applying
   this removal's returned effect.
+- Per-agent age (0014 D18 S2-04). Upstream keeps one elapsed time per command
+  type (`em_orch.cpp:72-88`, `:129-138`), which `transient` still receives as
+  `elapsed`. Two additive calls give a role a per-stage age:
+  `TransientOut::stage_elapsed` (the running stage's own age) and
+  `Orchestrator::reset_stage_start(kind, candidates, now)`, which restarts the
+  start time of active, not-yet-`Fini` stages of that kind with any listed
+  candidate. It leaves the type-wide value, other kinds and pending stages alone.
 
 ## Status
 

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use em_cmd::{CommandType, NodeKey, NodeKind};
+use em_cmd::{ChainId, Command, CommandType, CommandView, EmConfig, NodeKey, NodeKind};
 use em_core::configuration::build_search;
 use em_core::topology::{self, Bss, Radio};
 use em_core::wsc::{self, Identity, M1Params, Session};
@@ -145,12 +145,18 @@ impl Harness {
 
     /// An M1 from one of the agent's radios, sent to the controller.
     fn m1(&mut self, agent: MacAddr, radio: MacAddr, band: FreqBand) -> AgentRadio {
+        let (cmdu, session) = self.build_m1(agent, radio, band);
+        self.send(agent, &cmdu);
+        AgentRadio { session }
+    }
+
+    /// An M1 as the agent builds it, not yet sent.
+    fn build_m1(&mut self, agent: MacAddr, radio: MacAddr, band: FreqBand) -> (Vec<u8>, Session) {
         let mut session = Session::new();
         let params = m1_params(agent, radio, band);
         let cmdu =
             wsc::build_m1(&params, &mut self.ids, &mut self.peer_random, &mut session).unwrap();
-        self.send(agent, &cmdu);
-        AgentRadio { session }
+        (cmdu, session)
     }
 
     fn frames_of(&self, msg_type: MsgType) -> Vec<(Duration, &Frame)> {
@@ -161,8 +167,75 @@ impl Harness {
             .collect()
     }
 
+    /// The Renews sent to `agent` for the radio of this band.
+    fn renews_for(&self, agent: MacAddr, band: FreqBand) -> usize {
+        self.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW)
+            .iter()
+            .filter(|(_, frame)| {
+                let (_, area) = CmduHeader::parse(&frame.cmdu).unwrap();
+                frame.remote == agent && readers::freq_band(area).unwrap() == Some(band)
+            })
+            .count()
+    }
+
     fn state(&self, radio: MacAddr) -> CtrlState {
         self.core.nodes.state(key(radio)).unwrap()
+    }
+
+    /// The agent the radio's active `em_config` chain was submitted for.
+    fn chain_agent(&self, radio: MacAddr) -> Option<MacAddr> {
+        let active = self.core.orch.active(key(radio))?;
+        match self.core.orch.command(active.chain)? {
+            Command::EmConfig(config) => Some(config.agent_al),
+            _ => None,
+        }
+    }
+
+    /// Whether the orchestrator still holds an `em_config` command for the radio, in any
+    /// stage: pending, active or just finished.
+    fn has_em_config_command(&self, radio: MacAddr) -> bool {
+        (0..64).any(|id| {
+            matches!(
+                self.core.orch.command(ChainId(id)),
+                Some(Command::EmConfig(config)) if config.radio == key(radio)
+            )
+        })
+    }
+
+    fn owner(&self, radio: MacAddr) -> Option<MacAddr> {
+        self.core
+            .nodes
+            .links
+            .get(&key(radio))
+            .map(|link| link.agent_al)
+    }
+
+    fn mismatch(&self, radio: MacAddr) -> bool {
+        self.core.nodes.links[&key(radio)].ssid_mismatch
+    }
+
+    fn set_mismatch(&mut self, radio: MacAddr) {
+        self.core
+            .nodes
+            .links
+            .get_mut(&key(radio))
+            .unwrap()
+            .ssid_mismatch = true;
+    }
+
+    fn proto_deadline(&self, radio: MacAddr) -> Option<Instant> {
+        self.core
+            .proto_deadlines
+            .iter()
+            .find(|deadline| deadline.key == key(radio))
+            .map(|deadline| deadline.due)
+    }
+
+    /// Asserts that nothing is left of the radio: node, link and proto deadline.
+    fn assert_radio_absent(&self, radio: MacAddr) {
+        assert!(self.core.nodes().get(key(radio)).is_none());
+        assert!(!self.core.nodes.links.contains_key(&key(radio)));
+        assert!(self.proto_deadline(radio).is_none());
     }
 
     fn al_state(&self) -> CtrlState {
@@ -468,8 +541,11 @@ fn an_unknown_ssid_flags_a_mismatch_and_keeps_the_radios_waiting() {
     );
 }
 
+// Before 0014 D18 R1 the cancel sent exactly one Renew per radio and no retry. Now it starts
+// a retry episode: the first Renew at the cancel, then one per idle proto second, five in all
+// (upstream: em_configuration.cpp:850-938, EM_MAX_RENEW_TX_THRESH 5, em_base.h:115).
 #[test]
-fn the_forty_second_cancel_marks_the_agents_radios_and_sends_one_renew_each() {
+fn the_forty_second_cancel_marks_the_agents_radios_and_starts_a_renew_episode_each() {
     let (mut harness, _, _) = two_radios();
     harness.run_for(39 * SECOND);
     assert_eq!(harness.state(RADIO_24), CtrlState::TopoSyncPending);
@@ -482,9 +558,11 @@ fn the_forty_second_cancel_marks_the_agents_radios_and_sends_one_renew_each() {
     assert_eq!(harness.state(RADIO_24), CtrlState::Misconfigured);
     assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
     let renews = harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW);
-    assert_eq!(renews.len(), 2);
+    // The first two Renews, one per radio in `radios_of` order (the order the radios were
+    // created), go out at the cancel.
     let bands: Vec<FreqBand> = renews
         .iter()
+        .take(2)
         .map(|(_, frame)| {
             let (_, area) = CmduHeader::parse(&frame.cmdu).unwrap();
             assert_eq!(readers::al_mac_address(area).unwrap(), Some(CONTROLLER));
@@ -494,17 +572,16 @@ fn the_forty_second_cancel_marks_the_agents_radios_and_sends_one_renew_each() {
     assert_eq!(bands, [FreqBand::BAND_2_4_GHZ, FreqBand::BAND_5_GHZ]);
     assert!(renews.iter().all(|(_, frame)| frame.remote == AGENT));
 
-    // No command is left: no further Query and no further renew.
+    // No command is left: no further Query; the retry ends at five Renews per radio.
     assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
     let queries = harness.frames_of(MsgType::TOPOLOGY_QUERY).len();
     harness.run_for(120 * SECOND);
-    assert_eq!(
-        harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW).len(),
-        2
-    );
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
     assert_eq!(harness.frames_of(MsgType::TOPOLOGY_QUERY).len(), queries);
 }
 
+// Before 0014 D18 R1 each cancel sent one Renew per radio; now five (see above).
 #[test]
 fn the_cancel_is_scoped_to_the_radios_of_the_agent() {
     let (mut harness, _, _) = two_radios();
@@ -512,19 +589,17 @@ fn the_cancel_is_scoped_to_the_radios_of_the_agent() {
     harness.search(OTHER_AGENT);
     harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
     harness.run_for(22 * SECOND);
-    // The first agent timed out; the second has run for 22 s.
+    // The first agent timed out; the second has run for 22 s and is not touched.
     assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
     assert_eq!(harness.state(OTHER_RADIO), CtrlState::TopoSyncPending);
-    assert_eq!(
-        harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW).len(),
-        2
-    );
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
 
     harness.run_for(22 * SECOND);
     assert_eq!(harness.state(OTHER_RADIO), CtrlState::Misconfigured);
-    let renews = harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW);
-    assert_eq!(renews.len(), 3);
-    assert_eq!(renews[2].1.remote, OTHER_AGENT);
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 5);
 }
 
 #[test]
@@ -635,4 +710,874 @@ fn replay_core_seed_reaches_m2() {
     let first = replay_script(CORE_SEED, PEER_SEED);
     let other = replay_script(OTHER_CORE_SEED, PEER_SEED);
     assert_ne!(first_m2(&first), first_m2(&other));
+}
+
+// M1 path (0014 D18 S2-03, S2-06, S2-08) and peer-model eviction (Q1, R3).
+
+/// Radio `n` of an agent in the tests below, distinct from the named radios.
+fn radio_mac(agent_number: u8, n: u8) -> MacAddr {
+    MacAddr::new([2, 0, 0, agent_number, 3, n])
+}
+
+/// The AL MAC of the filler agent `n`, which only sends a Search.
+fn filler_agent(n: u16) -> MacAddr {
+    let [high, low] = n.to_be_bytes();
+    MacAddr::new([4, 0, 0, 0, high, low])
+}
+
+/// The M1 with a TLV of `tlv_type` put before all others. A raw TLV is written, so the
+/// value can name a radio other than the one the M1 describes.
+fn with_tlv_first(cmdu: &[u8], tlv_type: TlvType, value: &[u8]) -> Vec<u8> {
+    let (_, area) = CmduHeader::parse(cmdu).unwrap();
+    let header_len = cmdu.len() - area.len();
+    let mut out = Vec::from(&cmdu[..header_len]);
+    out.push(u8::from(tlv_type));
+    out.extend_from_slice(&u16::try_from(value.len()).unwrap().to_be_bytes());
+    out.extend_from_slice(value);
+    out.extend_from_slice(area);
+    out
+}
+
+/// A valid M1 for `radio` that carries an AP HT Capabilities TLV for `other` before AP Radio
+/// Basic Capabilities, so `readers::radio_id` routes it by `other`.
+fn m1_routed_by_other_radio(
+    harness: &mut Harness,
+    agent: MacAddr,
+    radio: MacAddr,
+    other: MacAddr,
+) -> Vec<u8> {
+    let (cmdu, _) = harness.build_m1(agent, radio, FreqBand::BAND_5_GHZ);
+    let mut value = Vec::from(other.octets());
+    value.push(0);
+    let crafted = with_tlv_first(&cmdu, TlvType::AP_HT_CAPABILITIES, &value);
+    // The test must reach the RUID check: the M1 parses, and routes by the other radio.
+    let (_, area) = CmduHeader::parse(&crafted).unwrap();
+    assert_eq!(readers::radio_id(area).unwrap(), Some(other));
+    assert_eq!(wsc::parse_m1(&crafted).unwrap().radio(), radio);
+    crafted
+}
+
+/// An M1 whose AP Radio Basic Capabilities TLV is gone. It routes by the AP Radio Advanced
+/// Capabilities TLV and cannot be parsed.
+fn m1_without_basic_capabilities(harness: &mut Harness, agent: MacAddr, radio: MacAddr) -> Vec<u8> {
+    let (cmdu, _) = harness.build_m1(agent, radio, FreqBand::BAND_5_GHZ);
+    let (_, area) = CmduHeader::parse(&cmdu).unwrap();
+    let header_len = cmdu.len() - area.len();
+    let first = TlvIter::new(area).next().unwrap().unwrap();
+    assert_eq!(first.tlv_type, TlvType::AP_RADIO_BASIC_CAPABILITIES);
+    let first_len = 3 + first.value.len();
+    let mut out = Vec::from(&cmdu[..header_len]);
+    out.extend_from_slice(&area[first_len..]);
+    let (_, area) = CmduHeader::parse(&out).unwrap();
+    assert_eq!(readers::radio_id(area).unwrap(), Some(radio));
+    assert!(wsc::parse_m1(&out).is_err());
+    out
+}
+
+/// An M1 that parses but whose M2 cannot be built: AP Radio Basic Capabilities says the
+/// radio supports no BSS (`build_m2` returns `NoBssCapacity`). `build_m1` refuses to write
+/// such a value, so the byte is patched in the frame.
+fn m1_without_bss_capacity(harness: &mut Harness, agent: MacAddr, radio: MacAddr) -> Vec<u8> {
+    let (mut cmdu, _) = harness.build_m1(agent, radio, FreqBand::BAND_5_GHZ);
+    let (_, area) = CmduHeader::parse(&cmdu).unwrap();
+    let header_len = cmdu.len() - area.len();
+    let first = TlvIter::new(area).next().unwrap().unwrap();
+    assert_eq!(first.tlv_type, TlvType::AP_RADIO_BASIC_CAPABILITIES);
+    // The TLV header is 3 bytes; the value is the RUID (6 bytes), then the BSS maximum.
+    cmdu[header_len + 3 + 6] = 0;
+    assert_eq!(wsc::parse_m1(&cmdu).unwrap().radio(), radio);
+    cmdu
+}
+
+// Upstream creates the node from the routing RUID before it parses the M1
+// (em_ctrl.cpp:1259-1265), so a bad M1 left a node with an unknown band. Here nothing is made.
+#[test]
+fn a_bad_m1_for_a_new_radio_creates_nothing() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.frames.clear();
+
+    let unparsable = m1_without_basic_capabilities(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &unparsable);
+    let mismatched = m1_routed_by_other_radio(&mut harness, AGENT, RADIO_5, OTHER_RADIO);
+    harness.send(AGENT, &mismatched);
+
+    harness.assert_radio_absent(RADIO_5);
+    harness.assert_radio_absent(OTHER_RADIO);
+    assert_eq!(harness.frames.len(), 0);
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+    assert!(harness.core.next_deadline().is_none());
+}
+
+// Upstream resets a known radio to ctrl_wsc_m1_pending before it parses the M1
+// (em_ctrl.cpp:1245-1250).
+#[test]
+fn a_bad_m1_for_a_known_radio_changes_nothing() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    let deadline = harness.proto_deadline(RADIO_5);
+    let frames = harness.frames.len();
+
+    let unparsable = m1_without_basic_capabilities(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &unparsable);
+    let mismatched = m1_routed_by_other_radio(&mut harness, AGENT, RADIO_5, OTHER_RADIO);
+    harness.send(AGENT, &mismatched);
+
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    assert!(harness.core.em_config_in_progress(key(RADIO_5)));
+    assert_eq!(harness.proto_deadline(RADIO_5), deadline);
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// The M2 is built and validated before any state change. An M1 with no BSS capacity
+// parses and passes every check, but its M2 cannot be built.
+#[test]
+fn an_m1_whose_m2_cannot_be_built_for_a_new_radio_creates_nothing() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.frames.clear();
+    let model_order: Vec<MacAddr> = harness.core.model_order.iter().copied().collect();
+
+    let cmdu = m1_without_bss_capacity(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &cmdu);
+
+    harness.assert_radio_absent(RADIO_5);
+    assert_eq!(harness.frames.len(), 0);
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+    assert!(harness.core.next_deadline().is_none());
+    // AGENT's model was not refreshed: it is still the oldest.
+    let after: Vec<MacAddr> = harness.core.model_order.iter().copied().collect();
+    assert_eq!(after, model_order);
+}
+
+#[test]
+fn an_m1_whose_m2_cannot_be_built_leaves_a_waiting_radio_alone() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    harness.set_mismatch(RADIO_5);
+    let deadline = harness.proto_deadline(RADIO_5);
+    let frames = harness.frames.len();
+
+    let cmdu = m1_without_bss_capacity(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &cmdu);
+
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    assert!(harness.core.em_config_in_progress(key(RADIO_5)));
+    assert!(harness.mismatch(RADIO_5));
+    assert_eq!(harness.proto_deadline(RADIO_5), deadline);
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// The failed M1 does not restart the 40 s age either: the cancel comes on schedule.
+#[test]
+fn an_m1_whose_m2_cannot_be_built_does_not_restart_the_age() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(30 * SECOND);
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+
+    let cmdu = m1_without_bss_capacity(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &cmdu);
+    harness.run_for(11 * SECOND);
+
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+}
+
+#[test]
+fn an_m1_whose_m2_cannot_be_built_does_not_end_a_renew_episode() {
+    let mut harness = cancelled_single_radio();
+    harness.run_for(SECOND);
+    let sent = harness.renews_for(AGENT, FreqBand::BAND_5_GHZ);
+    assert!((1..5).contains(&sent));
+
+    let cmdu = m1_without_bss_capacity(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &cmdu);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+    assert!(harness.core.renew_counts.contains_key(&key(RADIO_5)));
+    harness.run_for(20 * SECOND);
+
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+}
+
+#[test]
+fn a_move_whose_m2_cannot_be_built_leaves_the_radio_with_its_old_owner() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    let deadline = harness.proto_deadline(RADIO_5);
+
+    let cmdu = m1_without_bss_capacity(&mut harness, OTHER_AGENT, RADIO_5);
+    harness.send(OTHER_AGENT, &cmdu);
+
+    assert_eq!(harness.owner(RADIO_5), Some(AGENT));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    assert!(harness.core.em_config_in_progress(key(RADIO_5)));
+    assert_eq!(harness.proto_deadline(RADIO_5), deadline);
+}
+
+// The routing RUID is the first TLV that carries one. An M1 from agent B that routes by
+// agent A's radio must not touch it (upstream would reset and answer it, em_ctrl.cpp:1245-1270).
+#[test]
+fn an_m1_routed_by_another_agents_radio_leaves_that_radio_alone() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    let frames = harness.frames.len();
+
+    let crafted = m1_routed_by_other_radio(&mut harness, OTHER_AGENT, OTHER_RADIO, RADIO_5);
+    harness.send(OTHER_AGENT, &crafted);
+
+    assert_eq!(harness.owner(RADIO_5), Some(AGENT));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    harness.assert_radio_absent(OTHER_RADIO);
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// Upstream drops an M1 from an agent without a data model only when it would create the
+// node (em_ctrl.cpp:1253-1257); a known radio was reset and answered (S2-06).
+#[test]
+fn an_m1_without_a_peer_model_does_not_touch_a_known_radio() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    let frames = harness.frames.len();
+
+    harness.m1(OTHER_AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    assert_eq!(harness.owner(RADIO_5), Some(AGENT));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// Upstream defines EM_MAX_RADIO_PER_AGENT (em_base.h:90) and does not enforce it where it
+// creates a radio node (em_ctrl.cpp:1259-1269).
+#[test]
+fn a_fifth_radio_of_one_agent_is_refused() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    for n in 0..4 {
+        harness.m1(AGENT, radio_mac(1, n), FreqBand::BAND_5_GHZ);
+    }
+    assert_eq!(harness.core.nodes.radios_of(AGENT).len(), 4);
+    let frames = harness.frames.len();
+
+    harness.m1(AGENT, radio_mac(1, 4), FreqBand::BAND_5_GHZ);
+
+    harness.assert_radio_absent(radio_mac(1, 4));
+    assert_eq!(harness.core.nodes.radios_of(AGENT).len(), 4);
+    assert_eq!(harness.frames.len(), frames);
+    // A known radio of the full agent still gets its M1 answered.
+    harness.m1(AGENT, radio_mac(1, 0), FreqBand::BAND_5_GHZ);
+    assert_eq!(harness.frames.len(), frames + 1);
+}
+
+// Upstream sends M2 to the M1's sender, but Topology Query and Renew to the first owner's
+// data model (em_configuration.cpp:483,959). Here the radio moves as a whole.
+#[test]
+fn a_radio_moves_to_the_agent_that_sent_the_m1() {
+    let (mut harness, _, _) = two_radios();
+    harness.search(OTHER_AGENT);
+    harness.set_mismatch(RADIO_5);
+    harness.frames.clear();
+    harness.run_for(Duration::from_millis(1500));
+    harness.frames.clear();
+
+    harness.m1(OTHER_AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    // M2 goes to the new agent; the radio and its chain follow the M1.
+    let m2s = harness.frames_of(MsgType::AP_AUTOCONFIGURATION_WSC);
+    assert_eq!(m2s.len(), 1);
+    assert_eq!(m2s[0].1.remote, OTHER_AGENT);
+    assert_eq!(harness.owner(RADIO_5), Some(OTHER_AGENT));
+    assert!(!harness.mismatch(RADIO_5));
+    assert_eq!(harness.core.nodes.radios_of(AGENT), [key(RADIO_24)]);
+    assert_eq!(harness.core.nodes.radios_of(OTHER_AGENT), [key(RADIO_5)]);
+    harness.run_for(Duration::from_millis(600));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(OTHER_AGENT));
+    assert_eq!(harness.chain_agent(RADIO_24), Some(AGENT));
+
+    // The Query for each radio goes to its own agent; no Query goes to A for RADIO_5.
+    harness.run_for(2 * SECOND);
+    let query_targets: Vec<MacAddr> = harness
+        .frames_of(MsgType::TOPOLOGY_QUERY)
+        .iter()
+        .map(|(_, frame)| frame.remote)
+        .collect();
+    assert!(query_targets.contains(&OTHER_AGENT));
+    assert!(query_targets.contains(&AGENT));
+
+    // After 40 s without an answer, each Renew goes to the agent that owns the radio.
+    harness.run_for(45 * SECOND);
+    let renews: Vec<(FreqBand, MacAddr)> = harness
+        .frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW)
+        .iter()
+        .map(|(_, frame)| {
+            let (_, area) = CmduHeader::parse(&frame.cmdu).unwrap();
+            (readers::freq_band(area).unwrap().unwrap(), frame.remote)
+        })
+        .collect();
+    assert!(renews.contains(&(FreqBand::BAND_5_GHZ, OTHER_AGENT)));
+    assert!(renews.contains(&(FreqBand::BAND_2_4_GHZ, AGENT)));
+    assert!(!renews.contains(&(FreqBand::BAND_5_GHZ, AGENT)));
+}
+
+// Upstream does not enforce the radio cap (em_base.h:90); a move counts as a new radio of
+// the receiving agent, and a refused move leaves the old owner's radio as it was.
+#[test]
+fn a_move_is_refused_when_the_new_agent_has_the_most_radios() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    for n in 0..4 {
+        harness.m1(OTHER_AGENT, radio_mac(2, n), FreqBand::BAND_5_GHZ);
+    }
+    harness.run_for(Duration::from_millis(1500));
+    let deadline = harness.proto_deadline(RADIO_5);
+    let frames = harness.frames.len();
+
+    harness.m1(OTHER_AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    assert_eq!(harness.owner(RADIO_5), Some(AGENT));
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+    assert_eq!(harness.proto_deadline(RADIO_5), deadline);
+    assert_eq!(harness.core.nodes.radios_of(OTHER_AGENT).len(), 4);
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// Upstream clears a mismatch only in a good Topology Response and flags the first radio
+// only (em_configuration.cpp:6597-6632). A fresh M1 on either radio clears the agent's flags.
+#[test]
+fn a_fresh_m1_clears_the_mismatch_of_every_radio_of_the_agent() {
+    let (mut harness, _, _) = two_radios();
+    harness.run_for(2 * SECOND);
+    harness.response(AGENT, b"stranger", &[RADIO_24, RADIO_5]);
+    assert!(harness.mismatch(RADIO_24));
+    harness.set_mismatch(RADIO_5);
+    harness.run_for(5 * SECOND);
+    let queries = harness.frames_of(MsgType::TOPOLOGY_QUERY).len();
+    harness.run_for(5 * SECOND);
+    assert_eq!(harness.frames_of(MsgType::TOPOLOGY_QUERY).len(), queries);
+
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    assert!(!harness.mismatch(RADIO_24));
+    assert!(!harness.mismatch(RADIO_5));
+    harness.run_for(3 * SECOND);
+    assert!(harness.frames_of(MsgType::TOPOLOGY_QUERY).len() > queries);
+}
+
+// An M1 the owner's `wsc_m2_sent` rule ignores is never built and may be unanswerable, so
+// it must not refresh the model: the owner stays the oldest and is the one evicted.
+#[test]
+fn an_ignored_m1_from_the_owner_does_not_refresh_its_model() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness
+        .core
+        .nodes
+        .table
+        .get_mut(key(RADIO_5))
+        .unwrap()
+        .state = CtrlState::WscM2Sent;
+    fill_models(&mut harness, 255);
+    assert_eq!(harness.core.models.len(), 256);
+    let frames = harness.frames.len();
+
+    let unanswerable = m1_without_bss_capacity(&mut harness, AGENT, RADIO_5);
+    harness.send(AGENT, &unanswerable);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    assert_eq!(harness.frames.len(), frames);
+    assert_eq!(harness.core.model_order.front(), Some(&AGENT));
+    harness.search(filler_agent(1000));
+    assert!(harness.core.peer(AGENT).is_none());
+    assert!(harness.core.peer(filler_agent(0)).is_some());
+}
+
+/// Searches from `count` filler agents, so the peer-model table fills up.
+fn fill_models(harness: &mut Harness, count: u16) {
+    for n in 0..count {
+        harness.search(filler_agent(n));
+    }
+}
+
+// Upstream keeps peer models without limit; here the model heard from least recently goes
+// (R3), so a Search, an M1 or a Topology Response keeps an agent in the table.
+#[test]
+fn a_search_keeps_a_model_in_a_full_table() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    fill_models(&mut harness, 255);
+    assert_eq!(harness.core.models.len(), 256);
+    harness.search(AGENT);
+
+    harness.search(filler_agent(1000));
+
+    assert!(harness.core.peer(AGENT).is_some());
+    assert!(harness.core.peer(filler_agent(0)).is_none());
+    assert!(harness.core.peer(filler_agent(1)).is_some());
+}
+
+#[test]
+fn an_m1_keeps_a_model_in_a_full_table() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    fill_models(&mut harness, 255);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+
+    harness.search(filler_agent(1000));
+
+    assert!(harness.core.peer(AGENT).is_some());
+    assert!(harness.core.peer(filler_agent(0)).is_none());
+    assert!(harness.core.nodes().get(key(RADIO_5)).is_some());
+}
+
+// A refused M1 is no sign of life worth a place in the table: an agent at its radio cap
+// could otherwise keep its model by sending M1s.
+#[test]
+fn an_m1_refused_at_the_radio_cap_does_not_keep_a_model_in_a_full_table() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    for n in 0..4 {
+        harness.m1(AGENT, radio_mac(1, n), FreqBand::BAND_5_GHZ);
+    }
+    fill_models(&mut harness, 255);
+    assert_eq!(harness.core.models.len(), 256);
+
+    harness.m1(AGENT, radio_mac(1, 4), FreqBand::BAND_5_GHZ);
+    harness.assert_radio_absent(radio_mac(1, 4));
+    harness.search(filler_agent(1000));
+
+    assert!(harness.core.peer(AGENT).is_none());
+    assert!(harness.core.peer(filler_agent(0)).is_some());
+}
+
+#[test]
+fn a_topology_response_keeps_a_model_in_a_full_table() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    fill_models(&mut harness, 255);
+    harness.run_for(2 * SECOND);
+    harness.response(AGENT, b"front", &[RADIO_5]);
+
+    harness.search(filler_agent(1000));
+
+    assert!(harness.core.peer(AGENT).is_some());
+    assert!(harness.core.peer(filler_agent(0)).is_none());
+}
+
+// Upstream never evicts, so its models never leave radio nodes behind. Here an evicted agent
+// leaves nothing: no chain to time out, no node to tick, no Renew to an agent it forgot.
+#[test]
+fn an_evicted_agent_leaves_nothing_behind() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+    harness.run_for(2 * SECOND);
+    harness.response(OTHER_AGENT, b"front", &[OTHER_RADIO]);
+    harness.run_for(SECOND);
+    assert_eq!(harness.state(OTHER_RADIO), CtrlState::TopoSynchronized);
+    assert!(harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+    fill_models(&mut harness, 254);
+    assert_eq!(harness.core.models.len(), 256);
+
+    // The oldest model is AGENT's; the new Search evicts it.
+    harness.search(filler_agent(1000));
+
+    assert!(harness.core.peer(AGENT).is_none());
+    assert!(harness.core.peer(OTHER_AGENT).is_some());
+    harness.assert_radio_absent(RADIO_24);
+    harness.assert_radio_absent(RADIO_5);
+    harness.run_for(SECOND);
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+    let frames = harness.frames.len();
+
+    harness.run_for(41 * SECOND);
+
+    assert_eq!(harness.frames.len(), frames);
+    assert_eq!(harness.state(OTHER_RADIO), CtrlState::TopoSynchronized);
+    assert_eq!(
+        harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW).len(),
+        0
+    );
+
+    // The agent has no peer model any more: its M1 is dropped (S2-06 path).
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.assert_radio_absent(RADIO_5);
+    assert_eq!(harness.frames.len(), frames);
+}
+
+// A move does not wait for the M2: when the hand-off fails, the old owner's em_config for the
+// radio is still gone and the radio waits for the new owner's M1 (the M2 path removes the
+// chain only after a successful hand-off, em_configuration.cpp:6262-6275).
+#[test]
+fn a_move_removes_the_old_owners_chain_even_when_the_m2_cannot_be_handed_over() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(Duration::from_millis(1500));
+    assert_eq!(harness.chain_agent(RADIO_5), Some(AGENT));
+
+    harness.core.m2_handoff = M2Handoff::Fail;
+    harness.m1(OTHER_AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(SECOND);
+
+    assert_eq!(harness.owner(RADIO_5), Some(OTHER_AGENT));
+    assert_eq!(harness.state(RADIO_5), CtrlState::WscM1Pending);
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+}
+
+// Renew retry (0014 D18 R1, R2). Upstream retries up to EM_MAX_RENEW_TX_THRESH = 5 while a
+// cfg_renew command is in progress (em_configuration.cpp:850-938, em.cpp:546-559); the
+// controller has no such command, so the idle proto tick of a Misconfigured radio sends them.
+
+/// One agent, one radio, M1 answered, run to the 40 s cancel and its first Renew.
+fn cancelled_single_radio() -> Harness {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    while harness.state(RADIO_5) != CtrlState::Misconfigured {
+        harness.run_for(Duration::from_millis(250));
+    }
+    harness
+}
+
+#[test]
+fn a_cancelled_radio_gets_exactly_five_renews_and_none_after() {
+    let mut harness = cancelled_single_radio();
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 1);
+
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+    let renews = harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW);
+    for pair in renews.windows(2).skip(1) {
+        assert_eq!(pair[1].0.abs_diff(pair[0].0), SECOND);
+    }
+
+    harness.run_for(200 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+}
+
+#[test]
+fn an_m1_during_the_retry_stops_it() {
+    let mut harness = cancelled_single_radio();
+    harness.run_for(2 * SECOND);
+    let sent = harness.renews_for(AGENT, FreqBand::BAND_5_GHZ);
+    assert!((2..5).contains(&sent));
+
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    harness.run_for(20 * SECOND);
+
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), sent);
+}
+
+// Upstream carries the count into the next episode (em_configuration.cpp:935-938,
+// em_orch_ctrl.cpp:171-175,418-420); here each cancel starts a fresh five (R1).
+#[test]
+fn a_second_cancel_starts_a_fresh_episode_of_five() {
+    let mut harness = cancelled_single_radio();
+    harness.run_for(SECOND);
+    let first_episode = harness.renews_for(AGENT, FreqBand::BAND_5_GHZ);
+    assert!((2..5).contains(&first_episode));
+
+    // The M1 is answered, the agent never follows up: em_config is cancelled again.
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.run_for(100 * SECOND);
+
+    assert_eq!(
+        harness.renews_for(AGENT, FreqBand::BAND_5_GHZ),
+        first_episode + 5
+    );
+}
+
+#[test]
+fn each_radio_has_its_own_retry_count() {
+    let (mut harness, _, _) = two_radios();
+    harness.run_for(20 * SECOND);
+    harness.search(OTHER_AGENT);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+    // The first agent's episode is over (cancel at 41 s); the second agent's cancel is at 61 s.
+    harness.run_for(28 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
+
+    harness.run_for(15 * SECOND);
+    let second_agent = harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ);
+    assert!((1..5).contains(&second_agent));
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 5);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+}
+
+// The orchestrator activates one pending stage per pass, newest first. Reached here:
+// RADIO_24 runs em_config from the start. RADIO_5 and OTHER_RADIO have their chains removed
+// and are submitted again at once, with no pass in between, so both stages are pending.
+// The pass at the 40 s cancel activates the newest (OTHER_RADIO) before the hook runs;
+// RADIO_5 is still pending, so only the effects of `transient` can mark it.
+#[test]
+fn a_radio_with_a_pending_em_config_stage_is_marked_and_renewed_by_the_cancel() {
+    let (mut harness, _, _) = two_radios();
+    harness.search(OTHER_AGENT);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+    for radio in [RADIO_5, OTHER_RADIO] {
+        harness.core.remove_em_config_chain(key(radio), harness.now);
+    }
+    // The 40 s cancel comes on the idle tick at 41 s; submit after the tick at 40.75 s.
+    harness.run_for(Duration::from_millis(40_750));
+    assert_eq!(harness.state(RADIO_24), CtrlState::TopoSyncPending);
+    for radio in [RADIO_5, OTHER_RADIO] {
+        let config = EmConfig {
+            radio: key(radio),
+            agent_al: harness.owner(radio).unwrap(),
+        };
+        harness.core.submit_em_config(config, harness.now);
+    }
+    assert_eq!(harness.state(RADIO_5), CtrlState::Unconfigured);
+    assert!(harness.core.orch.active(key(RADIO_5)).is_none());
+
+    harness.run_for(2 * SECOND);
+    assert_eq!(harness.state(RADIO_24), CtrlState::Misconfigured);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
+}
+
+// A move or an eviction is not a cancel (upstream comments out pre_process_cancel in
+// remove_chain_for_node, em_orch.cpp:252): it ends the retry and sends nothing.
+#[test]
+fn a_move_during_the_retry_stops_it() {
+    let mut harness = cancelled_single_radio();
+    harness.search(OTHER_AGENT);
+    harness.run_for(SECOND);
+    let sent = harness.renews_for(AGENT, FreqBand::BAND_5_GHZ);
+    assert!((1..5).contains(&sent));
+    assert!(harness.core.renew_counts.contains_key(&key(RADIO_5)));
+
+    harness.m1(OTHER_AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    assert_eq!(harness.owner(RADIO_5), Some(OTHER_AGENT));
+    assert!(!harness.core.renew_counts.contains_key(&key(RADIO_5)));
+    harness.run_for(10 * SECOND);
+
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), sent);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
+}
+
+#[test]
+fn an_eviction_during_the_retry_stops_it() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    fill_models(&mut harness, 255);
+    harness.run_for(42 * SECOND + Duration::from_millis(500));
+    let sent = harness.renews_for(AGENT, FreqBand::BAND_5_GHZ);
+    assert!((1..5).contains(&sent));
+
+    // AGENT's model is the oldest; the new Search evicts it.
+    harness.search(filler_agent(1000));
+    assert!(harness.core.peer(AGENT).is_none());
+    assert!(harness.core.renew_counts.is_empty());
+    harness.run_for(20 * SECOND);
+
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), sent);
+}
+
+// Per-agent 40 s age (0014 D18 S2-04). Upstream keeps one elapsed time per command type and
+// resets it for the whole type (em_orch.cpp:72-88,129-138,222), so an agent held in
+// mismatch past 40 s cancelled every agent that onboarded after it.
+#[test]
+fn an_agent_held_in_mismatch_does_not_cancel_a_new_agent() {
+    let (mut harness, _, _) = two_radios();
+    harness.run_for(2 * SECOND);
+    harness.response(AGENT, b"stranger", &[RADIO_24, RADIO_5]);
+    harness.run_for(50 * SECOND);
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+
+    harness.search(OTHER_AGENT);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+    harness.run_for(5 * SECOND);
+
+    assert_eq!(harness.state(OTHER_RADIO), CtrlState::TopoSyncPending);
+    let queries_to_new_agent = harness
+        .frames_of(MsgType::TOPOLOGY_QUERY)
+        .iter()
+        .filter(|(_, frame)| frame.remote == OTHER_AGENT)
+        .count();
+    assert!(queries_to_new_agent >= 1);
+    assert_eq!(
+        harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW).len(),
+        0
+    );
+}
+
+// A fresh M1 on one radio of an agent restarts the 40 s of its other radios (upstream resets
+// the one time of the whole type, em_orch.cpp:129-138,222).
+#[test]
+fn a_fresh_m1_extends_the_other_radios_of_the_agent() {
+    let (mut harness, _, _) = two_radios();
+    harness.run_for(30 * SECOND);
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+
+    // 50 s after the first M1s: past their old 40 s, 20 s after the fresh M1.
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+    assert_eq!(
+        harness.frames_of(MsgType::AP_AUTOCONFIGURATION_RENEW).len(),
+        0
+    );
+
+    harness.run_for(30 * SECOND);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+}
+
+// The M1 alone restarts the age; it does not wait for the M2 to be handed over.
+#[test]
+fn a_fresh_m1_extends_the_other_radios_even_when_the_m2_cannot_be_handed_over() {
+    let (mut harness, _, _) = two_radios();
+    harness.run_for(30 * SECOND);
+    harness.core.m2_handoff = M2Handoff::Fail;
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.state(RADIO_5), CtrlState::TopoSyncPending);
+}
+
+// Upstream cancels the whole command type when a radio in another state is stuck
+// (em_orch_ctrl.cpp:142-150); here only the radios of its agent are cancelled.
+#[test]
+fn a_stuck_radio_cancels_only_the_radios_of_its_agent() {
+    let (mut harness, _, _) = two_radios();
+    for radio in [RADIO_24, RADIO_5] {
+        harness.core.nodes.table.get_mut(key(radio)).unwrap().state = CtrlState::Unconfigured;
+    }
+    harness.run_for(20 * SECOND);
+    harness.search(OTHER_AGENT);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+
+    harness.run_for(22 * SECOND);
+
+    assert_eq!(harness.state(RADIO_24), CtrlState::Misconfigured);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+    assert!((1..5).contains(&harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ)));
+    assert_eq!(harness.state(OTHER_RADIO), CtrlState::TopoSyncPending);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
+}
+
+// Upstream's type cancel marks only the candidates of cancelled em_config commands
+// (em_orch.cpp:270-301). A sibling radio that finished its chain is not one of them.
+#[test]
+fn a_stuck_radio_leaves_a_finished_sibling_radio_of_its_agent_alone() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+    harness.run_for(2 * SECOND);
+    harness.response(AGENT, b"front", &[RADIO_24]);
+    harness.run_for(SECOND);
+    assert_eq!(harness.state(RADIO_24), CtrlState::TopoSynchronized);
+    assert!(!harness.core.orch.is_type_in_progress(CommandType::EmConfig));
+
+    // RADIO_5 gets a good M1, then a second one whose M2 cannot be handed over. The M2 is
+    // built before any state change, so a build failure would leave the radio as it was;
+    // only the hand-off, which comes after the state change, can leave it in wsc_m1_pending
+    // with its stage active.
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.core.m2_handoff = M2Handoff::Fail;
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    assert_eq!(harness.state(RADIO_5), CtrlState::WscM1Pending);
+    assert!(harness.core.orch.active(key(RADIO_5)).is_some());
+
+    harness.run_for(60 * SECOND);
+
+    assert_eq!(harness.state(RADIO_5), CtrlState::Misconfigured);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 5);
+    assert_eq!(harness.state(RADIO_24), CtrlState::TopoSynchronized);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 0);
+}
+
+// Rule (b) of the 40 s cancel: a radio stuck outside topo_sync_pending cancels
+// em_config for its agent, and only the cancel hook marks and renews, for active stages.
+// A stage still pending is dropped silently, as upstream (em_orch.cpp:278-302).
+#[test]
+fn a_pending_stage_of_the_agent_is_dropped_silently_by_a_non_topology_cancel() {
+    let mut harness = Harness::new();
+    harness.search(AGENT);
+    harness.search(OTHER_AGENT);
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+    harness.run_for(2 * SECOND);
+    // RADIO_24 (X) is put in wsc_m1_pending by an M1 whose M2 cannot be handed over; its
+    // stage stays active.
+    harness.core.m2_handoff = M2Handoff::Fail;
+    harness.m1(AGENT, RADIO_24, FreqBand::BAND_2_4_GHZ);
+    harness.core.m2_handoff = M2Handoff::Deliver;
+    assert_eq!(harness.state(RADIO_24), CtrlState::WscM1Pending);
+    assert!(harness.core.orch.active(key(RADIO_24)).is_some());
+    harness.m1(AGENT, RADIO_5, FreqBand::BAND_5_GHZ);
+    harness.m1(OTHER_AGENT, OTHER_RADIO, FreqBand::BAND_5_GHZ);
+    for radio in [RADIO_5, OTHER_RADIO] {
+        harness.core.remove_em_config_chain(key(radio), harness.now);
+    }
+
+    // The cancel comes on the idle tick after 40 s of age; submit just before it. The pass
+    // activates the newest pending stage (OTHER_RADIO) and leaves RADIO_5 (Y) pending.
+    harness.run_for(Duration::from_millis(40_750));
+    for radio in [RADIO_5, OTHER_RADIO] {
+        let config = EmConfig {
+            radio: key(radio),
+            agent_al: harness.owner(radio).unwrap(),
+        };
+        harness.core.submit_em_config(config, harness.now);
+    }
+    assert!(harness.core.orch.active(key(RADIO_5)).is_none());
+    assert!(harness.has_em_config_command(RADIO_5));
+    assert_eq!(harness.state(RADIO_24), CtrlState::WscM1Pending);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 0);
+
+    harness.run_for(Duration::from_millis(250));
+    assert_eq!(harness.state(RADIO_24), CtrlState::Misconfigured);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 1);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Unconfigured);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 0);
+    assert!(!harness.has_em_config_command(RADIO_5));
+    assert_ne!(harness.state(OTHER_RADIO), CtrlState::Misconfigured);
+
+    harness.run_for(20 * SECOND);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_2_4_GHZ), 5);
+    assert_eq!(harness.state(RADIO_5), CtrlState::Unconfigured);
+    assert_eq!(harness.renews_for(AGENT, FreqBand::BAND_5_GHZ), 0);
+    assert_eq!(harness.renews_for(OTHER_AGENT, FreqBand::BAND_5_GHZ), 0);
+    assert_ne!(harness.state(OTHER_RADIO), CtrlState::Misconfigured);
 }
