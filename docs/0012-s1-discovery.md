@@ -385,6 +385,9 @@ reconnect rules are tested on these cores with no sockets and no Docker.
   (`em_orch.cpp:388`, `:404`), and activates the newest eligible pending stage.
 - **Peer-model cap (D3, user decision).** `CtrlCore` keeps at most 256 peer models; when full, a new AL MAC evicts
   the model created longest ago. Upstream keeps them without limit; S2 replaces the map with the database.
+  > **Amended by [0014](0014-init-config-and-al-mac.md) erratum E1 item 4 (2026-11-25):** the model heard from least
+  > recently is evicted (a Search, an M1 whose M2 was built and a Topology Response refresh it), with the agent's `em_config` chains,
+  > radio nodes, links, deadlines and Renew retry state.
 - **Harness (D8, medium and user decision).** The agent logs `dev_init submitted` at info on every submission; check
   6a requires exactly one before the kill and none after a baseline taken before the kill. The entrypoint marks
   the supervisor ready after it initialises its files, and `run-s1.sh` waits for that before the first start.

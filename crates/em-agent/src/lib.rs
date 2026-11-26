@@ -122,6 +122,10 @@ pub struct AgentCore<R: RandomSource = ProductionRandom> {
     /// (0013 D4).
     confirmed: Option<Vec<ConfirmedBss>>,
     platform_requests: Vec<ApplyRadioConfig>,
+    /// The `dev_init` that `reopen_search` submitted last. It can be a stale id: a Renew
+    /// treats it as running only while the orchestrator still has the chain. The startup
+    /// `dev_init` is never recorded here.
+    recovery_dev_init: Option<ChainId>,
 }
 
 impl AgentCore<ProductionRandom> {
@@ -170,6 +174,7 @@ impl<R: RandomSource> AgentCore<R> {
             measure_now,
             confirmed: None,
             platform_requests: Vec::new(),
+            recovery_dev_init: None,
         }
     }
 
@@ -328,16 +333,27 @@ impl<R: RandomSource> AgentCore<R> {
             .collect()
     }
 
-    fn submit_dev_init(&mut self, al_mac: MacAddr, now: Instant) {
+    /// Submits a `dev_init` and returns its chain.
+    fn submit_dev_init(&mut self, al_mac: MacAddr, now: Instant) -> ChainId {
         let command = Command::DevInit(DevInit {
             al_mac,
             radios: Vec::from(self.radios.as_slice()),
         });
-        self.submit(command, now);
+        let kind = command.kind();
+        let chain = self.start_command(command, now);
+        self.admit(chain, kind, now);
+        chain
     }
 
     /// Pre-processes, admits and starts a command. Returns whether it was admitted.
     fn submit(&mut self, command: Command, now: Instant) -> bool {
+        let kind = command.kind();
+        let chain = self.start_command(command, now);
+        self.admit(chain, kind, now)
+    }
+
+    /// Hands the command to the orchestrator and applies its effects; the caller admits it.
+    fn start_command(&mut self, command: Command, now: Instant) -> ChainId {
         let kind = command.kind();
         let (chain, effects) = self
             .orch
@@ -351,7 +367,7 @@ impl<R: RandomSource> AgentCore<R> {
             self.rules.apply(&mut self.nodes, effect, &mut out);
         }
         self.drain_orch_out(out, now);
-        self.admit(chain, kind, now)
+        chain
     }
 
     fn admit(&mut self, chain: ChainId, kind: CommandType, now: Instant) -> bool {
@@ -461,7 +477,7 @@ impl<R: RandomSource> AgentCore<R> {
             &mut out,
         );
         self.drain_orch_out(out, now);
-        self.submit_dev_init(al_mac, now);
+        self.recovery_dev_init = Some(self.submit_dev_init(al_mac, now));
     }
 
     fn drain_orch_out(&mut self, requests: Vec<RoleEffect<AgentState>>, now: Instant) {

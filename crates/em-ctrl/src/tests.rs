@@ -222,14 +222,15 @@ fn the_table_keeps_256_models_and_evicts_the_oldest_created() {
 }
 
 #[test]
-fn an_update_does_not_change_the_eviction_order() {
+fn an_update_moves_the_model_to_the_back_of_the_eviction_order() {
     let mut core = registered_core();
     for index in 0..256 {
         send(&mut core, &search_from(index));
     }
-    // Searching again from the oldest AL MAC updates it; it stays the oldest.
+    // Searching again from the oldest AL MAC updates it. Before 0014 D18 R3 it stayed the
+    // oldest (creation order); now eviction is by last heard from, so the next one goes.
     send(&mut core, &search_from(0));
     send(&mut core, &search_from(256));
-    assert_eq!(core.peer(agent_mac(0)), None);
-    assert!(core.peer(agent_mac(1)).is_some());
+    assert!(core.peer(agent_mac(0)).is_some());
+    assert_eq!(core.peer(agent_mac(1)), None);
 }

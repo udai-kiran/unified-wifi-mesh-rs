@@ -144,7 +144,7 @@ checks) is cargo, not this script.
 
 ```sh
 docker/run-s2.sh              # gating run: checks 1, 2, 3, 4 and 6 (about 6 minutes)
-docker/run-s2.sh --eviction   # check 5, evidence only (about 5 minutes)
+docker/run-s2.sh --eviction   # check 5 (evidence) and check 5r (gating, the Renew count; about 5 minutes)
 KEEP=1 docker/run-s2.sh       # leave the containers up afterwards
 ```
 
@@ -214,9 +214,9 @@ runs of that invocation. These are release builds in a container on the host's C
 release builds gave a longest agent `M1` build of about 2.8 ms, an agent `M2` check of about
 4.0 ms per M2 and a controller `M2` build of about 9.0 ms.
 
-### Check 5: the eviction run (`--eviction`, evidence only)
+### Check 5: the eviction run (`--eviction`; the prediction is evidence, check 5r gates)
 
-It never runs in the gating mode and its result does not decide a pass. The controller starts with
+It never runs in the gating mode. Its prediction does not decide the exit code; check 5r below does. The controller starts with
 `--test-drop-first-m2`. When `M2 dropped by test switch` appears, the script installs a `tc clsact` egress filter in
 the controller's container on `eth0` that drops ether types 0x893A (1905) and 0x88CC (LLDP, as D10 says) for 70 s,
 then removes it. The agent's `ieee1905-rs` then stops hearing the controller and evicts it after its 60 s unseen
@@ -228,12 +228,20 @@ prints:
   Searches and Topology Queries are summarised by count and first and last time);
 - the `tc -s filter show` statistics from just before the removal (dropped packet counts prove the filter acted);
 - the eight points of D10 check 5's prediction as yes or no (restart discovery after the lost M2; the controller's
-  40 s `em_config` cancel and both renews inside the block; the eviction; the `onewifi_cb` timeout (an `onewifi_cb cancelled` line and a `restart discovery`
+  40 s `em_config` cancel and a renew for each radio inside the block; the eviction; the `onewifi_cb` timeout (an `onewifi_cb cancelled` line and a `restart discovery`
   line with reason `onewifi_cb timeout`, both after the block) and a second
   `dev_init`; both radios `topo_synchronized` on both roles after the block), and a `RESULT 5` line.
 
-It exits 0 when it could run (a prediction that did not hold is a result, not a failure) and 1 when it could not
-(for example, the filter could not be installed).
+Check 5r (gating) counts the controller's `renew sent` lines per radio. Every `em_config` cancel starts a Renew retry
+episode: one Renew at once, then one per idle second while the radio is misconfigured, 5 in total. The 40 s cancel falls
+inside the block, so each radio (`02:00:00:00:01:01` and `02:00:00:00:01:02`) must have exactly 5 `renew sent` lines
+between the installation and the removal of the block, and exactly 5 over the whole controller log after the
+installation (a 6th line after the block lifts fails). The script prints `PASS 5r renew retry ...` or
+`FAIL 5r renew retry: ...` with the per-radio counts and the time of each line in seconds from the installation. A
+check that finds no `renew sent` line fails, like the other counts.
+
+It exits 0 when it could run and check 5r passed (a prediction that did not hold is a result, not a failure) and 1
+when check 5r failed or the run could not happen (for example, the filter could not be installed).
 
 ## Layout
 

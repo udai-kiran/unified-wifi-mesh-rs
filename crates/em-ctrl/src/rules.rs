@@ -163,13 +163,24 @@ impl OrchRole for CtrlRules {
     /// The state change of `em.cpp:173-175` is made in [`Self::ready_for_exec`].
     fn on_start(&self, _cmd: &Command, _node: NodeKey, _out: &mut Vec<RoleEffect<CtrlState>>) {}
 
-    /// `em_orch_ctrl.cpp:60-92,142-150`.
+    /// `em_orch_ctrl.cpp:60-92,142-150`. Two rules:
     ///
-    /// A radio in `topo_sync_pending` past 40 s cancels `em_config` for every radio of its
-    /// agent, marks each misconfigured and sends one renew per radio. A radio in another
-    /// state past 40 s cancels the type. The SSID-mismatch branch (a 120 s path with a
-    /// Query every 10 s) belongs to S3: while a mismatch is flagged nothing happens here
-    /// (tag `ssid-mismatch-path-deferred`).
+    /// (a) A radio in `topo_sync_pending` past 40 s: every radio of its agent is set
+    /// misconfigured and sent its first Renew, and `em_config` is cancelled for them
+    /// ([`cancel_em_config_of_agent`]); upstream's 40 s path does the same itself
+    /// (`em_orch_ctrl.cpp:75-92`). While a mismatch is flagged nothing happens here: the
+    /// SSID-mismatch path (a 120 s limit with a Query every 10 s) belongs to S3 (tag
+    /// `ssid-mismatch-path-deferred`).
+    ///
+    /// (b) A radio in any other state past 40 s: `em_config` is cancelled for the radios of
+    /// its agent and nothing else is done here. Upstream cancels the command type
+    /// (`:142-150`), and its cancel hook ([`Self::pre_process_cancel`]) marks and renews the
+    /// candidates of the active stages only; a stage still pending is dropped silently
+    /// (`em_orch.cpp:278-302`). The mismatch flag is not checked.
+    ///
+    /// intentional-difference:em-config-age-per-agent. Upstream compares one elapsed time
+    /// per command type (`em_orch.cpp:72-88,129-138`); here each stage is compared with its
+    /// own age (`stage_elapsed`), which a fresh M1 or M2 of the agent restarts.
     fn transient(
         &self,
         cmd: &Command,
@@ -189,7 +200,7 @@ impl OrchRole for CtrlRules {
             let mismatch = radios
                 .iter()
                 .any(|key| nodes.links.get(key).is_some_and(|link| link.ssid_mismatch));
-            if mismatch || out.elapsed() <= TOPO_SYNC_LIMIT_SECS {
+            if mismatch || out.stage_elapsed() <= TOPO_SYNC_LIMIT_SECS {
                 return;
             }
             tracing::warn!(
@@ -197,19 +208,27 @@ impl OrchRole for CtrlRules {
                 radios = radios.len(),
                 "em_config cancelled: topology sync did not complete within 40 s"
             );
-            out.cancel_scoped(CommandType::EmConfig, Vec::from(radios.as_slice()));
-            for radio in radios {
-                out.effect(RoleEffect::SetState(radio, CtrlState::Misconfigured));
-                out.effect(RoleEffect::Renew(radio));
-            }
-        } else if out.elapsed() > TOPO_SYNC_LIMIT_SECS {
+            cancel_em_config_of_agent(out, radios);
+        } else if out.stage_elapsed() > TOPO_SYNC_LIMIT_SECS {
             tracing::warn!(radio = %node.mac, "em_config cancelled: time limit exceeded");
-            out.cancel(CommandType::EmConfig);
+            // intentional-difference:em-config-cancel-per-agent
+            // Upstream cancels the whole command type here (`em_orch_ctrl.cpp:142-150`), so
+            // one stuck radio cancels every agent's `em_config`. Only the stuck radio's
+            // agent is cancelled. The radios are marked and renewed by the cancel hook, for
+            // active stages only, as upstream (`em_orch.cpp:270-302`).
+            out.cancel_scoped(CommandType::EmConfig, nodes.radios_of(config.agent_al));
         }
     }
 
     /// `em_orch_ctrl.cpp:404-416`: a cancelled `em_config` leaves the radio misconfigured.
-    /// Upstream also posts a `cfg_renew` bus event; the 40 s path sends the renew itself.
+    ///
+    /// Every cancel of a radio's `em_config` that reaches an active stage runs this hook and
+    /// starts one Renew retry episode. The 40 s cancel of [`Self::transient`] has started it
+    /// for its radios already; the second start in the same instant does nothing. A stage
+    /// still pending is dropped without this hook, as upstream. Upstream posts a
+    /// `cfg_renew` bus event and also sends the Renew itself on the 40 s path
+    /// (`em_orch_ctrl.cpp:75-92`); the controller has no `cfg_renew` command (tag
+    /// `renew-retry-without-cfg-renew-command`).
     fn pre_process_cancel(
         &self,
         cmd: &Command,
@@ -218,6 +237,21 @@ impl OrchRole for CtrlRules {
     ) {
         if matches!(cmd, Command::EmConfig(_)) {
             out.push(RoleEffect::SetState(node, CtrlState::Misconfigured));
+            out.push(RoleEffect::Renew(node));
         }
     }
+}
+
+/// The 40 s `topo_sync_pending` path: marks the given radios misconfigured, sends each its
+/// first Renew, and cancels their `em_config` (`em_orch_ctrl.cpp:75-92`). The effects come
+/// first because a radio whose stage is still pending is removed by the cancel without a
+/// cancel hook. The Renews go out in the order of `radios`, as upstream
+/// enumerates the radios (`em_orch_ctrl.cpp:81-90`); the hook's own Renew requests of the
+/// scoped cancel come later in the same instant and are dropped.
+fn cancel_em_config_of_agent(out: &mut TransientOut<CtrlState>, radios: Vec<NodeKey>) {
+    for radio in &radios {
+        out.effect(RoleEffect::SetState(*radio, CtrlState::Misconfigured));
+        out.effect(RoleEffect::Renew(*radio));
+    }
+    out.cancel_scoped(CommandType::EmConfig, radios);
 }

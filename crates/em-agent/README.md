@@ -97,6 +97,8 @@ tests use. The clock is read only for the D9 timings (`build_us`, `check_us`).
   `wsc_m2_processed` (`em_agent.cpp:2400-2447`), and otherwise submits `cfg_renew`. Its
   start clears the session and sets `autoconfig_renew_pending`; the proto tick sends M1
   and enters `wsc_m2_pending`; it finishes at `owconfig_pending`.
+  It also refuses while the recovery `dev_init` that `reopen_search` submitted still exists
+  (`intentional-difference:renew-refused-during-recovery`, 0014 D18 S2-R2-ADV-01); upstream accepts.
 - **WSC sessions** live in `AgentRules` and are cleared when a radio is set to
   `unconfigured` or `autoconfig_renew_pending` by any effect, when M2 is accepted, when an
   M1 fails validation and at the D5 restart.
@@ -186,7 +188,8 @@ D5 restart with exactly one `dev_init`, the `> 10 s` boundary (none at 10.9 s, r
 12 s), no `dev_init` cancel in a 60 s lost-M2 run (the rewritten S1 test
 `after_both_responses_the_cancel_resets_only_the_last_candidate`), a rejected then valid
 M2, the `onewifi_cb` timeout restart, a renew refused in each listed state and accepted
-otherwise, a renew followed by a lost M2, and two renews from the controller's 40 s
+otherwise, a renew followed by a lost M2, a renew refused during the recovery search and
+accepted after it (`intentional-difference:renew-refused-during-recovery`), and two renews from the controller's 40 s
 timeout completing through the `onewifi_cb` restart, no stale `cfg_renew` in 60 s after
 that restart synchronizes, and a renew queued behind a running `dev_init` that runs once that `dev_init` is done
 with its radio, when no recovery is involved (upstream behaviour).

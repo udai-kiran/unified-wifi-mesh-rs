@@ -37,6 +37,9 @@ pub use actor::{ActorError, CtrlConfig, run};
 /// the map in memory and persists nothing (0012 D3, 0013 D2).
 const MAX_PEER_MODELS: usize = 256;
 
+/// The most radios one agent may have (`EM_MAX_RADIO_PER_AGENT`, `inc/em_base.h:90`).
+const EM_MAX_RADIO_PER_AGENT: usize = 4;
+
 /// The profile of the controller itself, given to its AL node (0012 D3).
 const CONTROLLER_PROFILE: u8 = 3;
 
@@ -50,6 +53,13 @@ const ORCH_IDLE: Duration = Duration::from_millis(250);
 struct NodeDeadline {
     key: NodeKey,
     due: Instant,
+}
+
+/// A Renew retry episode of one radio: the Renews sent so far and when it started.
+#[derive(Debug, Clone, Copy)]
+struct RenewEpisode {
+    sent: u8,
+    started: Instant,
 }
 
 /// What the core does with each M2 it builds (0013 D3, D10).
@@ -123,7 +133,9 @@ pub struct CtrlCore<R: RandomSource = ProductionRandom> {
     al_mac: Option<MacAddr>,
     registered: bool,
     models: SortedVecMap<MacAddr, PeerModel>,
-    /// AL MACs of `models`, oldest creation first. Updates do not reorder it.
+    /// AL MACs of `models`, least recently heard from first. A Search, an M1 whose M2 was
+    /// built and validated (an ignored or refused one does not count) and a Topology Response
+    /// move the agent to the back (0014 D18 R3).
     model_order: VecDeque<MacAddr>,
     networks: Networks,
     random: R,
@@ -131,6 +143,10 @@ pub struct CtrlCore<R: RandomSource = ProductionRandom> {
     measure_now: fn() -> Instant,
     m2_handoff: M2Handoff,
     proto_deadlines: Vec<NodeDeadline>,
+    /// The current Renew retry episode of a radio (0014 D18 R1). A radio has an entry from
+    /// the cancel that started its episode, and the entry stays once the episode has sent
+    /// its five Renews. A move or an eviction removes it; no entry means no episode.
+    renew_counts: SortedVecMap<NodeKey, RenewEpisode>,
     orch_deadline: Option<Instant>,
     /// Frames produced by the current input, taken by its entry point.
     outbox: Vec<Frame>,
@@ -188,6 +204,7 @@ impl<R: RandomSource> CtrlCore<R> {
                 M2Handoff::Deliver
             },
             proto_deadlines: Vec::new(),
+            renew_counts: SortedVecMap::new(),
             orch_deadline: None,
             outbox: Vec::new(),
         }
@@ -333,16 +350,17 @@ impl<R: RandomSource> CtrlCore<R> {
         // Upstream requests the model commit in routing, before the handler runs,
         // so it happens whatever the handler did. It is applied after the
         // handler's frames are handed over (0012 D3).
-        self.commit_peer(&route);
+        self.commit_peer(&route, now);
     }
 
-    fn commit_peer(&mut self, route: &SearchRoute) {
+    fn commit_peer(&mut self, route: &SearchRoute, now: Instant) {
         if let Some(model) = self.models.get_mut(&route.al_mac) {
             model.is_emplus_agent = route.is_emplus_agent;
+            self.touch_model(route.al_mac);
             tracing::info!(agent = %route.al_mac, "existing peer model");
         } else {
             if self.models.len() >= MAX_PEER_MODELS {
-                self.evict_oldest_model();
+                self.evict_least_recent_model(now);
             }
             self.model_order.push_back(route.al_mac);
             self.models.insert(
@@ -360,11 +378,42 @@ impl<R: RandomSource> CtrlCore<R> {
         }
     }
 
-    fn evict_oldest_model(&mut self) {
-        if let Some(oldest) = self.model_order.pop_front() {
-            self.models.remove(&oldest);
-            tracing::info!(agent = %oldest, "peer model evicted, the table is full");
+    /// Marks the agent's model as heard from just now. The order is a short list (at most
+    /// [`MAX_PEER_MODELS`]), so the linear search is fine.
+    pub(crate) fn touch_model(&mut self, agent_al: MacAddr) {
+        if let Some(position) = self.model_order.iter().position(|mac| *mac == agent_al) {
+            self.model_order.remove(position);
+            self.model_order.push_back(agent_al);
         }
+    }
+
+    /// intentional-difference:peer-model-lru-eviction. Upstream keeps models without limit;
+    /// here the model heard from least recently goes, with everything the agent owns: its
+    /// `em_config` chains first, then its radio nodes, links and per-radio state. Nothing of
+    /// the agent is left to tick, time out or be sent a Renew.
+    fn evict_least_recent_model(&mut self, now: Instant) {
+        let Some(evicted) = self.model_order.pop_front() else {
+            return;
+        };
+        self.models.remove(&evicted);
+        let radios = self.nodes.radios_of(evicted);
+        for radio in &radios {
+            self.remove_em_config_chain(*radio, now);
+        }
+        for radio in radios {
+            self.nodes.table.remove(radio);
+            self.nodes.links.remove(&radio);
+            self.reset_radio_per_radio_state(radio);
+        }
+        tracing::info!(agent = %evicted, "peer model evicted, the table is full");
+    }
+
+    /// Forgets the state a radio keeps outside its node and link: its proto deadline and its
+    /// Renew retry counter. Called when a radio moves to another agent and when its agent is
+    /// evicted. Neither is a cancel, so no Renew is sent and no episode starts.
+    pub(crate) fn reset_radio_per_radio_state(&mut self, key: NodeKey) {
+        self.proto_deadlines.retain(|deadline| deadline.key != key);
+        self.renew_counts.remove(&key);
     }
 
     /// Activation and readiness after an event; restarts the idle orchestrator deadline.
@@ -389,7 +438,7 @@ impl<R: RandomSource> CtrlCore<R> {
         for request in requests {
             match request {
                 RoleEffect::RestartProto(key) => self.restart_proto_deadline(key, now),
-                RoleEffect::Renew(key) => self.send_renew(key),
+                RoleEffect::Renew(key) => self.start_renew_episode(key, now),
                 RoleEffect::CreateNode { .. } | RoleEffect::SetState(_, _) => {
                     unreachable!("node effects are applied by the role")
                 }

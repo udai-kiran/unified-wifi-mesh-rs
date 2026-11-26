@@ -5,8 +5,9 @@
 #
 #   docker/run-s2.sh              gating run: checks 1, 2, 3 and 6 on a normal run, check 4 on a second run
 #                                 with em-ctrl --test-drop-first-m2 (the first M2 is never sent)
-#   docker/run-s2.sh --eviction   check 5, evidence only: the lost M2 run with a 70 s block of the controller's
-#                                 egress for 1905 frames; prints the timeline and whether D10's prediction held
+#   docker/run-s2.sh --eviction   check 5: the lost M2 run with a 70 s block of the controller's egress for 1905
+#                                 frames; prints the timeline and whether D10's prediction held (evidence only),
+#                                 and gates on check 5r: exactly 5 "renew sent" per radio in the block, none after
 #
 # The gating run prints "PASS <n> <name> (<evidence>)" or "FAIL <n> <name>: <reason>" per check, in order, at
 # the end, and exits non-zero on any failure. KEEP=1 leaves the containers running afterwards. Both modes also
@@ -675,6 +676,48 @@ print_timeline() {
 # yesno <description> <number of matching lines>
 yesno() { if [ "$2" -gt 0 ]; then echo "  yes: $1 ($2)"; else echo "  NO:  $1"; fi; PREDICTION_HELD=$((PREDICTION_HELD + (($2 > 0) ? 0 : 1))); }
 
+# One Renew retry episode sends RENEW_PER_EPISODE "renew sent" lines per radio: one at once, then one per
+# idle second while the radio is misconfigured (em-ctrl s2.rs send_renew).
+RENEW_PER_EPISODE=5
+RENEW_GATE_FAILED=0
+
+# check_renew_retries <block install epoch> <block removal epoch>
+# Gating check 5r. For each radio the controller log must hold exactly RENEW_PER_EPISODE "renew sent" lines
+# between the installation and the removal of the block, and the same number over the whole log after the
+# installation (no extra one once the block lifts). Zero lines fail like any other count. Prints PASS or FAIL.
+check_renew_retries() {
+    local install=$1 remove=$2 radio all inside after failure="" evidence=""
+    local renews
+    if ! snapshot_both; then
+        echo "FAIL 5r renew retry: could not read the role logs"
+        return 1
+    fi
+    if ! renews=$(C "renew sent"); then
+        echo "FAIL 5r renew retry: scanning the controller log failed"
+        return 1
+    fi
+    for radio in "$RADIO_24" "$RADIO_5"; do
+        all=$(for_radio "$renews" "$radio" | awk -v a="$install" '$1 > a')
+        inside=$(printf '%s\n' "$all" | awk -v b="$remove" '$1 < b' | grep -c .)
+        after=$(printf '%s\n' "$all" | grep -c .)
+        evidence+="${evidence:+; }$radio: $inside inside the block, $after after its installation, at $(
+            printf '%s\n' "$all" | awk -v base="$install" 'NF { printf "%+.1fs ", $1 - base }')"
+        if [ "$inside" -ne "$RENEW_PER_EPISODE" ] || [ "$after" -ne "$RENEW_PER_EPISODE" ]; then
+            failure+="${failure:+; }$radio has $inside inside the block and $after after its installation (each must be exactly $RENEW_PER_EPISODE)"
+        fi
+    done
+    if [ -n "$failure" ]; then
+        echo "FAIL 5r renew retry: $failure ($evidence)"
+        return 1
+    fi
+    echo "PASS 5r renew retry, exactly $RENEW_PER_EPISODE renew sent per radio in the block and none after ($evidence)"
+}
+
+# renews_in_block <radio> <install epoch> <removal epoch>: the number of "renew sent" lines of that radio in the block.
+renews_in_block() {
+    for_radio "$(C "renew sent")" "$1" | awk -v a="$2" -v b="$3" '$1 > a && $1 < b' | grep -c .
+}
+
 eviction_run() {
     local drop_found=0 waited=0 install_epoch remove_epoch tc_output settle=0 end_epoch
     local markers=$WORK/markers.txt
@@ -740,14 +783,23 @@ eviction_run() {
     echo "=== tc filter statistics on $NODE2 just before removal"
     printf '%s\n' "$tc_output"
 
+    echo "=== Check 5r (gating): Renew retry count per radio"
+    if ! check_renew_retries "$install_epoch" "$remove_epoch"; then
+        RENEW_GATE_FAILED=1
+    fi
+
     echo "=== Predicted outcome of D10 check 5 (traced at the pin)"
     PREDICTION_HELD=0
     yesno "the agent radio restarted discovery after the lost M2 (no M2 within 10 s)" \
         "$(A "restart discovery" | grep -F "no M2 within 10 s of M1" | grep -c .)"
     yesno "the controller cancelled em_config at 40 s inside the block" \
         "$(C "em_config cancelled: topology sync" | awk -v a="$install_epoch" -v b="$remove_epoch" '$1 > a && $1 < b' | grep -c .)"
-    yesno "the controller sent a renew for both radios inside the block (needs 2)" \
-        "$([ "$(C "renew sent" | awk -v a="$install_epoch" -v b="$remove_epoch" '$1 > a && $1 < b' | grep -c .)" -ge 2 ] && echo 1 || echo 0)"
+    # This point asks only that each radio got a renew inside the block. A cancel starts a retry episode of
+    # RENEW_PER_EPISODE "renew sent" lines per radio; check 5r gates that exact count.
+    yesno "the controller sent a renew for each radio inside the block (the exact count is check 5r)" \
+        "$([ "$(renews_in_block "$RADIO_24" "$install_epoch" "$remove_epoch")" -ge 1 ] \
+            && [ "$(renews_in_block "$RADIO_5" "$install_epoch" "$remove_epoch")" -ge 1 ] \
+            && echo 1 || echo 0)"
     yesno "the agent's ieee1905-rs evicted the controller (Removing node due to timeout, in the block)" \
         "$(grep -F "Removing node due to timeout" "$WORK/service1.snap" | grep -cF "al_mac=$NODE2_MAC")"
     yesno "the agent's onewifi_cb timed out after the block and it restarted discovery for that reason" \
@@ -766,6 +818,11 @@ eviction_run() {
         echo "RESULT 5 the predicted outcome did NOT fully happen: $PREDICTION_HELD of 8 points differ (evidence only, not a gating check)"
     fi
     print_d9
+    if [ "$RENEW_GATE_FAILED" -ne 0 ]; then
+        dump_logs
+        echo "check 5r failed"
+        exit 1
+    fi
     exit 0
 }
 
